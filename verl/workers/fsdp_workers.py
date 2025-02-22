@@ -67,16 +67,15 @@ logger.setLevel(os.getenv("VERL_PPO_LOGGING_LEVEL", "WARN"))
 
 def create_device_mesh(world_size, fsdp_size):
     if fsdp_size < 0 or fsdp_size >= world_size:
-        device_mesh = init_device_mesh("cuda", mesh_shape=(world_size,), mesh_dim_names=["fsdp"])
+        return init_device_mesh("cuda", mesh_shape=(world_size,), mesh_dim_names=["fsdp"])
     else:
         raise ValueError(
             "HSDP is not supported yet because it produces incorrect results for now. Please set fsdp_size=-1"
         )
-        assert world_size % fsdp_size == 0
-        device_mesh = init_device_mesh(
-            "cuda", mesh_shape=(world_size // fsdp_size, fsdp_size), mesh_dim_names=["ddp", "fsdp"]
-        )
-    return device_mesh
+        # assert world_size % fsdp_size == 0
+        # device_mesh = init_device_mesh(
+        #     "cuda", mesh_shape=(world_size // fsdp_size, fsdp_size), mesh_dim_names=["ddp", "fsdp"]
+        # )
 
 
 def get_sharding_strategy(device_mesh):
@@ -86,6 +85,7 @@ def get_sharding_strategy(device_mesh):
         sharding_strategy = ShardingStrategy.HYBRID_SHARD
     else:
         raise NotImplementedError(f"Get device mesh ndim={device_mesh.ndim}, but only support 1 or 2")
+
     return sharding_strategy
 
 
@@ -169,7 +169,6 @@ class ActorRolloutRefWorker(Worker):
         use_remove_padding=False,
         enable_gradient_checkpointing=False,
         trust_remote_code=False,
-        use_liger=False,
         role="actor",
     ):
         assert role in ["actor", "ref"]
@@ -319,30 +318,26 @@ class ActorRolloutRefWorker(Worker):
             f"rollout world_size: {self.world_size} is not divisible by infer_tp: {infer_tp}"
         )
         rollout_device_mesh = init_device_mesh("cuda", mesh_shape=(dp, infer_tp), mesh_dim_names=["dp", "infer_tp"])
+        log_gpu_memory_usage("Before building vllm rollout", logger=None)
+        rollout = vLLMRollout(
+            model_path=self.config.model.path,
+            config=self.config.rollout,
+            tokenizer=self.tokenizer,
+            model_hf_config=self.actor_model_config,
+            device_mesh=rollout_device_mesh,
+        )
+        log_gpu_memory_usage("After building vllm rollout", logger=None)
+        if dist.get_world_size() == 1:
+            self.config.rollout.load_format = "dummy_hf"
 
-        if self.config.rollout.name == "hf":
-            raise NotImplementedError
-        elif self.config.rollout.name == "vllm":
-            log_gpu_memory_usage("Before building vllm rollout", logger=None)
-            rollout = vLLMRollout(
-                model_path=self.config.model.path,
-                config=self.config.rollout,
-                tokenizer=self.tokenizer,
-                model_hf_config=self.actor_model_config,
-                device_mesh=rollout_device_mesh,
-            )
-            log_gpu_memory_usage("After building vllm rollout", logger=None)
-            if dist.get_world_size() == 1:
-                self.config.rollout.load_format = "dummy_hf"
-
-            rollout_sharding_manager = FSDPVLLMShardingManager(
-                module=self.actor_module_fsdp,
-                inference_engine=rollout.inference_engine,
-                model_config=self.actor_model_config,
-                full_params="hf" in self.config.rollout.load_format,
-                device_mesh=rollout_device_mesh,
-            )
-            log_gpu_memory_usage("After building sharding manager", logger=None)
+        rollout_sharding_manager = FSDPVLLMShardingManager(
+            module=self.actor_module_fsdp,
+            inference_engine=rollout.inference_engine,
+            model_config=self.actor_model_config,
+            full_params="hf" in self.config.rollout.load_format,
+            device_mesh=rollout_device_mesh,
+        )
+        log_gpu_memory_usage("After building sharding manager", logger=None)
 
         return rollout, rollout_sharding_manager
 
@@ -370,7 +365,6 @@ class ActorRolloutRefWorker(Worker):
                     use_remove_padding=use_remove_padding,
                     enable_gradient_checkpointing=self.config.model.get("enable_gradient_checkpointing", False),
                     trust_remote_code=self.config.model.get("trust_remote_code", False),
-                    use_liger=self.config.model.get("use_liger", False),
                     role="actor",
                 )
             )
@@ -401,7 +395,6 @@ class ActorRolloutRefWorker(Worker):
                 override_model_config=override_model_config,
                 use_remove_padding=use_remove_padding,
                 trust_remote_code=self.config.model.get("trust_remote_code", False),
-                use_liger=self.config.model.get("use_liger", False),
                 role="ref",
             )[0]
             OmegaConf.set_struct(self.config.ref, True)

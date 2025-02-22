@@ -48,8 +48,9 @@ class vLLMRollout(BaseRollout):
         """
         super().__init__()
         self.config = config
+        self.pad_token_id = tokenizer.pad_token_id
         assert not (not config.enforce_eager and config.free_cache_engine), (
-            "disable CUDA graph (enforce_eager = False) if free cache engine"
+            "disable CUDA graph (enforce_eager=False) if free cache engine"
         )
 
         tensor_parallel_size = self.config.get("tensor_model_parallel_size", 1)
@@ -86,20 +87,15 @@ class vLLMRollout(BaseRollout):
         # Offload vllm model to reduce peak memory usage
         self.inference_engine.sleep(level=1)
 
-        kwargs = dict(n=1, max_tokens=config.response_length)
-
-        # # we may detokenize the result all together later
-        kwargs["detokenize"] = False
+        kwargs = {"n": 1, "max_tokens": config.response_length, "detokenize": False}
 
         # supporting adding any sampling params from the config file
         for k in config.keys():
             if hasattr(SamplingParams(), str(k)):
                 kwargs[k] = config.get(k)
 
-        print(f"kwargs: {kwargs}")
+        print(f"Sampling params: {kwargs}.")
         self.sampling_params = SamplingParams(**kwargs)
-
-        self.pad_token_id = tokenizer.pad_token_id
 
     @contextmanager
     def update_sampling_params(self, **kwargs):
@@ -127,10 +123,6 @@ class vLLMRollout(BaseRollout):
         eos_token_id: int = prompts.meta_info["eos_token_id"]
         batch_size = input_ids.size(0)
 
-        batch_prompt_token_ids = []  # parse input_ids from torch.Tensor to List[List[str]]
-        for i in range(batch_size):
-            batch_prompt_token_ids.append(_pre_process_inputs(self.pad_token_id, input_ids[i]))
-
         do_sample = prompts.meta_info.get("do_sample", True)
         if not do_sample:
             kwargs = {
@@ -143,22 +135,21 @@ class vLLMRollout(BaseRollout):
             }
 
         non_tensor_batch = prompts.non_tensor_batch
+        assert batch_size == len(non_tensor_batch["raw_prompt_ids"]), "vllm sharding manager is not work properly."
         if "images" in non_tensor_batch:
-            assert batch_size == len(non_tensor_batch["images"]), "vllm sharding manager is not work properly."
             vllm_inputs = []
             for raw_prompt_ids, images in zip(non_tensor_batch["raw_prompt_ids"], non_tensor_batch["images"]):
                 vllm_inputs.append({"prompt_token_ids": raw_prompt_ids, "multi_modal_data": {"image": images}})
         else:
-            vllm_inputs = [{"prompt_token_ids": prompt_token_ids} for prompt_token_ids in batch_prompt_token_ids]
+            vllm_inputs = [
+                {"prompt_token_ids": raw_prompt_ids} for raw_prompt_ids in non_tensor_batch["raw_prompt_ids"]
+            ]
 
         # users can customize different sampling_params at different run
         with self.update_sampling_params(**kwargs):
             completions: List[RequestOutput] = self.inference_engine.generate(
                 prompts=vllm_inputs, sampling_params=self.sampling_params
             )
-
-        # TODO(sgm): disable logprob when recompute_log_prob is enable
-        # if n = 1: (bs, response_length) ; if n > 1: (bs * n, response_length)
 
         response_ids = []
         for completion in completions:

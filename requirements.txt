@@ -7,8 +7,10 @@ liger-kernel
 numpy
 pandas
 peft
+pillow
 pyarrow>=15.0.0
 pylatexenc
+qwen-vl-utils
 ray
 tensordict
 transformers>=4.49.0

@@ -106,13 +106,14 @@ class RLHFDataset(Dataset):
         ]
         prompt = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
 
-        if self.processor is not None:  # expand image token
+        if "images" in row_dict:  # expand image token
+            raw_prompt = prompt.replace("<image>", "<|vision_start|><|image_pad|><|vision_end|>")
             row_dict["images"] = [
                 process_image(image, self.max_pixels, self.min_pixels) for image in row_dict["images"]
             ]
             image_inputs = self.processor.image_processor(row_dict["images"], return_tensors="pt")
             image_grid_thw = image_inputs["image_grid_thw"]
-            raw_prompt = prompt.replace("<image>", "<|vision_start|><|image_pad|><|vision_end|>")
+            row_dict.update(image_inputs)
 
             if image_grid_thw is not None:
                 merge_length = self.processor.image_processor.merge_size**2
@@ -124,6 +125,8 @@ class RLHFDataset(Dataset):
                     index += 1
 
                 prompt = prompt.replace("<|placeholder|>", self.processor.image_token)
+        else:
+            raw_prompt = prompt
 
         input_ids, attention_mask = verl_F.tokenize_and_postprocess_data(
             prompt=prompt,
@@ -134,19 +137,18 @@ class RLHFDataset(Dataset):
             truncation=self.truncation,
         )
 
-        if self.processor is not None:
+        if "images" in row_dict:
             position_ids = get_rope_index(
                 self.processor,
                 input_ids=input_ids,
                 image_grid_thw=image_grid_thw,
                 attention_mask=attention_mask,
             )  # (3, seq_len)
-            row_dict["raw_prompt_ids"] = self.tokenizer.encode(raw_prompt, add_special_tokens=False)
-            row_dict.update(image_inputs)
         else:
             position_ids = torch.clip(attention_mask.cumsum(dim=0) - 1, min=0, max=None)  # (seqlen,)
 
         row_dict["input_ids"] = input_ids
         row_dict["attention_mask"] = attention_mask
         row_dict["position_ids"] = position_ids
+        row_dict["raw_prompt_ids"] = self.tokenizer.encode(raw_prompt, add_special_tokens=False)
         return row_dict

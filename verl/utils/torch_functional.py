@@ -184,27 +184,11 @@ def compute_grad_norm(model: nn.Module):
 
 
 def broadcast_dict_tensor(tensors: Union[Dict[str, torch.Tensor], TensorDict], src, group):
-    """
-    TODO: optimize this. Technically, we only need one broadcast
-    """
-
     for key in tensors.sorted_keys:
         torch.distributed.broadcast(tensors[key], src=src, group=group, async_op=False)
 
 
-def allgather_dict_tensors(tensors: Union[Dict[str, torch.Tensor], TensorDict], size, group, dim=0):
-    """
-    TODO: optimize this.
-    - We can use async ops
-    - We can use only one allgather
-    Args:
-        tensors:
-        size:
-        group:
-
-    Returns:
-
-    """
+def all_gather_dict_tensors(tensors: Union[Dict[str, torch.Tensor], TensorDict], size, group, dim=0):
     if isinstance(tensors, TensorDict):
         is_tensor_dict = True
         tensors_as_dict = tensors.to_dict()
@@ -221,12 +205,12 @@ def allgather_dict_tensors(tensors: Union[Dict[str, torch.Tensor], TensorDict], 
         output[key] = torch.cat(output[key], dim=dim)
 
     if is_tensor_dict:
-        output = TensorDict(source=output, batch_size=tensors.batch_size[0] * size)
+        output = TensorDict(output, batch_size=tensors.batch_size[0] * size)
 
     return output
 
 
-def split_dict_tensor_into_batches(tensors: TensorDict, batch_size) -> List[TensorDict]:
+def split_dict_tensor_into_batches(tensors: TensorDict, batch_size: int) -> List[TensorDict]:
     assert tensors.batch_size[0] % batch_size == 0, (
         f"input data batch size: {tensors.batch_size[0]}, split batch size: {batch_size}"
     )

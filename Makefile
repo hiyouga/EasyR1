@@ -1,4 +1,4 @@
-.PHONY: build commit quality style test
+.PHONY: build commit quality style
 
 check_dirs := scripts verl setup.py
 
@@ -16,6 +16,3 @@ quality:
 style:
 	ruff check $(check_dirs) --fix
 	ruff format $(check_dirs)
-
-test:
-	pytest tests/

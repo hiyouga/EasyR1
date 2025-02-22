@@ -14,7 +14,9 @@
 
 import logging
 import os
+from collections import defaultdict
 
+import numpy as np
 import torch
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp.api import FullStateDictConfig, ShardedStateDictConfig, StateDictType
@@ -24,7 +26,7 @@ from vllm.distributed import parallel_state as vllm_ps
 
 from verl import DataProto
 from verl.utils.debug import log_gpu_memory_usage
-from verl.utils.torch_functional import allgather_dict_tensors, broadcast_dict_tensor
+from verl.utils.torch_functional import all_gather_dict_tensors, broadcast_dict_tensor
 
 from .base import BaseShardingManager
 
@@ -127,13 +129,21 @@ class FSDPVLLMShardingManager(BaseShardingManager):
             torch.cuda.set_rng_state(self.torch_random_states)
 
     def preprocess_data(self, data: DataProto) -> DataProto:
-        data.batch = allgather_dict_tensors(
-            data.batch.contiguous(),
-            size=vllm_ps.get_tensor_model_parallel_world_size(),
-            group=vllm_ps.get_tensor_model_parallel_group().device_group,
-            dim=0,
-        )
+        tp_size = vllm_ps.get_tensor_model_parallel_world_size()
+        tp_group = vllm_ps.get_tensor_model_parallel_group().device_group
+        data.batch = all_gather_dict_tensors(data.batch.contiguous(), size=tp_size, group=tp_group, dim=0)
+        # all gather non_tensor_batch
+        all_non_tensor_batch = [None for _ in range(tp_size)]
+        torch.distributed.all_gather_object(all_non_tensor_batch, data.non_tensor_batch, group=tp_group)
+        non_tensor_batch = defaultdict(list)
+        for key, value in data.non_tensor_batch.items():
+            if isinstance(value, np.ndarray):
+                non_tensor_batch[key] = np.concatenate([batch[key] for batch in all_non_tensor_batch])
+            else:
+                for batch in all_non_tensor_batch:
+                    non_tensor_batch[key].extend(batch[key])
 
+        data.non_tensor_batch = non_tensor_batch
         return data
 
     def postprocess_data(self, data: DataProto) -> DataProto:
@@ -148,4 +158,5 @@ class FSDPVLLMShardingManager(BaseShardingManager):
             # TODO: shall we build a micro_dp group for vllm when integrating with vLLM?
             local_prompts = data.chunk(chunks=tp_size)
             data = local_prompts[dp_rank % tp_size]
+
         return data
