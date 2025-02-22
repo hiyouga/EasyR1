@@ -2,6 +2,8 @@ set -x
 
 export VLLM_ATTENTION_BACKEND=XFORMERS
 
+MODEL_PATH=Qwen/Qwen2.5-7B-Instruct  # replace it with your local file path
+
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
     data.train_files=hiyouga/math12k@train \
@@ -11,7 +13,7 @@ python3 -m verl.trainer.main_ppo \
     data.val_batch_size=1024 \
     data.max_prompt_length=2048 \
     data.max_response_length=2048 \
-    actor_rollout_ref.model.path=Qwen/Qwen2.5-7B-Instruct \
+    actor_rollout_ref.model.path=${MODEL_PATH} \
     actor_rollout_ref.actor.optim.lr=1e-6 \
     actor_rollout_ref.model.use_remove_padding=False \
     actor_rollout_ref.actor.ppo_mini_batch_size=128 \

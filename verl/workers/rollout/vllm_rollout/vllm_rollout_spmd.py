@@ -32,22 +32,7 @@ from verl.utils.torch_functional import get_eos_mask, pad_2d_list_to_length
 from verl.workers.rollout.base import BaseRollout
 
 
-# TODO
-# 1. support pp in vllm
-# 2. passing tokenizer is not necessary? no encoding/decoding is happending here
-# 3. simplify init logics
-
-
-# NOTE(sgm): add for verl. We can optimize it by making the dataloader yield List[int] without padding.
-def _pre_process_inputs(pad_token_id, prompt_token_ids: torch.Tensor) -> List[int]:
-    # remove the left padding in the prompt token_id
-    # pad_token_id = self.llm_engine.tokenizer.pad_token_id if self.llm_engine.tokenizer.pad_token_id is not None else self.llm_engine.tokenizer.eos_token_id
-    non_pad_index = torch.nonzero(prompt_token_ids != pad_token_id, as_tuple=False)[0][0]
-    token_ids = prompt_token_ids[non_pad_index:].tolist()
-    return token_ids
-
-
-def _repeat_interleave(features: List[Any], repeats: int):
+def _repeat_interleave(features: List[Any], repeats: int) -> List[Any]:
     return [feature for feature in features for _ in range(repeats)]
 
 
@@ -159,6 +144,7 @@ class vLLMRollout(BaseRollout):
 
         non_tensor_batch = prompts.non_tensor_batch
         if "images" in non_tensor_batch:
+            assert batch_size == len(non_tensor_batch["images"]), "vllm sharding manager is not work properly."
             vllm_inputs = []
             for raw_prompt_ids, images in zip(non_tensor_batch["raw_prompt_ids"], non_tensor_batch["images"]):
                 vllm_inputs.append({"prompt_token_ids": raw_prompt_ids, "multi_modal_data": {"image": images}})

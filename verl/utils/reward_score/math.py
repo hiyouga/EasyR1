@@ -1,4 +1,4 @@
-from prm800k.grader import extract_boxed_content, grade_answer
+from mathruler.grader import extract_boxed_content, grade_answer
 
 
 def math_compute_score(predict_str: str, ground_truth: str) -> float:

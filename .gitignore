@@ -169,3 +169,8 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# outputs
+outputs/
+checkpoints/
+wandb/
