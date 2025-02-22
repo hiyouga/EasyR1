@@ -1,0 +1,16 @@
+accelerate
+codetiming
+datasets
+flash-attn
+hydra-core
+liger-kernel
+numpy
+pandas
+peft
+pyarrow>=15.0.0
+pylatexenc
+ray
+tensordict
+transformers>=4.49.0
+vllm>=0.7.3
+wandb
