@@ -1,6 +1,4 @@
-# EasyR1
-
-### An efficient, scalable, multi-modality training framework for Reinforcement Learning based on [veRL](https://github.com/volcengine/verl)
+# EasyR1: An Efficient, Scalable, Multi-Modality RL Training Framework
 
 This project is a clean fork of the original [veRL](https://github.com/volcengine/verl) project to support vision language models, we thank all the authors for providing such a high-performance RL training framework.
 
@@ -18,7 +16,7 @@ EasyR1 is efficient and scalable due to the design of **[HybirdEngine](https://a
   - others RL algorithms (comming soon)
 
 - Supported datasets
-  - any text, vision-text dataset in a [specific format](#custom-dataset).
+  - Any text, vision-text dataset in a [specific format](#custom-dataset).
 
 ## Requirements
 
@@ -86,10 +84,12 @@ These features are temporarily disabled for now, we plan to fix them one-by-one 
 
 ## Citation
 
+Core contributors: [Yaowei Zheng](https://github.com/hiyouga), [Junting Lu](https://github.com/AL-377), [Shenzhi Wang](https://github.com/Shenzhi-Wang) and Yuwen Xiong
+
 ```bibtex
 @misc{zheng2025easyr1,
-  title = {EasyR1},
-  author = {Yaowei Zheng, Junting Lu, Yuwen Xiong},
+  title = {EasyR1: An Efficient, Scalable, Multi-Modality RL Training Framework},
+  author = {Yaowei Zheng, Junting Lu, Shenzhi Wang, Yuwen Xiong},
   howpublished = {\url{https://github.com/hiyouga/EasyR1}},
   year = {2025}
 }

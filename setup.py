@@ -35,10 +35,6 @@ def main():
         author_email="zhangchi.usc1992@bytedance.com, gmsheng@connect.hku.hk, hiyouga@buaa.edu.cn",
         description="",
         install_requires=get_requires(),
-        package_data={
-            "verl": ["trainer/config/*.yaml"],
-        },
-        include_package_data=True,
         long_description=open("README.md", encoding="utf-8").read(),
         long_description_content_type="text/markdown",
     )

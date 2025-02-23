@@ -13,8 +13,8 @@ algorithm:
 worker:
   actor:
     global_batch_size: 128
-    micro_batch_size_per_device_for_update: 4
-    micro_batch_size_per_device_for_experience: 8
+    micro_batch_size_per_device_for_update: 2
+    micro_batch_size_per_device_for_experience: 2
     use_kl_loss: true
     kl_loss_coef: 1.0e-3
     kl_loss_type: low_var_kl
@@ -26,17 +26,17 @@ worker:
     offload:
       param_offload: true
       optimizer_offload: true
-  
+
   rollout:
     tensor_parallel_size: 2
     gpu_memory_utilization: 0.7
     n: 5
     enable_chunked_prefill: true
-  
+
   ref:
     offload:
       param_offload: true
-  
+
   reward:
     compute_score: math
 

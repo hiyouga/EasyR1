@@ -2,9 +2,9 @@ accelerate
 codetiming
 datasets
 flash-attn
-omegaconf
 liger-kernel
 numpy
+omegaconf
 pandas
 peft
 pillow
