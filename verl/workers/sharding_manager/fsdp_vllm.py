@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import logging
 
 import torch
 import torch.distributed as dist
@@ -27,9 +26,6 @@ from verl.utils.performance import log_gpu_memory_usage
 from verl.workers.rollout.vllm_rollout import load_dtensor_weights
 
 from .base import BaseShardingManager
-
-
-logger = logging.getLogger(__file__)
 
 
 class FSDPVLLMShardingManager(BaseShardingManager):
@@ -60,28 +56,28 @@ class FSDPVLLMShardingManager(BaseShardingManager):
             self.gen_random_states = None
 
     def __enter__(self):
-        log_gpu_memory_usage("Before state_dict() in sharding manager memory", logger=logger)
+        log_gpu_memory_usage("Before state_dict() in sharding manager memory")
         actor_weights = self.module.state_dict()
-        log_gpu_memory_usage("After state_dict() in sharding manager memory", logger=logger)
+        log_gpu_memory_usage("After state_dict() in sharding manager memory")
 
         self.inference_engine.wake_up()
         load_dtensor_weights(
             actor_weights, self.inference_engine.llm_engine.model_executor.driver_worker.worker.model_runner.model
         )
-        log_gpu_memory_usage("After sync model weights in sharding manager", logger=logger)
+        log_gpu_memory_usage("After sync model weights in sharding manager")
 
         del actor_weights
         torch.cuda.empty_cache()
-        log_gpu_memory_usage("After del state_dict and empty_cache in sharding manager", logger=logger)
+        log_gpu_memory_usage("After del state_dict and empty_cache in sharding manager")
         # important: need to manually set the random states of each tp to be identical.
         if self.device_mesh is not None:
             self.torch_random_states = torch.cuda.get_rng_state()
             torch.cuda.set_rng_state(self.gen_random_states)
 
     def __exit__(self, exc_type, exc_value, traceback):
-        log_gpu_memory_usage("Before vllm offload in sharding manager", logger=logger)
+        log_gpu_memory_usage("Before vllm offload in sharding manager")
         self.inference_engine.sleep(level=1)
-        log_gpu_memory_usage("After vllm offload in sharding manager", logger=logger)
+        log_gpu_memory_usage("After vllm offload in sharding manager")
 
         self.module.train()
         torch.cuda.empty_cache()  # add empty cache after each compute

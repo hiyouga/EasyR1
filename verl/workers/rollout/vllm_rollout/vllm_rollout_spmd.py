@@ -35,9 +35,9 @@ from verl.workers.rollout.config import RolloutConfig
 
 def _repeat_interleave(features: Union[torch.Tensor, List[Any]], repeats: int) -> Union[torch.Tensor, List[Any]]:
     if isinstance(features, torch.Tensor):
-        features = features.repeat_interleave(repeats, dim=0)
+        return features.repeat_interleave(repeats, dim=0)
     else:
-        features = [feature for feature in features for _ in range(repeats)]
+        return [feature for feature in features for _ in range(repeats)]
 
 
 class vLLMRollout(BaseRollout):
@@ -132,11 +132,11 @@ class vLLMRollout(BaseRollout):
 
         if "images" in non_tensor_batch:
             vllm_inputs = []
-            for raw_prompt_ids, images in zip(non_tensor_batch["raw_prompt_ids"], non_tensor_batch["images"]):
+            for raw_prompt_ids, images in zip(non_tensor_batch.pop("raw_prompt_ids"), non_tensor_batch.pop("images")):
                 vllm_inputs.append({"prompt_token_ids": raw_prompt_ids, "multi_modal_data": {"image": images}})
         else:
             vllm_inputs = [
-                {"prompt_token_ids": raw_prompt_ids} for raw_prompt_ids in non_tensor_batch["raw_prompt_ids"]
+                {"prompt_token_ids": raw_prompt_ids} for raw_prompt_ids in non_tensor_batch.pop("raw_prompt_ids")
             ]
 
         # users can customize different sampling_params at different run

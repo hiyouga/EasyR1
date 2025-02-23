@@ -12,13 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import logging
-
 from .protocol import DataProto
-from .utils.logging_utils import set_basic_config
 
-
-set_basic_config(level=logging.WARNING)
 
 __all__ = ["DataProto"]
 __version__ = "0.2.0.dev"

@@ -89,7 +89,7 @@ def check_workers_alive(workers: List, is_alive: Callable, gap_time: float = 1) 
     while True:
         for worker in workers:
             if not is_alive(worker):
-                logging.warning(f"worker {worker} is not alive" + " sending signal to main thread")
+                logging.warning(f"Worker {worker} is not alive, sending signal to main thread")
                 signal.raise_signal(signal.SIGABRT)
         time.sleep(gap_time)
 

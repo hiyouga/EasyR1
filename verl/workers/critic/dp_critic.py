@@ -44,35 +44,34 @@ class DataParallelPPOCritic(BasePPOCritic):
         self.critic_optimizer = critic_optimizer
 
     def _forward_micro_batch(self, micro_batch: Dict[str, torch.Tensor]) -> torch.Tensor:
-        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-            input_ids = micro_batch["input_ids"]
-            attention_mask = micro_batch["attention_mask"]
-            position_ids = micro_batch["position_ids"]
-            responses = micro_batch["responses"]
-            response_length = responses.size(-1)
-            if position_ids.dim() == 3:  # qwen2vl mrope
-                position_ids = position_ids.transpose(0, 1)  # (bsz, 3, seqlen) -> (3, bsz, seqlen)
+        input_ids = micro_batch["input_ids"]
+        attention_mask = micro_batch["attention_mask"]
+        position_ids = micro_batch["position_ids"]
+        responses = micro_batch["responses"]
+        response_length = responses.size(-1)
+        if position_ids.dim() == 3:  # qwen2vl mrope
+            position_ids = position_ids.transpose(0, 1)  # (bsz, 3, seqlen) -> (3, bsz, seqlen)
 
-            vision_inputs = {}
-            if "pixel_values" in micro_batch:
-                vision_inputs["pixel_values"] = torch.cat(micro_batch["pixel_values"], dim=0)
-                vision_inputs["image_grid_thw"] = torch.cat(micro_batch["image_grid_thw"], dim=0)
+        vision_inputs = {}
+        if "pixel_values" in micro_batch:
+            vision_inputs["pixel_values"] = torch.cat(micro_batch["pixel_values"], dim=0)
+            vision_inputs["image_grid_thw"] = torch.cat(micro_batch["image_grid_thw"], dim=0)
 
-            if self.config.padding_free:
-                # TODO (yaowei): preprocess data for padding_free and ulysses
-                raise NotImplementedError
-            else:
-                output = self.critic_module(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    position_ids=position_ids,
-                    **vision_inputs,
-                    use_cache=False,
-                )
-                values: torch.Tensor = output.logits
-                values = values[:, -response_length - 1 : -1].squeeze(-1)  # (bsz, response_length, vocab_size)
+        if self.config.padding_free:
+            # TODO (yaowei): preprocess data for padding_free and ulysses
+            raise NotImplementedError
+        else:
+            output = self.critic_module(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                **vision_inputs,
+                use_cache=False,
+            )
+            values: torch.Tensor = output.logits
+            values = values[:, -response_length - 1 : -1].squeeze(-1)  # (bsz, response_length, vocab_size)
 
-            return values
+        return values
 
     def _optimizer_step(self) -> torch.Tensor:
         if isinstance(self.critic_module, FSDP):
@@ -100,6 +99,7 @@ class DataParallelPPOCritic(BasePPOCritic):
         )
         values_lst = []
         for micro_batch in tqdm(micro_batches, "Compute values", disable=(self.rank != 0)):
+            micro_batch.to("cuda")
             values = self._forward_micro_batch(micro_batch)
             values_lst.append(values)
 
@@ -125,14 +125,16 @@ class DataParallelPPOCritic(BasePPOCritic):
         mini_batches = data.select(select_keys, non_tensor_select_keys).split(self.config.global_batch_size_per_device)
 
         metrics = defaultdict(list)
-        for mini_batch in tqdm(mini_batches, desc="Update critic", disable=(self.rank != 0)):
+        n = len(mini_batches)
+        for i, mini_batch in enumerate(mini_batches):
             gradient_accumulation = (
                 self.config.global_batch_size_per_device // self.config.micro_batch_size_per_device_for_update
             )
             micro_batches = mini_batch.split(self.config.micro_batch_size_per_device_for_update)
 
             self.critic_optimizer.zero_grad()
-            for micro_batch in micro_batches:
+            for micro_batch in tqdm(micro_batches, desc=f"Update critic [{i + 1}/{n}]", disable=(self.rank != 0)):
+                micro_batch.to("cuda")
                 model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
                 responses = model_inputs["responses"]
                 attention_mask = model_inputs["attention_mask"]

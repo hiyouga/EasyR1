@@ -15,12 +15,10 @@
 A unified tracking interface that supports logging data to different backend
 """
 
-import dataclasses
 import os
-from enum import Enum
-from functools import partial
-from pathlib import Path
-from typing import Any, Dict, List, Union
+from typing import List, Union
+
+from verl.utils.logger.aggregate_logger import LocalLogger
 
 
 class Tracking:
@@ -29,17 +27,13 @@ class Tracking:
     def __init__(self, project_name, experiment_name, default_backend: Union[str, List[str]] = "console", config=None):
         if isinstance(default_backend, str):
             default_backend = [default_backend]
-        for backend in default_backend:
-            if backend == "tracking":
-                import warnings
 
-                warnings.warn("`tracking` logger is deprecated. use `wandb` instead.", DeprecationWarning)
-            else:
-                assert backend in self.supported_backend, f"{backend} is not supported"
+        for backend in default_backend:
+            assert backend in self.supported_backend, f"{backend} is not supported"
 
         self.logger = {}
 
-        if "tracking" in default_backend or "wandb" in default_backend:
+        if "wandb" in default_backend:
             import wandb  # type: ignore
 
             wandb.init(project=project_name, name=experiment_name, config=config)
@@ -49,7 +43,7 @@ class Tracking:
             import mlflow  # type: ignore
 
             mlflow.start_run(run_name=experiment_name)
-            mlflow.log_params(_compute_mlflow_params_from_objects(config))
+            mlflow.log_params(config)
             self.logger["mlflow"] = _MlflowLoggingAdapter()
 
         if "swanlab" in default_backend:
@@ -71,8 +65,6 @@ class Tracking:
             self.logger["swanlab"] = swanlab
 
         if "console" in default_backend:
-            from verl.utils.logger.aggregate_logger import LocalLogger
-
             self.console_logger = LocalLogger(print_to_console=True)
             self.logger["console"] = self.console_logger
 
@@ -84,6 +76,7 @@ class Tracking:
     def __del__(self):
         if "wandb" in self.logger:
             self.logger["wandb"].finish(exit_code=0)
+
         if "swanlab" in self.logger:
             self.logger["swanlab"].finish()
 
@@ -93,38 +86,3 @@ class _MlflowLoggingAdapter:
         import mlflow  # type: ignore
 
         mlflow.log_metrics(metrics=data, step=step)
-
-
-def _compute_mlflow_params_from_objects(params) -> Dict[str, Any]:
-    if params is None:
-        return {}
-
-    return _flatten_dict(_transform_params_to_json_serializable(params, convert_list_to_dict=True), sep="/")
-
-
-def _transform_params_to_json_serializable(x, convert_list_to_dict: bool):
-    _transform = partial(_transform_params_to_json_serializable, convert_list_to_dict=convert_list_to_dict)
-
-    if dataclasses.is_dataclass(x):
-        return _transform(dataclasses.asdict(x))
-    if isinstance(x, dict):
-        return {k: _transform(v) for k, v in x.items()}
-    if isinstance(x, list):
-        if convert_list_to_dict:
-            return {"list_len": len(x)} | {f"{i}": _transform(v) for i, v in enumerate(x)}
-        else:
-            return [_transform(v) for v in x]
-    if isinstance(x, Path):
-        return str(x)
-    if isinstance(x, Enum):
-        return x.value
-
-    return x
-
-
-def _flatten_dict(raw: Dict[str, Any], *, sep: str) -> Dict[str, Any]:
-    import pandas as pd
-
-    ans = pd.json_normalize(raw, sep=sep).to_dict(orient="records")[0]
-    assert isinstance(ans, dict)
-    return ans

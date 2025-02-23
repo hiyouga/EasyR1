@@ -13,7 +13,6 @@
 # limitations under the License.
 """Utils for tokenization."""
 
-import warnings
 from typing import Optional
 
 from transformers import AutoConfig, AutoProcessor, AutoTokenizer, PreTrainedTokenizer, ProcessorMixin
@@ -38,7 +37,7 @@ def get_tokenizer(model_path, correct_pad_token=True, correct_gemma=True, **kwar
     if correct_gemma and getattr(config, "model_type", None) in ["gemma", "gemma2"]:
         # the EOS token in gemma2 is ambiguious, which may worsen RL performance.
         # https://huggingface.co/google/gemma-2-2b-it/commit/17a01657f5c87135bcdd0ec7abb4b2dece04408a
-        warnings.warn("Found gemma model. Set eos_token and eos_token_id to <end_of_turn> and 107.")
+        print("Found gemma model. Set eos_token and eos_token_id to <end_of_turn> and 107.")
         tokenizer.eos_token = "<end_of_turn>"
 
     if correct_pad_token:

@@ -15,8 +15,6 @@
 The main entry point to run the PPO algorithm
 """
 
-import logging
-import os
 from typing import Literal
 
 import torch
@@ -50,7 +48,7 @@ from verl.utils.fsdp_utils import (
     offload_fsdp_model,
     offload_fsdp_optimizer,
 )
-from verl.utils.model import print_model_size
+from verl.utils.model_utils import print_model_size
 from verl.utils.performance import log_gpu_memory_usage
 from verl.utils.torch_dtypes import PrecisionType
 from verl.utils.torch_functional import get_constant_schedule_with_warmup
@@ -60,10 +58,6 @@ from verl.workers.critic import DataParallelPPOCritic
 from verl.workers.rollout.vllm_rollout import vLLMRollout
 from verl.workers.sharding_manager import FSDPVLLMShardingManager
 from verl.workers.sharding_manager.fsdp_ulysses import FSDPUlyssesShardingManager
-
-
-logger = logging.getLogger(__file__)
-logger.setLevel(os.getenv("VERL_PPO_LOGGING_LEVEL", "WARN"))
 
 
 class FSDPWorker(Worker):
@@ -202,7 +196,7 @@ class FSDPWorker(Worker):
         if self.rank == 0:
             print_model_size(model)
 
-        log_gpu_memory_usage("After init from HF AutoModel", logger=logger)
+        log_gpu_memory_usage("After init from huggingface model")
         mixed_precision = MixedPrecision(
             param_dtype=PrecisionType.to_dtype(fsdp_config.mp_param_dtype),
             reduce_dtype=PrecisionType.to_dtype(fsdp_config.mp_reduce_dtype),
@@ -235,7 +229,7 @@ class FSDPWorker(Worker):
             use_orig_params=False,
             device_mesh=self.device_mesh,
         )
-        log_gpu_memory_usage("After Actor FSDP init", logger=logger)
+        log_gpu_memory_usage("After Actor FSDP init")
 
         if self._is_actor or self._is_critic:
             self.optimizer = torch.optim.AdamW(
@@ -251,7 +245,7 @@ class FSDPWorker(Worker):
         else:
             self.optimizer, self.lr_scheduler = None, None
 
-        log_gpu_memory_usage("After actor optimizer init", logger=logger)
+        log_gpu_memory_usage("After actor optimizer init")
 
     def _build_rollout(self) -> None:
         # TODO(sgm): support FSDP hybrid shard for larger model
@@ -261,20 +255,20 @@ class FSDPWorker(Worker):
             f"rollout world_size: {self.world_size} is not divisible by tp_size: {tp_size}"
         )
         rollout_device_mesh = init_device_mesh("cuda", mesh_shape=(dp_size, tp_size), mesh_dim_names=["dp", "tp"])
-        log_gpu_memory_usage("Before building vllm rollout", logger=None)
+        log_gpu_memory_usage("Before building vllm rollout")
         self.rollout = vLLMRollout(
             model_path=self.config.actor.model.model_path,
             config=self.config.rollout,
             tokenizer=self.tokenizer,
         )
-        log_gpu_memory_usage("After building vllm rollout", logger=None)
+        log_gpu_memory_usage("After building vllm rollout")
 
         self.rollout_sharding_manager = FSDPVLLMShardingManager(
             module=self.fsdp_module,
             inference_engine=self.rollout.inference_engine,
             device_mesh=rollout_device_mesh,
         )
-        log_gpu_memory_usage("After building sharding manager", logger=None)
+        log_gpu_memory_usage("After building sharding manager")
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
     def init_model(self):
@@ -300,7 +294,7 @@ class FSDPWorker(Worker):
             self.unwrapped_model = self.fsdp_module._fsdp_wrapped_module
             if self._use_optimizer_offload and not self._is_critic:
                 offload_fsdp_optimizer(optimizer=self.optimizer)
-                log_gpu_memory_usage("After offload actor optimizer during init", logger=logger)
+                log_gpu_memory_usage("After offload actor optimizer during init")
 
         if self._is_actor:
             self.actor = DataParallelPPOActor(
@@ -370,7 +364,7 @@ class FSDPWorker(Worker):
         if self._use_optimizer_offload:
             load_fsdp_optimizer(optimizer=self.optimizer)
 
-        log_gpu_memory_usage("Before update policy", logger=logger)
+        log_gpu_memory_usage("Before update policy")
         with self.ulysses_sharding_manager:
             data = self.ulysses_sharding_manager.preprocess_data(data=data)
             with Timer(name="update_policy", logger=None) as timer:
@@ -384,7 +378,7 @@ class FSDPWorker(Worker):
             self.lr_scheduler.step()
             lr = self.lr_scheduler.get_last_lr()[0]
             metrics["actor/lr"] = lr
-            log_gpu_memory_usage("After update policy", logger=logger)
+            log_gpu_memory_usage("After update policy")
 
             # TODO: here, we should return all metrics
             output = DataProto(meta_info={"metrics": metrics})
@@ -424,17 +418,17 @@ class FSDPWorker(Worker):
             if self._use_optimizer_offload:
                 offload_fsdp_optimizer(optimizer=self.optimizer)
 
-            log_gpu_memory_usage("After entering rollout sharding manager", logger=logger)
+            log_gpu_memory_usage("After entering rollout sharding manager")
 
             prompts = self.rollout_sharding_manager.preprocess_data(prompts)
             output = self.rollout.generate_sequences(prompts=prompts)
-            log_gpu_memory_usage("After rollout generation", logger=logger)
+            log_gpu_memory_usage("After rollout generation")
 
             output = self.rollout_sharding_manager.postprocess_data(output)
 
         output = output.to("cpu")
         torch.cuda.empty_cache()  # clear kv cache
-        log_gpu_memory_usage("After recompute log prob", logger=logger)
+        log_gpu_memory_usage("After recompute log prob")
         return output
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
@@ -465,7 +459,7 @@ class FSDPWorker(Worker):
             offload_fsdp_model(self.fsdp_module)
 
         torch.cuda.empty_cache()
-        log_gpu_memory_usage("After compute_log_prob", logger=logger)
+        log_gpu_memory_usage("After compute_log_prob")
         return output
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
@@ -492,7 +486,7 @@ class FSDPWorker(Worker):
             offload_fsdp_model(self.fsdp_module)
 
         torch.cuda.empty_cache()
-        log_gpu_memory_usage("After compute_ref_log_prob", logger=logger)
+        log_gpu_memory_usage("After compute_ref_log_prob")
         return output
 
     """CriticWorker"""

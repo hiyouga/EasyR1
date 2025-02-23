@@ -60,38 +60,37 @@ class DataParallelPPOActor(BasePPOActor):
             entropy: # (bs, response_len)
             log_probs: # (bs, response_len)
         """
-        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-            input_ids = micro_batch["input_ids"]
-            attention_mask = micro_batch["attention_mask"]
-            position_ids = micro_batch["position_ids"]
-            responses = micro_batch["responses"]
-            response_length = responses.size(-1)
-            if position_ids.dim() == 3:  # qwen2vl mrope
-                position_ids = position_ids.transpose(0, 1)  # (bsz, 3, seqlen) -> (3, bsz, seqlen)
+        input_ids = micro_batch["input_ids"]
+        attention_mask = micro_batch["attention_mask"]
+        position_ids = micro_batch["position_ids"]
+        responses = micro_batch["responses"]
+        response_length = responses.size(-1)
+        if position_ids.dim() == 3:  # qwen2vl mrope
+            position_ids = position_ids.transpose(0, 1)  # (bsz, 3, seqlen) -> (3, bsz, seqlen)
 
-            vision_inputs = {}
-            if "pixel_values" in micro_batch:
-                vision_inputs["pixel_values"] = torch.cat(micro_batch["pixel_values"], dim=0)
-                vision_inputs["image_grid_thw"] = torch.cat(micro_batch["image_grid_thw"], dim=0)
+        vision_inputs = {}
+        if "pixel_values" in micro_batch:
+            vision_inputs["pixel_values"] = torch.cat(micro_batch["pixel_values"], dim=0)
+            vision_inputs["image_grid_thw"] = torch.cat(micro_batch["image_grid_thw"], dim=0)
 
-            if self.config.padding_free:
-                # TODO (yaowei): preprocess data for padding_free and ulysses
-                raise NotImplementedError
-            else:
-                output = self.actor_module(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    position_ids=position_ids,
-                    **vision_inputs,
-                    use_cache=False,
-                )
-                logits: torch.Tensor = output.logits
-                logits.div_(temperature)
-                logits = logits[:, -response_length - 1 : -1, :]  # (bsz, response_length, vocab_size)
-                log_probs = logprobs_from_logits(logits, responses)  # (bsz, response_length)
-                entropy = verl_F.entropy_from_logits(logits)  # (bsz, response_length)
+        if self.config.padding_free:
+            # TODO (yaowei): preprocess data for padding_free and ulysses
+            raise NotImplementedError
+        else:
+            output = self.actor_module(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                **vision_inputs,
+                use_cache=False,
+            )
+            logits: torch.Tensor = output.logits
+            logits.div_(temperature)
+            logits = logits[:, -response_length - 1 : -1, :]  # (bsz, response_length, vocab_size)
+            log_probs = logprobs_from_logits(logits, responses)  # (bsz, response_length)
+            entropy = verl_F.entropy_from_logits(logits)  # (bsz, response_length)
 
-            return entropy, log_probs
+        return entropy, log_probs
 
     def _optimizer_step(self) -> torch.Tensor:
         if isinstance(self.actor_module, FSDP):
@@ -135,6 +134,7 @@ class DataParallelPPOActor(BasePPOActor):
         )
         log_probs_lst = []
         for micro_batch in tqdm(micro_batches, desc="Compute log probs", disable=(self.rank != 0)):
+            micro_batch.to("cuda")
             model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
             _, log_probs = self._forward_micro_batch(model_inputs, temperature=temperature)
             log_probs_lst.append(log_probs)
@@ -161,14 +161,16 @@ class DataParallelPPOActor(BasePPOActor):
         mini_batches = data.select(select_keys, non_tensor_select_keys).split(self.config.global_batch_size_per_device)
 
         metrics = defaultdict(list)
-        for mini_batch in tqdm(mini_batches, desc="Update policy", disable=(self.rank != 0)):
+        n = len(mini_batches)
+        for i, mini_batch in enumerate(mini_batches):
             gradient_accumulation = (
                 self.config.global_batch_size_per_device // self.config.micro_batch_size_per_device_for_update
             )
             micro_batches = mini_batch.split(self.config.micro_batch_size_per_device_for_update)
 
             self.actor_optimizer.zero_grad()
-            for micro_batch in micro_batches:
+            for micro_batch in tqdm(micro_batches, desc=f"Update policy [{i + 1}/{n}]", disable=(self.rank != 0)):
+                micro_batch.to("cuda")
                 model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
                 responses = model_inputs["responses"]
                 response_length = responses.size(1)
