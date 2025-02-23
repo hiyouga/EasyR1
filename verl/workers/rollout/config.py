@@ -25,8 +25,6 @@ class RolloutConfig:
     temperature: float = 1.0
     top_k: int = -1
     top_p: float = 1.0
-    prompt_length: int = field(default=-1, init=False)
-    response_length: int = field(default=-1, init=False)
     dtype: str = "bfloat16"
     gpu_memory_utilization: float = 0.5
     ignore_eos: bool = False
@@ -40,6 +38,9 @@ class RolloutConfig:
     do_sample: bool = True
     n: int = 1
     limit_images: int = 0
+    """auto keys"""
+    prompt_length: int = field(default=-1, init=False)
+    response_length: int = field(default=-1, init=False)
 
     def to_dict(self):
         return asdict(self)

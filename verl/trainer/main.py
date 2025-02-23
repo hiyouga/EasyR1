@@ -22,10 +22,10 @@ import ray
 from omegaconf import OmegaConf
 
 from verl.single_controller.ray import RayWorkerGroup
-from verl.trainer.ppo.ray_trainer import RayPPOTrainer, ResourcePoolManager, Role
+from verl.trainer.ray_trainer import RayPPOTrainer, ResourcePoolManager, Role
 from verl.utils import get_processor, get_tokenizer
 from verl.workers.fsdp_workers import ActorRolloutRefWorker, CriticWorker
-from verl.workers.reward_manager import CustomRewardManager
+from verl.workers.reward import CustomRewardManager
 
 
 @hydra.main(config_path="config", config_name="ppo_trainer", version_base=None)

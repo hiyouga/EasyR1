@@ -16,41 +16,82 @@ Actor config
 """
 
 from dataclasses import dataclass, field
-from typing import Literal, Optional
+from typing import Any, Dict, Literal, Optional, Tuple
 
 
 @dataclass
-class ActorOptimConfig:
+class ModelConfig:
+    model_path: str = ""
+    tokenizer_path: Optional[str] = None
+    override_config: Dict[str, Any] = field(default_factory=dict)
+    enable_gradient_checkpointing: bool = True
+    trust_remote_code: bool = True
+
+    def __post_init__(self):
+        if self.tokenizer_path is None:
+            self.tokenizer_path = self.model_path
+
+
+@dataclass
+class OptimConfig:
     lr: float = 1e-6
+    betas: Tuple[float, float] = (0.9, 0.999)
+    weight_decay: float = 1e-2
     lr_warmup_steps_ratio: float = 0.0
     min_lr_ratio: Optional[float] = None
     warmup_style: Literal["constant", "cosine"] = "constant"
+    """auto keys"""
     training_steps: int = field(default=-1, init=False)
 
 
 @dataclass
-class ActorWorkerConfig:
+class FSDPConfig:
+    enable_full_shard: bool = True
     param_offload: bool = False
     optimizer_offload: bool = False
-    fsdp_size: int = -1
+    torch_dtype: Optional[str] = None
+    mp_param_dtype: str = "bf16"
+    mp_reduce_dtype: str = "fp32"
+    mp_buffer_dtype: str = "fp32"
+
+
+@dataclass
+class OffloadConfig:
+    param_offload: bool = False
+    optimizer_offload: bool = False
 
 
 @dataclass
 class ActorConfig:
     strategy: Literal["fsdp"] = "fsdp"
-    global_mini_batch_size: int = 256
-    micro_batch_size_per_device: int = 8
-    max_token_len_per_gpu: int = 16384
+    global_batch_size: int = 256
+    micro_batch_size_per_device_for_update: int = field(default=-1, init=False)
+    micro_batch_size_per_device_for_experience: int = field(default=-1, init=False)
     max_grad_norm: float = 1.0
     clip_ratio: float = 0.2
     entropy_coeff: float = 1e-3
-    use_kl_loss: bool = False
+    use_kl_loss: bool = True
     kl_loss_coef: bool = 1e-3
     kl_loss_type: str = "low_var_kl"
     ppo_epochs: int = 1
+    padding_free: bool = False
     ulysses_sequence_parallel_size: int = 1
-    mini_batch_size_per_device: int = field(default=-1, init=False)
-    use_dynamic_bsz: bool = field(default=False, init=False)
-    use_remove_padding: bool = field(default=False, init=False)
-    optim: ActorOptimConfig = field(default_factory=ActorOptimConfig)
-    worker: ActorWorkerConfig = field(default_factory=ActorWorkerConfig)
+    model: ModelConfig = field(default_factory=ModelConfig)
+    optim: OptimConfig = field(default_factory=OptimConfig)
+    fsdp: FSDPConfig = field(default_factory=FSDPConfig)
+    offload: OffloadConfig = field(default_factory=OffloadConfig)
+    """auto keys"""
+    global_batch_size_per_device: int = field(default=-1, init=False)
+
+    def __post_init__(self):
+        if self.ppo_epochs != 1:
+            raise NotImplementedError
+
+
+@dataclass
+class RefConfig:
+    strategy: Literal["fsdp"] = "fsdp"
+    offload: OffloadConfig = field(default_factory=OffloadConfig)
+    """auto keys"""
+    micro_batch_size_per_device_for_experience: int = field(default=-1, init=False)
+    padding_free: bool = field(default=False, init=False)

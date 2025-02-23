@@ -16,12 +16,11 @@ Contain small torch utilities
 """
 
 import math
-from typing import List, Literal, Optional, Union
+from typing import List, Literal, Union
 
 import torch
 import torch.distributed
 import torch.nn.functional as F
-from torch import nn
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR
 from transformers import PreTrainedTokenizer
@@ -33,21 +32,6 @@ try:
     FLAH_ATTN_CROSS_ENTROPY_LOSS_AVAILABLE = True
 except ImportError:
     FLAH_ATTN_CROSS_ENTROPY_LOSS_AVAILABLE = False
-
-
-def gather_from_labels(data, label):
-    """Gather the label from data. The value in label should be [0, vocab_size)
-
-    Args:
-        data: (..., vocab_size)
-        label (torch.IntTensor) : (...,)
-
-    Returns:
-
-    """
-
-    output = torch.gather(data, -1, label.unsqueeze(-1)).squeeze(-1)
-    return output
 
 
 def logprobs_from_logits(logits, labels):
@@ -74,12 +58,6 @@ def logprobs_from_logits_flash_attn(logits, labels):
     return -output[0]
 
 
-def logprobs_from_logits_naive(logits, labels):
-    logp = F.log_softmax(logits, dim=-1)
-    logpy = gather_from_labels(logp, labels)
-    return logpy
-
-
 def logprobs_from_logits_v2(logits: torch.FloatTensor, labels):
     """
     A memory efficient implementation of logprobs_from_logits
@@ -96,7 +74,9 @@ def logprobs_from_logits_v2(logits: torch.FloatTensor, labels):
             row_logprobs = F.log_softmax(row_logits, dim=-1)
             row_logprobs_labels = row_logprobs.gather(dim=-1, index=row_labels.unsqueeze(-1)).squeeze(-1)
             logprobs_labels.append(row_logprobs_labels)
+
         logprobs_labels = torch.stack(logprobs_labels)
+
     return logprobs_labels
 
 
@@ -114,11 +94,6 @@ def entropy_from_logits(logits: torch.Tensor):
     pd = torch.nn.functional.softmax(logits, dim=-1)
     entropy = torch.logsumexp(logits, dim=-1) - torch.sum(pd * logits, dim=-1)
     return entropy
-
-
-def masked_sum(values, mask, axis=None):
-    """Compute mean of tensor with a masked values."""
-    return (values * mask).sum(axis=axis)
 
 
 def masked_mean(values, mask, axis=None) -> torch.Tensor:
@@ -171,15 +146,6 @@ def get_eos_mask(response_ids: torch.Tensor, eos_token: Union[int, List[int]] = 
     eos_mask = (torch.cumsum(eos_mask, dim=1) - eos_mask).bool()
     eos_mask = torch.logical_not(eos_mask).to(dtype)
     return eos_mask
-
-
-def compute_grad_norm(model: nn.Module):
-    total_grad_square = 0
-    # total_params = 0
-    for param in model.parameters():
-        if param.grad is not None:
-            total_grad_square += torch.sum(torch.square(param.grad.detach())).item()
-    return total_grad_square
 
 
 def pad_2d_list_to_length(response, pad_token_id, max_length=None) -> torch.Tensor:
@@ -266,93 +232,6 @@ def remove_pad_token(input_ids: torch.Tensor, attention_mask: torch.Tensor):
     return no_padding_batch
 
 
-def log_probs_from_logits_response(input_ids, logits, response_length):
-    """Compute the response log_probs from full logits. Note that logits = model(input_ids)
-
-    Args:
-        input_ids: [batch_size, seqlen]
-        logits: [batch_size, seqlen, vocab_size]
-
-    Returns:
-        response_log_prob:
-    """
-    response_logits = logits[:, -response_length - 1 : -1]
-    response = input_ids[:, -response_length:]
-    response_log_prob = logprobs_from_logits(logits=response_logits, labels=response)
-    return response_log_prob
-
-
-def log_probs_from_logits_response_rmpad(input_ids, attention_mask, logits_rmpad, response_length):
-    """Compute the log_probs from logits with rmpad logits and pad input. Note that
-    logits_rmpad = model(input_ids_rmpad). For each sentences, there is a shift between
-    logits and input_ids.
-    The reason for this function to is to compute logprobs_from_logits in rmpad mode because it is memory-intensive
-    for large vocab_size
-
-    Args:
-        input_ids: [batch_size, seqlen]
-        attention_mask: [batch_size, seqlen]
-        logits_rmpad: [total_nnz, vocab_size]
-        response_length: int
-    """
-    from flash_attn.bert_padding import pad_input, unpad_input
-
-    batch_size, seqlen = input_ids.shape
-    input_ids_rmpad, indices, *_ = unpad_input(input_ids.unsqueeze(-1), attention_mask=attention_mask)
-    input_ids_rmpad = input_ids_rmpad.squeeze(-1)
-    input_ids_rmpad_rolled = torch.roll(input_ids_rmpad, shifts=-1, dims=0)
-    full_log_probs_rmpad = logprobs_from_logits(logits=logits_rmpad, labels=input_ids_rmpad_rolled)  # (total_nnz,)
-    full_output = pad_input(
-        hidden_states=full_log_probs_rmpad.unsqueeze(-1), indices=indices, batch=batch_size, seqlen=seqlen
-    )
-    output = full_output.squeeze(-1)[:, -response_length - 1 : -1]  # [batch_size, response_length]
-    return output
-
-
-def log_probs_from_logits_all_rmpad(input_ids_rmpad, logits_rmpad, indices, batch_size, seqlen, response_length):
-    """Compute the log_probs from logits with rmpad input_ids and logits. Note that
-    logits_rmpad = model(input_ids_rmpad). For each sentences, there is a shift between
-    logits and input_ids.
-    The reason for this function to is to compute logprobs_from_logits in rmpad mode because it is memory-intensive
-    for large vocab_size
-
-    Args:
-        input_ids_rmpad: [1, total_nnz]
-        logits_rmpad: [total_nnz, vocab_size]
-        indices: [total_nnz]
-        batch_size: int
-        seqlen: int
-        response_length: int
-    """
-    from flash_attn.bert_padding import pad_input
-
-    input_ids_rmpad = input_ids_rmpad.transpose(0, 1)  # transpose back to [total_nnz, 1]
-    input_ids_rmpad = input_ids_rmpad.squeeze(-1)
-    input_ids_rmpad_rolled = torch.roll(input_ids_rmpad, shifts=-1, dims=0)
-    full_log_probs_rmpad = logprobs_from_logits(logits=logits_rmpad, labels=input_ids_rmpad_rolled)  # (total_nnz,)
-    full_output = pad_input(
-        hidden_states=full_log_probs_rmpad.unsqueeze(-1), indices=indices, batch=batch_size, seqlen=seqlen
-    )
-    output = full_output.squeeze(-1)[:, -response_length - 1 : -1]  # [batch_size, response_length]
-    return output
-
-
-def post_process_logits(input_ids, logits, temperature, top_k, top_p):
-    if temperature != 1.0:
-        logits = logits.div_(temperature)  # inplace operation to avoid OOM
-    # TODO: add them back
-    # if top_k is not None and top_k > 0:
-    #     logits = TopKLogitsWarper(top_k=top_k)(input_ids, logits)
-    # if top_p is not None and top_p < 1.0 and top_p > 0.0:
-    #     logits = TopPLogitsWarper(top_p=top_p)(input_ids, logits)
-    return logits
-
-
-"""
-Optimizer related
-"""
-
-
 def get_cosine_schedule_with_warmup(
     optimizer: Optimizer,
     num_warmup_steps: int,
@@ -405,57 +284,6 @@ def get_constant_schedule_with_warmup(
         return min(1, float(current_step) / float(max(1, num_warmup_steps)))
 
     return LambdaLR(optimizer, lr_lambda, last_epoch)
-
-
-def prepare_decoder_attention_mask(attention_mask, input_shape, inputs_embeds):
-    # create causal mask
-    # [bsz, seq_len] -> [bsz, 1, tgt_seq_len, src_seq_len]
-    combined_attention_mask = None
-    if input_shape[-1] > 1:
-        combined_attention_mask = _make_causal_mask(
-            input_shape,
-            inputs_embeds.dtype,
-            device=inputs_embeds.device,
-        )
-
-    if attention_mask is not None:
-        # [bsz, seq_len] -> [bsz, 1, tgt_seq_len, src_seq_len]
-        expanded_attn_mask = _expand_mask(attention_mask, inputs_embeds.dtype, tgt_len=input_shape[-1]).to(
-            inputs_embeds.device
-        )
-        combined_attention_mask = (
-            expanded_attn_mask if combined_attention_mask is None else expanded_attn_mask + combined_attention_mask
-        )
-
-    return combined_attention_mask
-
-
-# Copied from transformers.models.bart.modeling_bart._make_causal_mask
-def _make_causal_mask(input_ids_shape: torch.Size, dtype: torch.dtype, device: torch.device):
-    """
-    Make causal mask used for bi-directional self-attention.
-    """
-    bsz, tgt_len = input_ids_shape
-    mask = torch.full((tgt_len, tgt_len), torch.finfo(dtype).min, device=device)
-    mask_cond = torch.arange(mask.size(-1), device=device)
-    mask.masked_fill_(mask_cond < (mask_cond + 1).view(mask.size(-1), 1), 0)
-    mask = mask.to(dtype)
-    return mask[None, None, :, :].expand(bsz, 1, tgt_len, tgt_len)
-
-
-# Copied from transformers.models.bart.modeling_bart._expand_mask
-def _expand_mask(mask: torch.Tensor, dtype: torch.dtype, tgt_len: Optional[int] = None):
-    """
-    Expands attention_mask from `[bsz, seq_len]` to `[bsz, 1, tgt_seq_len, src_seq_len]`.
-    """
-    bsz, src_len = mask.size()
-    tgt_len = tgt_len if tgt_len is not None else src_len
-
-    expanded_mask = mask[:, None, None, :].expand(bsz, 1, tgt_len, src_len).to(dtype)
-
-    inverted_mask = 1.0 - expanded_mask
-
-    return inverted_mask.masked_fill(inverted_mask.to(torch.bool), torch.finfo(dtype).min)
 
 
 def get_unpad_data(attention_mask):

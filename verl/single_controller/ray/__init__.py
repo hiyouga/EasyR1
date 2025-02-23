@@ -13,4 +13,3 @@
 # limitations under the License.
 
 from .base import RayClassWithInitArgs, RayResourcePool, RayWorkerGroup, create_colocated_worker_cls
-from .megatron import DistGlobalInfo, DistRankInfo, MegatronRayWorkerGroup

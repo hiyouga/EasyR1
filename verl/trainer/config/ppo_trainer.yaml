@@ -13,20 +13,6 @@ data:
   max_pixels: 4194304
   min_pixels: 262144
 
-actor_rollout_ref:
-  hybrid_engine: True
-  model:
-    path: null
-    override_config: {}
-    enable_gradient_checkpointing: True
-    use_remove_padding: False
-  actor:
-    
-  ref:
-    fsdp_config:
-      param_offload: False
-
-
 algorithm:
   gamma: 1.0
   lam: 1.0

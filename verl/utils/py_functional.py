@@ -15,7 +15,6 @@
 Contain small python utility functions
 """
 
-from types import SimpleNamespace
 from typing import Any, Dict, List
 
 
@@ -36,13 +35,3 @@ def append_to_dict(data: Dict[str, List[Any]], new_data: Dict[str, Any]) -> None
             data[key] = []
 
         data[key].append(val)
-
-
-class NestedNamespace(SimpleNamespace):
-    def __init__(self, dictionary, **kwargs):
-        super().__init__(**kwargs)
-        for key, value in dictionary.items():
-            if isinstance(value, dict):
-                self.__setattr__(key, NestedNamespace(value))
-            else:
-                self.__setattr__(key, value)

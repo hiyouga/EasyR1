@@ -11,11 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""
-Adapted from Cruise.
-"""
-
-from typing import Union
 
 import torch
 
@@ -39,14 +34,6 @@ class PrecisionType:
     FULL = "64"
     BFLOAT = "bf16"
     MIXED = "mixed"
-
-    @staticmethod
-    def supported_type(precision: Union[str, int]) -> bool:
-        return any(x == precision for x in PrecisionType)
-
-    @staticmethod
-    def supported_types() -> list[str]:
-        return [x.value for x in PrecisionType]
 
     @staticmethod
     def is_fp16(precision):

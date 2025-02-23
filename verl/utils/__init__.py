@@ -12,8 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from . import tokenizer
 from .tokenizer import get_processor, get_tokenizer
 
 
-__all__ = ["get_processor", "get_tokenizer", "tokenizer"]
+__all__ = ["get_processor", "get_tokenizer"]

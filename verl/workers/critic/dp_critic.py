@@ -26,7 +26,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from tqdm import tqdm
 
 from verl import DataProto
-from verl.trainer.ppo import core_algos
+from verl.trainer import core_algos
 from verl.utils.py_functional import append_to_dict
 from verl.utils.torch_functional import masked_mean
 from verl.workers.critic.base import BasePPOCritic
@@ -58,7 +58,7 @@ class DataParallelPPOCritic(BasePPOCritic):
                 vision_inputs["pixel_values"] = torch.cat(micro_batch["pixel_values"], dim=0)
                 vision_inputs["image_grid_thw"] = torch.cat(micro_batch["image_grid_thw"], dim=0)
 
-            if self.config.use_remove_padding:
+            if self.config.padding_free:
                 # TODO (yaowei): preprocess data for padding_free and ulysses
                 raise NotImplementedError
             else:
@@ -89,15 +89,15 @@ class DataParallelPPOCritic(BasePPOCritic):
     def compute_values(self, data: DataProto) -> torch.Tensor:
         self.critic_module.eval()
 
-        micro_batch_size = data.meta_info["micro_batch_size"]
-
         select_keys = ["responses", "input_ids", "attention_mask", "position_ids"]
         if "pixel_values" in data.non_tensor_batch.keys():
             non_tensor_select_keys = ["pixel_values", "image_grid_thw"]
         else:
             non_tensor_select_keys = None
 
-        micro_batches = data.select(select_keys, non_tensor_select_keys).split(micro_batch_size)
+        micro_batches = data.select(select_keys, non_tensor_select_keys).split(
+            self.config.micro_batch_size_per_device_for_experience
+        )
         values_lst = []
         for micro_batch in tqdm(micro_batches, "Compute values", disable=(self.rank != 0)):
             values = self._forward_micro_batch(micro_batch)
@@ -121,12 +121,14 @@ class DataParallelPPOCritic(BasePPOCritic):
 
         # Split to make minibatch iterator for updating the actor
         # See PPO paper for details. https://arxiv.org/abs/1707.06347
-        mini_batches = data.select(select_keys, non_tensor_select_keys).split(self.config.mini_batch_size_per_device)
+        mini_batches = data.select(select_keys, non_tensor_select_keys).split(self.config.global_batch_size_per_device)
 
         metrics = defaultdict(list)
         for mini_batch in tqdm(mini_batches, desc="Update critic", disable=(self.rank != 0)):
-            gradient_accumulation = self.config.mini_batch_size_per_device // self.config.micro_batch_size_per_device
-            micro_batches = mini_batch.split(self.config.micro_batch_size_per_device)
+            gradient_accumulation = (
+                self.config.global_batch_size_per_device // self.config.micro_batch_size_per_device_for_update
+            )
+            micro_batches = mini_batch.split(self.config.micro_batch_size_per_device_for_update)
 
             self.critic_optimizer.zero_grad()
             for micro_batch in micro_batches:

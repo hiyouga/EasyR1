@@ -19,7 +19,10 @@ import os
 import socket
 from dataclasses import dataclass
 
+import ray
+
 from verl.single_controller.base.decorator import Dispatch, Execute, register
+from verl.single_controller.base.register_center.ray import create_worker_group_register_center
 
 
 @dataclass
@@ -38,18 +41,10 @@ class DistGlobalInfo:
 
 class WorkerHelper:
     def _get_node_ip(self):
-        def get_node_ip_by_sdk():
-            if os.getenv("WG_BACKEND", None) == "ray":
-                import ray
-
-                return ray._private.services.get_node_ip_address()
-            else:
-                raise NotImplementedError("WG_BACKEND now just support ray mode.")
-
         host_ipv4 = os.getenv("MY_HOST_IP", None)
         host_ipv6 = os.getenv("MY_HOST_IPV6", None)
         host_ip_by_env = host_ipv4 or host_ipv6
-        host_ip_by_sdk = get_node_ip_by_sdk()
+        host_ip_by_sdk = ray._private.services.get_node_ip_address()
 
         host_ip = host_ip_by_env or host_ip_by_sdk
         return host_ip
@@ -112,14 +107,7 @@ class Worker(WorkerHelper):
                 "MASTER_ADDR": master_addr,
                 "MASTER_PORT": master_port,
             }
-
-            if os.getenv("WG_BACKEND", None) == "ray":
-                from verl.single_controller.base.register_center.ray import create_worker_group_register_center
-
-                self.register_center = create_worker_group_register_center(
-                    name=register_center_name, info=rank_zero_info
-                )
-
+            self.register_center = create_worker_group_register_center(name=register_center_name, info=rank_zero_info)
             os.environ.update(rank_zero_info)
 
     def __init__(self, cuda_visible_devices=None) -> None:

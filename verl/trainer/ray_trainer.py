@@ -37,10 +37,9 @@ from verl.protocol import pad_dataproto_to_divisor, unpad_dataproto
 from verl.single_controller.base import Worker
 from verl.single_controller.ray import RayClassWithInitArgs, RayResourcePool, RayWorkerGroup
 from verl.single_controller.ray.base import create_colocated_worker_cls
-from verl.trainer.ppo import core_algos
+from verl.trainer import core_algos
 from verl.utils.checkpoint.checkpoint_manager import find_latest_ckpt_path
 from verl.utils.rl_dataset import RLHFDataset, collate_fn
-from verl.utils.seqlen_balancing import get_seqlen_balanced_partitions, log_seqlen_unbalance
 from verl.utils.torch_functional import masked_mean
 from verl.utils.tracking import Tracking
 
@@ -699,7 +698,9 @@ class RayPPOTrainer:
         # create critic
         if self.use_critic:
             resource_pool = self.resource_pool_manager.get_resource_pool(Role.Critic)
-            critic_cls = RayClassWithInitArgs(cls=self.role_worker_mapping[Role.Critic], config=self.config.critic)
+            critic_cls = RayClassWithInitArgs(
+                cls=self.role_worker_mapping[Role.Critic], config=self.config.critic, role="critic"
+            )
             self.resource_pool_to_cls[resource_pool]["critic"] = critic_cls
 
         # create reference policy if needed
@@ -817,23 +818,6 @@ class RayPPOTrainer:
             self.critic_wg.load_checkpoint(
                 critic_path, del_local_after_load=self.config.trainer.del_local_ckpt_after_load
             )
-
-    def _balance_batch(self, batch: DataProto, metrics, logging_prefix="global_seqlen"):
-        """Reorder the data on single controller such that each dp rank gets similar total tokens"""
-        attention_mask = batch.batch["attention_mask"]
-        batch_size = attention_mask.shape[0]
-        global_seqlen_lst = batch.batch["attention_mask"].view(batch_size, -1).sum(-1).tolist()  # (train_batch_size,)
-        world_size = self.actor_rollout_wg.world_size
-        global_partition_lst = get_seqlen_balanced_partitions(
-            global_seqlen_lst, k_partitions=world_size, equal_size=True
-        )
-        # reorder based on index. The data will be automatically equally partitioned by dispatch function
-        global_idx = torch.tensor([j for partition in global_partition_lst for j in partition])
-        batch.reorder(global_idx)
-        global_balance_stats = log_seqlen_unbalance(
-            seqlen_list=global_seqlen_lst, partitions=global_partition_lst, prefix=logging_prefix
-        )
-        metrics.update(global_balance_stats)
 
     def fit(self):
         """
