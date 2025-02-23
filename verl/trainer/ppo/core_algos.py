@@ -19,6 +19,7 @@ implement PPO
 """
 
 from collections import defaultdict
+from typing import Tuple
 
 import numpy as np
 import torch
@@ -233,7 +234,9 @@ def compute_rewards(token_level_scores, old_log_prob, ref_log_prob, kl_ratio):
     return token_level_scores - kl * kl_ratio
 
 
-def compute_policy_loss(old_log_prob, log_prob, advantages, eos_mask, cliprange):
+def compute_policy_loss(
+    old_log_prob, log_prob, advantages, eos_mask, cliprange
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Adapted from https://github.com/huggingface/trl/blob/main/trl/trainer/ppo_trainer.py#L1122
 
     Args:
@@ -312,7 +315,7 @@ def compute_value_loss(vpreds, returns, values, eos_mask, cliprange_value):
     return vf_loss, vf_clipfrac
 
 
-def kl_penalty(logprob: torch.FloatTensor, ref_logprob: torch.FloatTensor, kl_penalty) -> torch.FloatTensor:
+def kl_penalty(logprob: torch.FloatTensor, ref_logprob: torch.FloatTensor, kl_penalty) -> torch.Tensor:
     """Compute KL divergence given logprob and ref_logprob.
     Copied from https://github.com/huggingface/trl/blob/main/trl/trainer/ppo_trainer.py#L1104
 

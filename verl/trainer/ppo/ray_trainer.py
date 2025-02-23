@@ -754,28 +754,16 @@ class RayPPOTrainer:
         )
         actor_local_path = os.path.join(local_global_step_folder, "actor")
 
-        actor_remote_path = (
-            None
-            if self.config.trainer.default_hdfs_dir is None
-            else os.path.join(self.config.trainer.default_hdfs_dir, f"global_step_{self.global_steps}", "actor")
-        )
         self.actor_rollout_wg.save_checkpoint(
             actor_local_path,
-            actor_remote_path,
             self.global_steps,
             remove_previous_ckpt=self.config.trainer.remove_previous_ckpt_in_save,
         )
 
         if self.use_critic:
             critic_local_path = os.path.join(local_global_step_folder, "critic")
-            critic_remote_path = (
-                None
-                if self.config.trainer.default_hdfs_dir is None
-                else os.path.join(self.config.trainer.default_hdfs_dir, f"global_step_{self.global_steps}", "critic")
-            )
             self.critic_wg.save_checkpoint(
                 critic_local_path,
-                critic_remote_path,
                 self.global_steps,
                 remove_previous_ckpt=self.config.trainer.remove_previous_ckpt_in_save,
             )
@@ -791,15 +779,11 @@ class RayPPOTrainer:
         if self.config.trainer.resume_mode == "disable":
             return 0
 
-        # load from hdfs
-        if self.config.trainer.default_hdfs_dir is not None:
-            NotImplementedError("load from hdfs is not implemented yet")
-        else:
-            checkpoint_folder = self.config.trainer.default_local_dir  # TODO: check path
-            if not os.path.isabs(checkpoint_folder):
-                working_dir = os.getcwd()
-                checkpoint_folder = os.path.join(working_dir, checkpoint_folder)
-            global_step_folder = find_latest_ckpt_path(checkpoint_folder)  # None if no latest
+        checkpoint_folder = self.config.trainer.default_local_dir  # TODO: check path
+        if not os.path.isabs(checkpoint_folder):
+            working_dir = os.getcwd()
+            checkpoint_folder = os.path.join(working_dir, checkpoint_folder)
+        global_step_folder = find_latest_ckpt_path(checkpoint_folder)  # None if no latest
 
         # find global_step_folder
         if self.config.trainer.resume_mode == "auto":

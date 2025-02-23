@@ -12,13 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-Single Process Actor
+Implement Actor
 """
 
-from typing import Tuple
+import os
+from collections import defaultdict
+from typing import Any, Dict, Optional, Tuple
 
 import torch
-from flash_attn.bert_padding import index_first_axis, pad_input, rearrange, unpad_input
 from torch import nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from tqdm import tqdm
@@ -28,8 +29,8 @@ from verl import DataProto
 from verl.trainer.ppo import core_algos
 from verl.utils.py_functional import append_to_dict
 from verl.utils.torch_functional import logprobs_from_logits, masked_mean
-from verl.utils.ulysses import gather_outpus_and_unpad, ulysses_pad_and_slice_inputs
-from verl.workers.actor import BasePPOActor
+from verl.workers.actor.base import BasePPOActor
+from verl.workers.actor.config import ActorConfig
 
 
 __all__ = ["DataParallelPPOActor"]
@@ -38,125 +39,70 @@ __all__ = ["DataParallelPPOActor"]
 class DataParallelPPOActor(BasePPOActor):
     def __init__(
         self,
-        config,
+        config: ActorConfig,
         actor_module: nn.Module,
-        actor_optimizer: torch.optim.Optimizer = None,
+        actor_optimizer: Optional[torch.optim.Optimizer] = None,
     ):
-        """When optimizer is None, it is Reference Policy"""
+        """
+        When optimizer is None, it is Reference Policy
+        """
         super().__init__(config)
+        self.rank = int(os.getenv("RANK", "0"))
         self.actor_module = actor_module
         self.actor_optimizer = actor_optimizer
-        self.use_remove_padding = self.config.get("use_remove_padding", False)
-        print(f"Actor use_remove_padding={self.use_remove_padding}")
-        self.ulysses_sequence_parallel_size = self.config.ulysses_sequence_parallel_size
-        self.use_ulysses_sp = self.ulysses_sequence_parallel_size > 1
-
         self.compute_entropy_from_logits = torch.compile(verl_F.entropy_from_logits, dynamic=True)
 
-    def _forward_micro_batch(self, micro_batch, temperature) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _forward_micro_batch(
+        self, micro_batch: Dict[str, torch.Tensor], temperature: float
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Returns:
             entropy: # (bs, response_len)
             log_probs: # (bs, response_len)
         """
-        response_length = micro_batch["responses"].size(-1)
-        extra_inputs = {}
-        if "pixel_values" in micro_batch:
-            extra_inputs["pixel_values"] = torch.cat(micro_batch["pixel_values"], dim=0)
-            extra_inputs["image_grid_thw"] = torch.cat(micro_batch["image_grid_thw"], dim=0)
-
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             input_ids = micro_batch["input_ids"]
-            batch_size, seqlen = input_ids.shape
             attention_mask = micro_batch["attention_mask"]
             position_ids = micro_batch["position_ids"]
+            responses = micro_batch["responses"]
+            response_length = responses.size(-1)
             if position_ids.dim() == 3:  # qwen2vl mrope
-                position_ids = position_ids.transpose(0, 1)
+                position_ids = position_ids.transpose(0, 1)  # (bsz, 3, seqlen) -> (3, bsz, seqlen)
 
-            if self.use_remove_padding:
-                input_ids_rmpad, indices, *_ = unpad_input(
-                    input_ids.unsqueeze(-1), attention_mask
-                )  # input_ids_rmpad (total_nnz, ...)
-                input_ids_rmpad = input_ids_rmpad.transpose(0, 1)  # (1, total_nnz)
+            vision_inputs = {}
+            if "pixel_values" in micro_batch:
+                vision_inputs["pixel_values"] = torch.cat(micro_batch["pixel_values"], dim=0)
+                vision_inputs["image_grid_thw"] = torch.cat(micro_batch["image_grid_thw"], dim=0)
 
-                # unpad the position_ids to align the rotary
-                position_ids_rmpad = index_first_axis(
-                    rearrange(position_ids.unsqueeze(-1), "b s ... -> (b s) ..."), indices
-                ).transpose(0, 1)
-
-                # for compute the log_prob
-                input_ids_rmpad_rolled = torch.roll(input_ids_rmpad, shifts=-1, dims=1)  # (1, total_nnz)
-
-                # pad and slice the inputs if sp > 1
-                if self.use_ulysses_sp:
-                    input_ids_rmpad, position_ids_rmpad, pad_size = ulysses_pad_and_slice_inputs(
-                        input_ids_rmpad, position_ids_rmpad, sp_size=self.ulysses_sequence_parallel_size
-                    )
-                    input_ids_rmpad_rolled, _, _ = ulysses_pad_and_slice_inputs(
-                        input_ids_rmpad_rolled, None, self.ulysses_sequence_parallel_size
-                    )
-
-                input_ids_rmpad_rolled = input_ids_rmpad_rolled.squeeze(0)  # ((total_nnz / sp) + pad)
-
-                # only pass input_ids and position_ids to enable flash_attn_varlen
-                output = self.actor_module(
-                    input_ids=input_ids_rmpad, attention_mask=None, position_ids=position_ids_rmpad, use_cache=False
-                )  # prevent model thinks we are generating
-                logits_rmpad = output.logits.squeeze(0)  # (total_nnz, vocab_size)
-
-                logits_rmpad.div_(temperature)
-
-                # compute entropy
-                entropy_rmpad = self.compute_entropy_from_logits(logits_rmpad)  # ((total_nnz / sp) + pad)
-
-                # if use_sp: ((total_nnz / sp) + pad) ; if not use_sp: (batch, seqlen)
-                log_probs = logprobs_from_logits(logits=logits_rmpad, labels=input_ids_rmpad_rolled)
-
-                # gather log_prob if sp > 1
-                if self.use_ulysses_sp:
-                    # gather and unpad for the ulysses sp
-                    log_probs = gather_outpus_and_unpad(log_probs, gather_dim=0, unpad_dim=0, padding_size=pad_size)
-                    entropy_rmpad = gather_outpus_and_unpad(
-                        entropy_rmpad, gather_dim=0, unpad_dim=0, padding_size=pad_size
-                    )
-                # pad back to (bsz, seqlen)
-                full_entropy = pad_input(
-                    hidden_states=entropy_rmpad.unsqueeze(-1), indices=indices, batch=batch_size, seqlen=seqlen
-                )
-                full_log_probs = pad_input(
-                    hidden_states=log_probs.unsqueeze(-1), indices=indices, batch=batch_size, seqlen=seqlen
-                )
-
-                # only return response part:
-                entropy = full_entropy.squeeze(-1)[:, -response_length - 1 : -1]  # (bsz, response_length)
-                log_probs = full_log_probs.squeeze(-1)[:, -response_length - 1 : -1]  # (bsz, response_length)
-
-            else:  # not using rmpad and no ulysses sp
+            if self.config.use_remove_padding:
+                # TODO (yaowei): preprocess data for padding_free and ulysses
+                raise NotImplementedError
+            else:
                 output = self.actor_module(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
                     position_ids=position_ids,
-                    **extra_inputs,
+                    **vision_inputs,
                     use_cache=False,
-                )  # prevent model thinks we are generating
-                logits = output.logits
+                )
+                logits: torch.Tensor = output.logits
                 logits.div_(temperature)
                 logits = logits[:, -response_length - 1 : -1, :]  # (bsz, response_length, vocab_size)
-                log_probs = logprobs_from_logits(logits, micro_batch["responses"])
+                log_probs = logprobs_from_logits(logits, responses)  # (bsz, response_length)
                 entropy = verl_F.entropy_from_logits(logits)  # (bsz, response_length)
 
             return entropy, log_probs
 
-    def _optimizer_step(self):
-        assert self.config.grad_clip is not None
-
+    def _optimizer_step(self) -> torch.Tensor:
         if isinstance(self.actor_module, FSDP):
-            grad_norm = self.actor_module.clip_grad_norm_(max_norm=self.config.grad_clip)
+            grad_norm = self.actor_module.clip_grad_norm_(self.config.max_grad_norm)
         else:
-            grad_norm = torch.nn.utils.clip_grad_norm_(self.actor_module.parameters(), max_norm=self.config.grad_clip)
+            grad_norm = nn.utils.clip_grad_norm_(self.actor_module.parameters(), max_norm=self.config.max_grad_norm)
+
         self.actor_optimizer.step()
         return grad_norm
 
+    @torch.no_grad()
     def compute_log_prob(self, data: DataProto) -> torch.Tensor:
         """Compute the log probability of the responses given input_ids, attention_mask and position_ids
 
@@ -175,35 +121,28 @@ class DataParallelPPOActor(BasePPOActor):
         Returns:
             torch.Tensor: the log_prob tensor
         """
-        # set to eval
         self.actor_module.eval()
 
         micro_batch_size = data.meta_info["micro_batch_size"]
-        temperature = data.meta_info["temperature"]  # temperature must be in the data.meta_info to avoid slient error
-        # use_dynamic_bsz = data.meta_info["use_dynamic_bsz"]
+        temperature = data.meta_info["temperature"]
 
-        num_micro_batches = data.batch.batch_size[0] // micro_batch_size
         select_keys = ["responses", "input_ids", "attention_mask", "position_ids"]
         if "pixel_values" in data.non_tensor_batch.keys():
             non_tensor_select_keys = ["pixel_values", "image_grid_thw"]
-            micro_batches = data.select(select_keys, non_tensor_select_keys).chunk(num_micro_batches)
         else:
-            micro_batches = data.select(select_keys).chunk(num_micro_batches)
+            non_tensor_select_keys = None
 
+        micro_batches = data.select(select_keys, non_tensor_select_keys).split(micro_batch_size)
         log_probs_lst = []
-        for micro_batch in tqdm(micro_batches, desc="Compute log probs"):
+        for micro_batch in tqdm(micro_batches, desc="Compute log probs", disable=(self.rank != 0)):
             model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
-            with torch.no_grad():
-                _, log_probs = self._forward_micro_batch(model_inputs, temperature=temperature)
-
+            _, log_probs = self._forward_micro_batch(model_inputs, temperature=temperature)
             log_probs_lst.append(log_probs)
 
         log_probs = torch.concat(log_probs_lst, dim=0)
-
         return log_probs
 
-    def update_policy(self, data: DataProto):
-        # make sure we are in training mode
+    def update_policy(self, data: DataProto) -> Dict[str, Any]:
         self.actor_module.train()
 
         temperature = data.meta_info["temperature"]  # temperature must be in the data.meta_info to avoid slient error
@@ -212,21 +151,19 @@ class DataParallelPPOActor(BasePPOActor):
         if self.config.use_kl_loss:
             select_keys.append("ref_log_prob")
 
-        # Split to make minibatch iterator for updating the actor
-        # See PPO paper for details. https://arxiv.org/abs/1707.06347
-        num_mini_batches = data.batch.batch_size[0] // self.config.ppo_mini_batch_size
         if "pixel_values" in data.non_tensor_batch.keys():
             non_tensor_select_keys = ["pixel_values", "image_grid_thw"]
-            mini_batches = data.select(select_keys, non_tensor_select_keys).chunk(num_mini_batches)
         else:
-            mini_batches = data.select(select_keys).chunk(num_mini_batches)
+            non_tensor_select_keys = None
 
-        metrics = {}
-        for mini_batch in tqdm(mini_batches, desc="Update policy"):
-            self.gradient_accumulation = self.config.ppo_mini_batch_size // self.config.ppo_micro_batch_size_per_gpu
-            # split batch into micro_batches
-            num_micro_batches = mini_batch.batch.batch_size[0] // self.config.ppo_micro_batch_size_per_gpu
-            micro_batches = mini_batch.chunk(num_micro_batches)
+        # Split to make minibatch iterator for updating the actor
+        # See PPO paper for details. https://arxiv.org/abs/1707.06347
+        mini_batches = data.select(select_keys, non_tensor_select_keys).split(self.config.mini_batch_size_per_device)
+
+        metrics = defaultdict(list)
+        for mini_batch in tqdm(mini_batches, desc="Update policy", disable=(self.rank != 0)):
+            gradient_accumulation = self.config.mini_batch_size_per_device // self.config.micro_batch_size_per_device
+            micro_batches = mini_batch.split(self.config.micro_batch_size_per_device)
 
             self.actor_optimizer.zero_grad()
             for micro_batch in micro_batches:
@@ -261,29 +198,28 @@ class DataParallelPPOActor(BasePPOActor):
                     ref_log_prob = model_inputs["ref_log_prob"]
                     # compute kl loss
                     kld = core_algos.kl_penalty(
-                        logprob=log_prob, ref_logprob=ref_log_prob, kl_penalty=self.config.kl_loss_type
+                        logprob=log_prob,
+                        ref_logprob=ref_log_prob,
+                        kl_penalty=self.config.kl_loss_type,
                     )
                     kl_loss = masked_mean(kld, response_mask)
-
                     policy_loss = policy_loss + kl_loss * self.config.kl_loss_coef
                     metrics["actor/kl_loss"] = kl_loss.detach().item()
                     metrics["actor/kl_coef"] = self.config.kl_loss_coef
 
-                loss = policy_loss / self.gradient_accumulation
-
+                loss = policy_loss / gradient_accumulation
                 loss.backward()
 
-                micro_batch_metrics = {
+                batch_metrics = {
                     "actor/entropy_loss": entropy_loss.detach().item(),
                     "actor/pg_loss": pg_loss.detach().item(),
                     "actor/pg_clipfrac": pg_clipfrac.detach().item(),
                     "actor/ppo_kl": ppo_kl.detach().item(),
                 }
-                append_to_dict(metrics, micro_batch_metrics)
+                append_to_dict(metrics, batch_metrics)
 
             grad_norm = self._optimizer_step()
-            mini_batch_metrics = {"actor/grad_norm": grad_norm.detach().item()}
-            append_to_dict(metrics, mini_batch_metrics)
+            append_to_dict(metrics, {"actor/grad_norm": grad_norm.detach().item()})
 
         self.actor_optimizer.zero_grad()
         return metrics

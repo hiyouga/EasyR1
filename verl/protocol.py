@@ -26,8 +26,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import numpy as np
 import ray
 import torch
+import torch.distributed as dist
 from numpy.typing import NDArray
 from tensordict import TensorDict
+from torch.distributed import ProcessGroup
 from torch.utils.data import DataLoader
 
 from verl.utils.py_functional import union_two_dict
@@ -255,14 +257,13 @@ class DataProto:
     def from_single_dict(cls, data: Dict[str, Union[torch.Tensor, list, NDArray]], meta_info=None):
         tensors = {}
         non_tensors = {}
-
-        for key, val in data.items():
-            if isinstance(val, torch.Tensor):
-                tensors[key] = val
-            elif isinstance(val, (list, np.ndarray)):
-                non_tensors[key] = val
+        for key, value in data.items():
+            if isinstance(value, torch.Tensor):
+                tensors[key] = value
+            elif isinstance(value, (list, np.ndarray)):
+                non_tensors[key] = value
             else:
-                raise ValueError(f"Unsupported type in data {type(val)}")
+                raise ValueError(f"Unsupported type in data {type(value)}")
 
         return DataProto.from_dict(tensors=tensors, non_tensors=non_tensors, meta_info=meta_info)
 
@@ -498,6 +499,10 @@ class DataProto:
 
         return output
 
+    def split(self, split_size: int) -> List["DataProto"]:
+        chunks = len(self) // split_size
+        return self.chunk(chunks)
+
     @staticmethod
     def concat(data: List["DataProto"]) -> "DataProto":
         """Concat a list of DataProto. The batch is concatenated among dim=0.
@@ -579,6 +584,39 @@ class DataProto:
             non_tensor_batch=repeated_non_tensor_batch,
             meta_info=self.meta_info,
         )
+
+    def broadcast(self, src: int, group: Optional[ProcessGroup] = None):
+        for key in self.batch.sorted_keys:
+            dist.broadcast(self.batch[key], src=src, group=group, async_op=False)
+
+        object_list = [self.non_tensor_batch]
+        dist.broadcast_object_list(object_list, src=src, group=group)
+        self.non_tensor_batch = object_list[0]
+
+    def all_gather(self, group: Optional[ProcessGroup] = None):
+        world_size = dist.get_world_size(group)
+        output = {}
+        for key in self.batch.sorted_keys:
+            value = self.batch[key].contiguous()
+            output[key] = [torch.empty_like(value) for _ in range(world_size)]
+            dist.all_gather(output, value, group=group, async_op=False)
+            output[key] = torch.cat(output, dim=0)
+
+        self.batch = TensorDict(output, batch_size=self.batch.batch_size[0] * world_size)
+
+        # all gather non_tensor_batch
+        all_non_tensor_batch = [None for _ in range(world_size)]
+        dist.all_gather_object(all_non_tensor_batch, self.non_tensor_batch, group=group)
+        non_tensor_batch = defaultdict(list)
+        for key, value in self.non_tensor_batch.items():
+            if isinstance(value, np.ndarray):
+                non_tensor_batch[key] = np.concatenate([batch[key] for batch in all_non_tensor_batch])
+            else:
+                for batch in all_non_tensor_batch:
+                    non_tensor_batch[key].extend(batch[key])
+
+        self.non_tensor_batch = non_tensor_batch
+        self.check_consistency()
 
 
 @dataclass

@@ -2,15 +2,15 @@ set -x
 
 export VLLM_ATTENTION_BACKEND=XFORMERS
 
-MODEL_PATH=Qwen/Qwen2.5-VL-7B-Instruct  # replace it with your local file path
+MODEL_PATH=/mnt/hdfs/veomni/models/qwen2_5vl-7b-instruct/  # replace it with your local file path
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
     data.train_files=hiyouga/geometry3k@train \
     data.val_files=hiyouga/geometry3k@test \
     data.prompt_key=problem \
-    data.train_batch_size=1024 \
-    data.val_batch_size=1024 \
+    data.train_batch_size=512 \
+    data.val_batch_size=512 \
     data.max_prompt_length=4096 \
     data.max_response_length=2048 \
     actor_rollout_ref.model.path=${MODEL_PATH} \
@@ -22,12 +22,12 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.kl_loss_coef=0.001 \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
-    actor_rollout_ref.actor.fsdp_config.param_offload=False \
-    actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
+    actor_rollout_ref.actor.fsdp_config.param_offload=True \
+    actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=4 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
     actor_rollout_ref.rollout.name=vllm \
-    actor_rollout_ref.rollout.gpu_memory_utilization=0.6 \
+    actor_rollout_ref.rollout.gpu_memory_utilization=0.7 \
     actor_rollout_ref.rollout.n=5 \
     actor_rollout_ref.rollout.enforce_eager=False \
     actor_rollout_ref.rollout.free_cache_engine=False \

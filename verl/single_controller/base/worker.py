@@ -124,8 +124,6 @@ class Worker(WorkerHelper):
 
     def __init__(self, cuda_visible_devices=None) -> None:
         # construct a meta from envrionment variable. Note that the import must be inside the class because it is executed remotely
-        import os
-
         world_size = int(os.environ["WORLD_SIZE"])
         rank = int(os.environ["RANK"])
         self._rank = rank
@@ -171,10 +169,12 @@ class Worker(WorkerHelper):
         return self._master_addr, self._master_port
 
     def get_cuda_visible_devices(self):
-        import os
-
         cuda_visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES", "not set")
         return cuda_visible_devices
+
+    def print_rank0(self, *args, **kwargs):
+        if self.rank == 0:
+            print(*args, **kwargs)
 
     @property
     def world_size(self):

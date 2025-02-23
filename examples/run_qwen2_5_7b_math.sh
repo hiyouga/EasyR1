@@ -2,15 +2,15 @@ set -x
 
 export VLLM_ATTENTION_BACKEND=XFORMERS
 
-MODEL_PATH=Qwen/Qwen2.5-7B-Instruct  # replace it with your local file path
+MODEL_PATH=/mnt/hdfs/veomni/models/qwen2_5-7b-instruct/  # replace it with your local file path
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
-    data.train_files=hiyouga/math12k@train \
+    data.train_files=hiyouga/math12k@test \
     data.val_files=hiyouga/math12k@test \
     data.prompt_key=problem \
-    data.train_batch_size=1024 \
-    data.val_batch_size=1024 \
+    data.train_batch_size=128 \
+    data.val_batch_size=128 \
     data.max_prompt_length=2048 \
     data.max_response_length=2048 \
     actor_rollout_ref.model.path=${MODEL_PATH} \

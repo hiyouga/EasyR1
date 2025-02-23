@@ -12,26 +12,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
 import torch
+from transformers import PreTrainedTokenizer
 
 from verl import DataProto
 from verl.utils.reward_score import math_compute_score
 
 
 class CustomRewardManager:
-    def __init__(self, tokenizer, num_examine, compute_score) -> None:
+    def __init__(self, tokenizer: PreTrainedTokenizer, num_examine: int, compute_score: str):
         self.tokenizer = tokenizer
-        self.num_examine = num_examine  # the number of batches of decoded responses to print to the console
+        self.num_examine = num_examine
         if compute_score == "math":
             self.compute_score = math_compute_score
         else:
             raise NotImplementedError()
 
-    def __call__(self, data: DataProto):
-        """We will expand this function gradually based on the available datasets"""
-
+    def __call__(self, data: DataProto) -> torch.Tensor:
         reward_tensor = torch.zeros_like(data.batch["responses"], dtype=torch.float32)
-
         already_print = 0
 
         for i in range(len(data)):
@@ -49,7 +48,7 @@ class CustomRewardManager:
 
             # decode
             sequences = torch.cat((valid_prompt_ids, valid_response_ids))
-            sequences_str = self.tokenizer.decode(sequences)
+            sequences_str = self.tokenizer.decode(sequences, skip_special_tokens=True)
 
             ground_truth = data_item.non_tensor_batch["answer"]
 

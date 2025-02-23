@@ -207,8 +207,7 @@ class ActorRolloutRefWorker(Worker):
         }
         override_config_kwargs.update(override_model_config)
         update_model_config(actor_model_config, override_config_kwargs=override_config_kwargs)
-        if self.rank == 0:
-            print(f"Model config after override: {actor_model_config}")
+        self.print_rank0(f"Model config after override: {actor_model_config}")
 
         # NOTE(fix me): tie_word_embedding causes meta_tensor init to hang
         init_context = get_init_weight_context_manager(use_meta_tensor=not actor_model_config.tie_word_embeddings)
@@ -259,7 +258,8 @@ class ActorRolloutRefWorker(Worker):
             # TODO(zhangchi.usc1992, shengguangming) fix me. Current, auto_wrap_policy causes HFRollout to hang in Gemma
             auto_wrap_policy = None
 
-        print(f"wrap_policy: {auto_wrap_policy}")
+        if self.rank == 0:
+            print(f"wrap_policy: {auto_wrap_policy}")
 
         fsdp_mesh = self.device_mesh
         sharding_strategy = get_sharding_strategy(fsdp_mesh)
@@ -297,17 +297,15 @@ class ActorRolloutRefWorker(Worker):
             num_warmup_steps_ratio = optim_config.get("lr_warmup_steps_ratio", 0.0)
             num_warmup_steps = int(num_warmup_steps_ratio * total_steps)
 
-            print(f"Total steps: {total_steps}, num_warmup_steps: {num_warmup_steps}")
-
             actor_lr_scheduler = get_constant_schedule_with_warmup(
                 optimizer=actor_optimizer, num_warmup_steps=num_warmup_steps
             )
+            self.print_rank0(f"Total steps: {total_steps}, num_warmup_steps: {num_warmup_steps}")
         else:
             actor_optimizer = None
             actor_lr_scheduler = None
 
         log_gpu_memory_usage("After actor optimizer init", logger=logger)
-
         return actor_module_fsdp, actor_optimizer, actor_lr_scheduler, actor_model_config
 
     def _build_rollout(self):
@@ -323,18 +321,12 @@ class ActorRolloutRefWorker(Worker):
             model_path=self.config.model.path,
             config=self.config.rollout,
             tokenizer=self.tokenizer,
-            model_hf_config=self.actor_model_config,
-            device_mesh=rollout_device_mesh,
         )
         log_gpu_memory_usage("After building vllm rollout", logger=None)
-        if dist.get_world_size() == 1:
-            self.config.rollout.load_format = "dummy_hf"
 
         rollout_sharding_manager = FSDPVLLMShardingManager(
             module=self.actor_module_fsdp,
             inference_engine=rollout.inference_engine,
-            model_config=self.actor_model_config,
-            full_params="hf" in self.config.rollout.load_format,
             device_mesh=rollout_device_mesh,
         )
         log_gpu_memory_usage("After building sharding manager", logger=None)
@@ -375,6 +367,7 @@ class ActorRolloutRefWorker(Worker):
             if self._is_offload_optimizer:
                 offload_fsdp_optimizer(optimizer=self.actor_optimizer)
                 log_gpu_memory_usage("After offload actor optimizer during init", logger=logger)
+
         # load from checkpoint
         if self._is_actor:
             OmegaConf.set_struct(self.config.actor, True)
@@ -417,7 +410,6 @@ class ActorRolloutRefWorker(Worker):
     def update_actor(self, data: DataProto):
         assert self._is_actor
 
-        data = data.to("cuda")
         if self._is_offload_param:
             load_fsdp_model_to_gpu(self.actor_module_fsdp)
 
@@ -461,7 +453,6 @@ class ActorRolloutRefWorker(Worker):
     def generate_sequences(self, prompts: DataProto):
         assert self._is_rollout
 
-        prompts = prompts.to("cuda")
         if self._is_offload_param:
             load_fsdp_model_to_gpu(self.actor_module_fsdp)
 
@@ -504,7 +495,6 @@ class ActorRolloutRefWorker(Worker):
         if self._is_offload_param:
             load_fsdp_model_to_gpu(self.actor_module_fsdp)
 
-        data = data.to("cuda")
         # we should always recompute old_log_probs when it is HybridEngine
         data.meta_info["micro_batch_size"] = self.config.rollout.log_prob_micro_batch_size_per_gpu
         data.meta_info["max_token_len"] = self.config.rollout.log_prob_max_token_len_per_gpu
@@ -538,8 +528,6 @@ class ActorRolloutRefWorker(Worker):
     def compute_ref_log_prob(self, data: DataProto):
         assert self._is_ref
 
-        data = data.to("cuda")
-
         micro_batch_size = self.config.ref.log_prob_micro_batch_size_per_gpu
         data.meta_info["micro_batch_size"] = micro_batch_size
         data.meta_info["temperature"] = self.config.rollout.temperature
@@ -562,7 +550,7 @@ class ActorRolloutRefWorker(Worker):
         return output
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
-    def save_checkpoint(self, local_path, hdfs_path=None, global_step=0, remove_previous_ckpt=False):
+    def save_checkpoint(self, local_path, global_step=0, remove_previous_ckpt=False):
         # only support save and load ckpt for actor
         assert self._is_actor
 
@@ -571,7 +559,6 @@ class ActorRolloutRefWorker(Worker):
 
         self.checkpoint_manager.save_checkpoint(
             local_path=local_path,
-            hdfs_path=hdfs_path,
             global_step=global_step,
             remove_previous_ckpt=remove_previous_ckpt,
         )
@@ -827,13 +814,12 @@ class CriticWorker(Worker):
         return output
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
-    def save_checkpoint(self, local_path, hdfs_path=None, global_step=0, remove_previous_ckpt=False):
+    def save_checkpoint(self, local_path, global_step=0, remove_previous_ckpt=False):
         if self._is_offload_param:
             load_fsdp_model_to_gpu(self.critic_module)
 
         self.checkpoint_manager.save_checkpoint(
             local_path=local_path,
-            hdfs_path=hdfs_path,
             global_step=global_step,
             remove_previous_ckpt=remove_previous_ckpt,
         )

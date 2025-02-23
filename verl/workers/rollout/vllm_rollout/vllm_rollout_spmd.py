@@ -19,49 +19,44 @@ When working with FSDP:
 """
 
 from contextlib import contextmanager
-from typing import Any, List
+from typing import Any, List, Union
 
 import torch
 import torch.distributed
-from omegaconf import DictConfig
 from tensordict import TensorDict
+from transformers import PreTrainedTokenizer
 from vllm import LLM, RequestOutput, SamplingParams
 
 from verl import DataProto
 from verl.utils.torch_functional import get_eos_mask, pad_2d_list_to_length
 from verl.workers.rollout.base import BaseRollout
+from verl.workers.rollout.config import RolloutConfig
 
 
-def _repeat_interleave(features: List[Any], repeats: int) -> List[Any]:
-    return [feature for feature in features for _ in range(repeats)]
+def _repeat_interleave(features: Union[torch.Tensor, List[Any]], repeats: int) -> Union[torch.Tensor, List[Any]]:
+    if isinstance(features, torch.Tensor):
+        features = features.repeat_interleave(repeats, dim=0)
+    else:
+        features = [feature for feature in features for _ in range(repeats)]
 
 
 class vLLMRollout(BaseRollout):
-    def __init__(self, model_path: str, config: DictConfig, tokenizer, model_hf_config, **kwargs):
+    def __init__(self, model_path: str, config: RolloutConfig, tokenizer: PreTrainedTokenizer):
         """A vLLM rollout. It requires the module is supported by the vllm.
 
         Args:
             module: module here follows huggingface APIs
             config: DictConfig
             tokenizer: the task/model tokenizer
-            model_hf_config: the huggingface config to initiallize the generating model in vllm
         """
         super().__init__()
         self.config = config
         self.pad_token_id = tokenizer.pad_token_id
-        assert not (not config.enforce_eager and config.free_cache_engine), (
-            "disable CUDA graph (enforce_eager=False) if free cache engine"
-        )
+        if config.tensor_parallel_size > torch.distributed.get_world_size():
+            raise ValueError("Tensor parallelism size should be less than world size.")
 
-        tensor_parallel_size = self.config.get("tensor_model_parallel_size", 1)
-        assert tensor_parallel_size <= torch.distributed.get_world_size(), (
-            "tensor parallel size should be less than or equal to the world size"
-        )
-        max_num_batched_tokens = self.config.get("max_num_batched_tokens", 8192)
-
-        assert model_hf_config.max_position_embeddings >= config.prompt_length + config.response_length, (
-            "model context length should be greater than total sequence length"
-        )
+        if not config.enforce_eager and config.free_cache_engine:
+            raise ValueError("CUDA graph should be disabled when `free_cache_engine` is True.")
 
         vllm_init_kwargs = {}
         if config.limit_images > 0:
@@ -69,17 +64,17 @@ class vLLMRollout(BaseRollout):
 
         self.inference_engine = LLM(
             model=model_path,
-            enable_sleep_mode=True,
-            tensor_parallel_size=tensor_parallel_size,
-            distributed_executor_backend="external_launcher",
-            dtype=config.dtype,
-            enforce_eager=config.enforce_eager,
-            gpu_memory_utilization=config.gpu_memory_utilization,
-            disable_custom_all_reduce=True,
             skip_tokenizer_init=False,
+            tensor_parallel_size=config.tensor_parallel_size,
+            dtype=config.dtype,
+            gpu_memory_utilization=config.gpu_memory_utilization,
+            enforce_eager=config.enforce_eager,
             max_model_len=config.prompt_length + config.response_length,
+            max_num_batched_tokens=config.max_num_batched_tokens,
+            enable_sleep_mode=True,
+            distributed_executor_backend="external_launcher",
+            disable_custom_all_reduce=True,
             disable_log_stats=config.disable_log_stats,
-            max_num_batched_tokens=max_num_batched_tokens,
             enable_chunked_prefill=config.enable_chunked_prefill,
             **vllm_init_kwargs,
         )
@@ -87,15 +82,14 @@ class vLLMRollout(BaseRollout):
         # Offload vllm model to reduce peak memory usage
         self.inference_engine.sleep(level=1)
 
-        kwargs = {"n": 1, "max_tokens": config.response_length, "detokenize": False}
+        sampling_kwargs = {"max_tokens": config.response_length, "detokenize": False}
+        default_sampling_params = SamplingParams()
+        for key in config.to_dict().keys():
+            if hasattr(default_sampling_params, key):
+                sampling_kwargs[key] = getattr(config, key)
 
-        # supporting adding any sampling params from the config file
-        for k in config.keys():
-            if hasattr(SamplingParams(), str(k)):
-                kwargs[k] = config.get(k)
-
-        print(f"Sampling params: {kwargs}.")
-        self.sampling_params = SamplingParams(**kwargs)
+        print(f"Sampling params: {sampling_kwargs}.")
+        self.sampling_params = SamplingParams(**sampling_kwargs)
 
     @contextmanager
     def update_sampling_params(self, **kwargs):
@@ -114,8 +108,7 @@ class vLLMRollout(BaseRollout):
             setattr(self.sampling_params, key, value)
 
     @torch.no_grad()
-    def generate_sequences(self, prompts, **kwargs) -> DataProto:
-        # rebuild vllm cache engine
+    def generate_sequences(self, prompts: DataProto, **kwargs) -> DataProto:
         # left-padded attention_mask
         input_ids: torch.Tensor = prompts.batch["input_ids"]  # (bs, prompt_length)
         attention_mask: torch.Tensor = prompts.batch["attention_mask"]
@@ -126,16 +119,17 @@ class vLLMRollout(BaseRollout):
         do_sample = prompts.meta_info.get("do_sample", True)
         if not do_sample:
             kwargs = {
-                "best_of": 1,
+                "n": 1,
+                "temperature": 0.0,
                 "top_p": 1.0,
                 "top_k": -1,
                 "min_p": 0.0,
-                "temperature": 0,
-                "n": 1,  # if greedy, only 1 response
             }
 
         non_tensor_batch = prompts.non_tensor_batch
-        assert batch_size == len(non_tensor_batch["raw_prompt_ids"]), "vllm sharding manager is not work properly."
+        if batch_size != len(non_tensor_batch["raw_prompt_ids"]):
+            raise RuntimeError("vllm sharding manager is not work properly.")
+
         if "images" in non_tensor_batch:
             vllm_inputs = []
             for raw_prompt_ids, images in zip(non_tensor_batch["raw_prompt_ids"], non_tensor_batch["images"]):
@@ -161,15 +155,15 @@ class vLLMRollout(BaseRollout):
         ).to(input_ids.device)
 
         if self.config.n > 1 and do_sample:
-            input_ids = input_ids.repeat_interleave(self.config.n, dim=0)
-            attention_mask = attention_mask.repeat_interleave(self.config.n, dim=0)
-            position_ids = position_ids.repeat_interleave(self.config.n, dim=0)
             batch_size = batch_size * self.config.n
+            input_ids = _repeat_interleave(input_ids, self.config.n)
+            attention_mask = _repeat_interleave(attention_mask, self.config.n)
+            position_ids = _repeat_interleave(position_ids, self.config.n)
             if "pixel_values" in non_tensor_batch.keys():
-                non_tensor_batch = {
-                    "pixel_values": _repeat_interleave(non_tensor_batch["pixel_values"], self.config.n),
-                    "image_grid_thw": _repeat_interleave(non_tensor_batch["image_grid_thw"], self.config.n),
-                }
+                non_tensor_batch["pixel_values"] = _repeat_interleave(non_tensor_batch["pixel_values"], self.config.n)
+                non_tensor_batch["image_grid_thw"] = _repeat_interleave(
+                    non_tensor_batch["image_grid_thw"], self.config.n
+                )
 
         sequence_ids = torch.cat([input_ids, response_ids], dim=-1)
         response_length = response_ids.size(1)
@@ -199,5 +193,4 @@ class vLLMRollout(BaseRollout):
             },
             batch_size=batch_size,
         )
-
         return DataProto(batch=batch, non_tensor_batch=non_tensor_batch)

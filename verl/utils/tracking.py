@@ -16,6 +16,7 @@ A unified tracking interface that supports logging data to different backend
 """
 
 import dataclasses
+import os
 from enum import Enum
 from functools import partial
 from pathlib import Path
@@ -39,28 +40,27 @@ class Tracking:
         self.logger = {}
 
         if "tracking" in default_backend or "wandb" in default_backend:
-            import wandb
+            import wandb  # type: ignore
 
             wandb.init(project=project_name, name=experiment_name, config=config)
             self.logger["wandb"] = wandb
 
         if "mlflow" in default_backend:
-            import mlflow
+            import mlflow  # type: ignore
 
             mlflow.start_run(run_name=experiment_name)
             mlflow.log_params(_compute_mlflow_params_from_objects(config))
             self.logger["mlflow"] = _MlflowLoggingAdapter()
 
         if "swanlab" in default_backend:
-            import os
-
-            import swanlab
+            import swanlab  # type: ignore
 
             SWANLAB_API_KEY = os.environ.get("SWANLAB_API_KEY", None)
             SWANLAB_LOG_DIR = os.environ.get("SWANLAB_LOG_DIR", "swanlog")
             SWANLAB_MODE = os.environ.get("SWANLAB_MODE", "cloud")
             if SWANLAB_API_KEY:
                 swanlab.login(SWANLAB_API_KEY)  # NOTE: previous login information will be overwritten
+
             swanlab.init(
                 project=project_name,
                 experiment_name=experiment_name,
@@ -90,7 +90,7 @@ class Tracking:
 
 class _MlflowLoggingAdapter:
     def log(self, data, step):
-        import mlflow
+        import mlflow  # type: ignore
 
         mlflow.log_metrics(metrics=data, step=step)
 

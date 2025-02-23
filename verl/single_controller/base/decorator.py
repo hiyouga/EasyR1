@@ -17,7 +17,9 @@ from functools import wraps
 from types import FunctionType
 from typing import Dict, List, Tuple
 
-from verl.protocol import DataProtoFuture
+import ray
+
+from verl.protocol import DataProto, DataProtoFuture
 
 
 # here we add a magic number of avoid user-defined function already have this attribute
@@ -134,10 +136,6 @@ def dispatch_megatron_compute_data_proto(worker_group, *args, **kwargs):
 
 
 def _concat_data_proto_or_future(output: List):
-    import ray
-
-    from verl.protocol import DataProto, DataProtoFuture
-
     # make sure all the elements in output has the same type
     for o in output:
         assert type(o) is type(output[0])

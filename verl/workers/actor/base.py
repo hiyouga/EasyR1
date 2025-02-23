@@ -16,25 +16,24 @@ The base class for Actor
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict
+from typing import Any, Dict
 
 import torch
 
 from verl import DataProto
+from verl.workers.actor.config import ActorConfig
 
 
 __all__ = ["BasePPOActor"]
 
 
 class BasePPOActor(ABC):
-    def __init__(self, config):
+    def __init__(self, config: ActorConfig):
         """The base class for PPO actor
 
         Args:
-            config (DictConfig): a config passed to the PPOActor. We expect the type to be
-                DictConfig (https://omegaconf.readthedocs.io/), but it can be any namedtuple in general.
+            config (ActorConfig): a config passed to the PPOActor.
         """
-        super().__init__()
         self.config = config
 
     @abstractmethod
@@ -47,13 +46,11 @@ class BasePPOActor(ABC):
 
         Returns:
             DataProto: a DataProto containing the key ```log_probs```
-
-
         """
         pass
 
     @abstractmethod
-    def update_policy(self, data: DataProto) -> Dict:
+    def update_policy(self, data: DataProto) -> Dict[str, Any]:
         """Update the policy with an iterator of DataProto
 
         Args:
@@ -63,6 +60,5 @@ class BasePPOActor(ABC):
         Returns:
             Dict: a dictionary contains anything. Typically, it contains the statistics during updating the model
             such as ```loss```, ```grad_norm```, etc,.
-
         """
         pass

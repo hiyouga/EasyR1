@@ -16,12 +16,11 @@ Contain small torch utilities
 """
 
 import math
-from typing import Dict, List, Literal, Optional, Union
+from typing import List, Literal, Optional, Union
 
 import torch
 import torch.distributed
 import torch.nn.functional as F
-from tensordict import TensorDict
 from torch import nn
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR
@@ -122,7 +121,7 @@ def masked_sum(values, mask, axis=None):
     return (values * mask).sum(axis=axis)
 
 
-def masked_mean(values, mask, axis=None):
+def masked_mean(values, mask, axis=None) -> torch.Tensor:
     """Compute mean of tensor with a masked values."""
     return (values * mask).sum(axis=axis) / mask.sum(axis=axis)
 
@@ -181,40 +180,6 @@ def compute_grad_norm(model: nn.Module):
         if param.grad is not None:
             total_grad_square += torch.sum(torch.square(param.grad.detach())).item()
     return total_grad_square
-
-
-def broadcast_dict_tensor(tensors: Union[Dict[str, torch.Tensor], TensorDict], src, group):
-    for key in tensors.sorted_keys:
-        torch.distributed.broadcast(tensors[key], src=src, group=group, async_op=False)
-
-
-def all_gather_dict_tensors(tensors: Union[Dict[str, torch.Tensor], TensorDict], size, group, dim=0):
-    if isinstance(tensors, TensorDict):
-        is_tensor_dict = True
-        tensors_as_dict = tensors.to_dict()
-    else:
-        tensors_as_dict = tensors
-        is_tensor_dict = False
-
-    output = {}
-    sorted_keys = sorted(tensors_as_dict.keys())
-    for key in sorted_keys:
-        val = tensors_as_dict[key]
-        output[key] = [torch.empty_like(val) for _ in range(size)]
-        torch.distributed.all_gather(output[key], val, group=group, async_op=False)
-        output[key] = torch.cat(output[key], dim=dim)
-
-    if is_tensor_dict:
-        output = TensorDict(output, batch_size=tensors.batch_size[0] * size)
-
-    return output
-
-
-def split_dict_tensor_into_batches(tensors: TensorDict, batch_size: int) -> List[TensorDict]:
-    assert tensors.batch_size[0] % batch_size == 0, (
-        f"input data batch size: {tensors.batch_size[0]}, split batch size: {batch_size}"
-    )
-    return tensors.split(batch_size)
 
 
 def pad_2d_list_to_length(response, pad_token_id, max_length=None) -> torch.Tensor:
