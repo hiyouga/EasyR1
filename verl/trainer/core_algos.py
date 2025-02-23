@@ -19,12 +19,16 @@ implement PPO
 """
 
 from collections import defaultdict
-from typing import Tuple
+from typing import TYPE_CHECKING, Tuple
 
 import numpy as np
 import torch
 
 import verl.utils.torch_functional as verl_F
+
+
+if TYPE_CHECKING:
+    from verl.trainer.config import AlgorithmConfig
 
 
 class AdaptiveKLController:
@@ -33,7 +37,7 @@ class AdaptiveKLController:
     https://arxiv.org/pdf/1909.08593.pdf
     """
 
-    def __init__(self, init_kl_coef, target_kl, horizon):
+    def __init__(self, init_kl_coef: float, target_kl: float, horizon: float):
         self.value = init_kl_coef
         self.target = target_kl
         self.horizon = horizon
@@ -48,22 +52,22 @@ class AdaptiveKLController:
 class FixedKLController:
     """Fixed KL controller."""
 
-    def __init__(self, kl_coef):
+    def __init__(self, kl_coef: float):
         self.value = kl_coef
 
     def update(self, current_kl, n_steps):
         pass
 
 
-def get_kl_controller(config):
-    if config.critic.kl_ctrl.type == "fixed":
-        kl_ctrl = FixedKLController(kl_coef=config.critic.kl_ctrl.kl_coef)
-    elif config.critic.kl_ctrl.type == "adaptive":
-        assert config.kl_ctrl.horizon > 0, f"horizon must be larger than 0. Got {config.critic.kl_ctrl.horizon}"
+def get_kl_controller(algorithm_config: "AlgorithmConfig"):
+    if algorithm_config.kl_type == "fixed":
+        kl_ctrl = FixedKLController(kl_coef=algorithm_config.kl_coef)
+    elif algorithm_config.kl_type == "adaptive":
+        assert algorithm_config.kl_horizon > 0, f"horizon must be larger than 0. Got {algorithm_config.kl_horizon}."
         kl_ctrl = AdaptiveKLController(
-            init_kl_coef=config.critic.kl_ctrl.kl_coef,
-            target_kl=config.critic.kl_ctrl.target_kl,
-            horizon=config.critic.kl_ctrl.horizon,
+            init_kl_coef=algorithm_config.kl_coef,
+            target_kl=algorithm_config.kl_target,
+            horizon=algorithm_config.kl_horizon,
         )
     else:
         raise ValueError("Unknown kl_ctrl type")

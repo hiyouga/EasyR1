@@ -1,8 +1,7 @@
 accelerate
 codetiming
 datasets
-flash-attn
-hydra-core
+omegaconf
 liger-kernel
 numpy
 pandas

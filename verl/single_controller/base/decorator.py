@@ -20,7 +20,6 @@ from typing import Dict, List
 import ray
 
 from verl.protocol import DataProto, DataProtoFuture
-from verl.single_controller.base.worker_group import WorkerGroup
 
 
 # here we add a magic number of avoid user-defined function already have this attribute
@@ -57,6 +56,8 @@ def _split_args_kwargs_data_proto(chunks, *args, **kwargs):
 
 
 def dispatch_one_to_all(worker_group, *args, **kwargs):
+    from verl.single_controller.base.worker_group import WorkerGroup
+
     assert isinstance(worker_group, WorkerGroup)
     args = tuple([arg] * worker_group.world_size for arg in args)
     kwargs = {k: [v] * worker_group.world_size for k, v in kwargs.items()}
@@ -64,11 +65,15 @@ def dispatch_one_to_all(worker_group, *args, **kwargs):
 
 
 def dispatch_all_to_all(worker_group, *args, **kwargs):
+    from verl.single_controller.base.worker_group import WorkerGroup
+
     assert isinstance(worker_group, WorkerGroup)
     return args, kwargs
 
 
 def collect_all_to_all(worker_group, output):
+    from verl.single_controller.base.worker_group import WorkerGroup
+
     assert isinstance(worker_group, WorkerGroup)
     return output
 
@@ -89,23 +94,31 @@ def _concat_data_proto_or_future(output: List):
 
 
 def dispatch_dp_compute(worker_group, *args, **kwargs):
+    from verl.single_controller.base.worker_group import WorkerGroup
+
     assert isinstance(worker_group, WorkerGroup)
     return args, kwargs
 
 
 def collect_dp_compute(worker_group, output):
+    from verl.single_controller.base.worker_group import WorkerGroup
+
     assert isinstance(worker_group, WorkerGroup)
     assert len(output) == worker_group.world_size
     return output
 
 
 def dispatch_dp_compute_data_proto(worker_group, *args, **kwargs):
+    from verl.single_controller.base.worker_group import WorkerGroup
+
     assert isinstance(worker_group, WorkerGroup)
     splitted_args, splitted_kwargs = _split_args_kwargs_data_proto(worker_group.world_size, *args, **kwargs)
     return splitted_args, splitted_kwargs
 
 
 def dispatch_dp_compute_data_proto_with_func(worker_group, *args, **kwargs):
+    from verl.single_controller.base.worker_group import WorkerGroup
+
     assert isinstance(worker_group, WorkerGroup)
     assert type(args[0]) is FunctionType  # NOTE: The first one args is a function!
     splitted_args, splitted_kwargs = _split_args_kwargs_data_proto(worker_group.world_size, *args[1:], **kwargs)

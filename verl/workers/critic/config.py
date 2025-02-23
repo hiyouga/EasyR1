@@ -16,14 +16,13 @@ Critic config
 """
 
 from dataclasses import dataclass, field
-from typing import Literal
 
 from verl.workers.actor.config import FSDPConfig, ModelConfig, OffloadConfig, OptimConfig
 
 
 @dataclass
 class CriticConfig:
-    strategy: Literal["fsdp"] = "fsdp"
+    strategy: str = "fsdp"
     global_batch_size: int = 256
     micro_batch_size_per_device_for_update: int = field(default=-1, init=False)
     micro_batch_size_per_device_for_experience: int = field(default=-1, init=False)

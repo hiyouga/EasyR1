@@ -15,44 +15,49 @@
 Note that we don't combine the main with ray_trainer as ray_trainer is used by other main.
 """
 
-from pprint import pprint
+import json
 
-import hydra
 import ray
 from omegaconf import OmegaConf
 
 from verl.single_controller.ray import RayWorkerGroup
+from verl.trainer.config import PPOConfig
 from verl.trainer.ray_trainer import RayPPOTrainer, ResourcePoolManager, Role
 from verl.utils import get_processor, get_tokenizer
-from verl.workers.fsdp_workers import ActorRolloutRefWorker, CriticWorker
+from verl.workers.fsdp_workers import FSDPWorker
 from verl.workers.reward import CustomRewardManager
 
 
-@hydra.main(config_path="config", config_name="ppo_trainer", version_base=None)
-def main(config):
+def main():
+    cli_args = OmegaConf.from_cli()
+    file_config = OmegaConf.load(cli_args.config)
+    del cli_args.config
+
+    default_config = OmegaConf.structured(PPOConfig())
+    ppo_config = OmegaConf.merge(default_config, file_config, cli_args)
+    ppo_config = OmegaConf.to_object(ppo_config)
+
     if not ray.is_initialized():
         # this is for local ray cluster
         ray.init(runtime_env={"env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN"}})
 
-    ray.get(main_task.remote(config))
+    ray.get(main_task.remote(ppo_config))
 
 
 @ray.remote(num_cpus=1)  # please make sure main_task is not scheduled on head
-def main_task(config):
-    # print initial config
-    pprint(OmegaConf.to_container(config, resolve=True))  # resolve=True will eval symbol values
-    OmegaConf.resolve(config)
-
+def main_task(config: PPOConfig):
+    config.deep_post_init()
+    print(json.dumps(config.to_dict(), indent=2))
     # instantiate tokenizer
-    tokenizer = get_tokenizer(config.actor_rollout_ref.model.path)
-    processor = get_processor(config.actor_rollout_ref.model.path, use_fast=True)
+    tokenizer = get_tokenizer(config.worker.actor.model.model_path)
+    processor = get_processor(config.worker.actor.model.model_path, use_fast=True)
 
     # define worker classes
     ray_worker_group_cls = RayWorkerGroup
     role_worker_mapping = {
-        Role.ActorRollout: ray.remote(ActorRolloutRefWorker),
-        Role.Critic: ray.remote(CriticWorker),
-        Role.RefPolicy: ray.remote(ActorRolloutRefWorker),
+        Role.ActorRollout: ray.remote(FSDPWorker),
+        Role.Critic: ray.remote(FSDPWorker),
+        Role.RefPolicy: ray.remote(FSDPWorker),
     }
 
     global_pool_id = "global_pool"
@@ -66,10 +71,10 @@ def main_task(config):
     }
 
     reward_fn = CustomRewardManager(
-        tokenizer=tokenizer, num_examine=1, compute_score=config.reward_model.reward_compute_score
+        tokenizer=tokenizer, num_examine=1, compute_score=config.worker.reward.compute_score
     )
     val_reward_fn = CustomRewardManager(
-        tokenizer=tokenizer, num_examine=1, compute_score=config.reward_model.reward_compute_score
+        tokenizer=tokenizer, num_examine=1, compute_score=config.worker.reward.compute_score
     )
 
     resource_pool_manager = ResourcePoolManager(resource_pool_spec=resource_pool_spec, mapping=mapping)

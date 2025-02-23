@@ -143,6 +143,7 @@ class FSDPWorker(Worker):
         optim_config: OptimConfig,
         padding_free: bool = False,
     ) -> None:
+        self.tokenizer = get_tokenizer(model_config.tokenizer_path, trust_remote_code=model_config.trust_remote_code)
         self.model_config = AutoConfig.from_pretrained(
             model_config.model_path,
             trust_remote_code=model_config.trust_remote_code,
@@ -157,7 +158,6 @@ class FSDPWorker(Worker):
         except Exception:
             self.generation_config = GenerationConfig.from_model_config(self.model_config)
 
-        self.tokenizer = get_tokenizer(model_config.tokenizer_path, trust_remote_code=model_config.trust_remote_code)
         self.print_rank0(f"Model config: {self.model_config}")
 
         if padding_free:
@@ -205,7 +205,7 @@ class FSDPWorker(Worker):
             reduce_dtype=PrecisionType.to_dtype(fsdp_config.mp_reduce_dtype),
             buffer_dtype=PrecisionType.to_dtype(fsdp_config.mp_buffer_dtype),
         )
-        auto_wrap_policy = get_fsdp_wrap_policy(module=model)
+        auto_wrap_policy = get_fsdp_wrap_policy(model)
         if fsdp_config.enable_full_shard:
             sharding_strategy = ShardingStrategy.FULL_SHARD
         else:
@@ -217,7 +217,7 @@ class FSDPWorker(Worker):
             cpu_offload = None
 
         if self.rank == 0:
-            print(f"fsdp wrap policy: {auto_wrap_policy}.")
+            print(f"FSDP wrap policy: {auto_wrap_policy}.")
 
         self.fsdp_module = FSDP(
             model,
@@ -286,7 +286,7 @@ class FSDPWorker(Worker):
             optim_config = self.config.actor.optim
             padding_free = self.config.actor.padding_free
 
-        if self._is_actor or self._is_critic:
+        if self._is_actor or self._is_critic or self._is_ref:
             self._build_model_optimizer(
                 model_config=model_config,
                 fsdp_config=fsdp_config,
@@ -295,7 +295,7 @@ class FSDPWorker(Worker):
             )
             # get the original unwrapped module
             self.unwrapped_model = self.fsdp_module._fsdp_wrapped_module
-            if self._use_optimizer_offload:
+            if self._use_optimizer_offload and not self._is_critic:
                 offload_fsdp_optimizer(optimizer=self.optimizer)
                 log_gpu_memory_usage("After offload actor optimizer during init", logger=logger)
 
@@ -355,12 +355,7 @@ class FSDPWorker(Worker):
         if self._use_param_offload:
             offload_fsdp_model(self.fsdp_module)
 
-
-class ActorRolloutRefWorker(FSDPWorker):
-    """
-    This worker can be instantiated as a standalone actor or a standalone rollout or a standalone reference policy
-    or a hybrid engine based on the config.rollout
-    """
+    """ActorRolloutRefWorker"""
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def update_actor(self, data: DataProto):
@@ -497,8 +492,8 @@ class ActorRolloutRefWorker(FSDPWorker):
         log_gpu_memory_usage("After compute_ref_log_prob", logger=logger)
         return output
 
+    """CriticWorker"""
 
-class CriticWorker(FSDPWorker):
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def compute_values(self, data: DataProto):
         assert self._is_critic

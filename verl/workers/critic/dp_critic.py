@@ -119,6 +119,7 @@ class DataParallelPPOCritic(BasePPOCritic):
         else:
             non_tensor_select_keys = None
 
+        # TODO (yaowei): support ppo epochs
         # Split to make minibatch iterator for updating the actor
         # See PPO paper for details. https://arxiv.org/abs/1707.06347
         mini_batches = data.select(select_keys, non_tensor_select_keys).split(self.config.global_batch_size_per_device)

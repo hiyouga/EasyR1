@@ -16,12 +16,11 @@ Rollout config
 """
 
 from dataclasses import asdict, dataclass, field
-from typing import Literal
 
 
 @dataclass
 class RolloutConfig:
-    name: Literal["vllm"] = "vllm"
+    name: str = "vllm"
     temperature: float = 1.0
     top_k: int = -1
     top_p: float = 1.0

@@ -42,8 +42,9 @@ class WorkerConfig:
     actor: ActorConfig = field(default_factory=ActorConfig)
     critic: CriticConfig = field(default_factory=CriticConfig)
     ref: RefConfig = field(default_factory=RefConfig)
+    reward: RewardConfig = field(default_factory=RewardConfig)
     rollout: RolloutConfig = field(default_factory=RolloutConfig)
 
-    def __post_init__(self):
+    def post_init(self):
         self.ref.padding_free = self.actor.padding_free
         self.ref.micro_batch_size_per_device_for_experience = self.actor.micro_batch_size_per_device_for_experience

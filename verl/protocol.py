@@ -573,11 +573,17 @@ class DataProto:
             repeated_batch = None
 
         repeated_non_tensor_batch = {}
-        for key, val in self.non_tensor_batch.items():
-            if interleave:
-                repeated_non_tensor_batch[key] = np.repeat(val, repeat_times, axis=0)
+        for key, value in self.non_tensor_batch.items():
+            if isinstance(value, np.ndarray):
+                if interleave:
+                    repeated_non_tensor_batch[key] = np.repeat(value, repeat_times, axis=0)
+                else:
+                    repeated_non_tensor_batch[key] = np.tile(value, (repeat_times,) + (1,) * (value.ndim - 1))
             else:
-                repeated_non_tensor_batch[key] = np.tile(val, (repeat_times,) + (1,) * (val.ndim - 1))
+                if interleave:
+                    repeated_non_tensor_batch[key] = [item for item in value for _ in range(repeat_times)]
+                else:
+                    repeated_non_tensor_batch[key] = [item for _ in range(repeat_times) for item in value]
 
         return DataProto(
             batch=repeated_batch,
