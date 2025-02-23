@@ -180,6 +180,9 @@ class FSDPWorker(Worker):
                 model_config.model_path,
                 config=self.model_config,
                 torch_dtype=torch_dtype,
+                attn_implementation="flash_attention_2",
+                device_map="cpu",
+                low_cpu_mem_usage=True,
                 trust_remote_code=model_config.trust_remote_code,
             )
         else:

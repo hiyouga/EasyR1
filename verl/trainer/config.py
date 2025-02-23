@@ -36,8 +36,8 @@ class DataConfig:
     train_files: str = ""
     val_files: str = ""
     prompt_key: str = "prompt"
-    max_prompt_length: str = 512
-    max_response_length: str = 512
+    max_prompt_length: int = 512
+    max_response_length: int = 512
     rollout_batch_size: int = 512
     return_raw_input_ids: bool = False
     return_raw_prompt: bool = False

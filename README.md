@@ -2,7 +2,7 @@
 
 ### An efficient, scalable, multi-modality training framework for Reinforcement Learning based on [veRL](https://github.com/volcengine/verl)
 
-This project is a clean fork of the original [veRL](https://github.com/volcengine/verl) project, we thank all the authors for providing such a high-performance RL training framework.
+This project is a clean fork of the original [veRL](https://github.com/volcengine/verl) project to support vision language models, we thank all the authors for providing such a high-performance RL training framework.
 
 EasyR1 is efficient and scalable due to the design of **[HybirdEngine](https://arxiv.org/abs/2409.19256)** and the latest release of **[vLLM](https://github.com/vllm-project/vllm)**'s SPMD mode.
 
@@ -36,7 +36,7 @@ We provide a [Dockerfile](./Dockerfile) to easily build environments.
 
 At least **8*80GB VRAM** is needed to train a 7B model. If you have less computation resource, please consider using smaller (1.5B, 3B) models.
 
-## Tutorial: Run Qwen2.5-VL GRPO on [Geometry3K](https://huggingface.co/datasets/hiyouga/geometry3k) Dataset
+## Tutorial: Run Qwen2.5-VL GRPO on [Geometry3K](https://huggingface.co/datasets/hiyouga/geometry3k) Dataset in Just 3 Steps
 
 ![image](assets/qwen2_5_vl_7b_geo.png)
 

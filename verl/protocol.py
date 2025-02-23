@@ -605,8 +605,8 @@ class DataProto:
         for key in self.batch.sorted_keys:
             value = self.batch[key].contiguous()
             output[key] = [torch.empty_like(value) for _ in range(world_size)]
-            dist.all_gather(output, value, group=group, async_op=False)
-            output[key] = torch.cat(output, dim=0)
+            dist.all_gather(output[key], value, group=group, async_op=False)
+            output[key] = torch.cat(output[key], dim=0)
 
         self.batch = TensorDict(output, batch_size=self.batch.batch_size[0] * world_size)
 
