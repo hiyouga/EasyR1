@@ -34,6 +34,9 @@ We provide a [Dockerfile](./Dockerfile) to easily build environments.
 
 At least **8*80GB VRAM** is needed to train a 7B model. If you have less computation resource, please consider using smaller (1.5B, 3B) models.
 
+> [!NOTE]
+> We are working hard to reduce the VRAM in RL training, LoRA support will be integrated in next updates.
+
 ## Tutorial: Run Qwen2.5-VL GRPO on [Geometry3K](https://huggingface.co/datasets/hiyouga/geometry3k) Dataset in Just 3 Steps
 
 ![image](assets/qwen2_5_vl_7b_geo.png)
@@ -58,6 +61,9 @@ bash examples/run_qwen2_5_vl_7b_geo.sh
 ```bash
 python3 scripts/model_merger.py --local_dir path_to_your_last_actor_checkpoint
 ```
+
+> [!NOTE]
+> If you encounter issues with connecting to Hugging Face, consider using `export HF_ENDPOINT=https://hf-mirror.com`.
 
 ## Custom Dataset
 
