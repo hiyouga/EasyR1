@@ -74,6 +74,7 @@ The dataset should strictly follow the example data format.
 - Support PPO, Remax, Reinforce++ and RLOO for VLMs.
 - Support padding-free training for VLMs.
 - Support ulysses parallelism for VLMs.
+- Support more VLM architectures.
 
 ### Known bugs
 
@@ -82,9 +83,15 @@ These features are temporarily disabled for now, we plan to fix them one-by-one 
 - Vision language models are not compatible with padding-free training and ulysses parallelism yet.
 - Vision language models are not compatible with `enable_chunked_prefill` unless [vLLM v1](https://blog.vllm.ai/2025/01/27/v1-alpha-release.html) is supported.
 
+## Discussion Group
+
+👋 Join our [WeChat group](assets/wechat.jpg).
+
 ## Citation
 
 Core contributors: [Yaowei Zheng](https://github.com/hiyouga), [Junting Lu](https://github.com/AL-377), [Shenzhi Wang](https://github.com/Shenzhi-Wang) and Yuwen Xiong
+
+We also thank Guangming Sheng and Chi Zhang for helpful discussions.
 
 ```bibtex
 @misc{zheng2025easyr1,
