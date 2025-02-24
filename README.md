@@ -64,6 +64,7 @@ python3 scripts/model_merger.py --local_dir path_to_your_last_actor_checkpoint
 
 > [!NOTE]
 > If you encounter issues with connecting to Hugging Face, consider using `export HF_ENDPOINT=https://hf-mirror.com`.
+> If you want to use SwanLab logger, consider using `sh examples/run_qwen2_5_vl_7b_geo_swanlab.sh`.
 
 ## Custom Dataset
 
