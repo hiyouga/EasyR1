@@ -7,4 +7,5 @@ MODEL_PATH=Qwen/Qwen2.5-7B-Instruct  # replace it with your local file path
 python3 -m verl.trainer.main \
     config=examples/grpo_example.yaml \
     worker.actor.model.model_path=${MODEL_PATH} \
-    trainer.logger=['console','swanlab']
+    trainer.logger=['console','swanlab'] \
+    trainer.n_gpus_per_node=4
