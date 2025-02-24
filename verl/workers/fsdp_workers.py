@@ -188,6 +188,7 @@ class FSDPWorker(Worker):
                 )
 
         assert isinstance(model, PreTrainedModel)  # lint
+        model.tie_weights()  # avoid hanging
         model = model.to(torch_dtype)
         if model_config.enable_gradient_checkpointing:
             model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})

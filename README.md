@@ -32,7 +32,11 @@ We provide a [Dockerfile](./Dockerfile) to easily build environments.
 
 ### Hardware Requirements
 
-At least **8*80GB VRAM** is needed to train a 7B model. If you have less computation resource, please consider using smaller (1.5B, 3B) models.
+\* *estimated*
+
+| Method                   | Bits |  1.5B  |   3B   |   7B   |
+| ------------------------ | ---- | ------ | ------ | ------ |
+| GRPO Full Fine-Tuning    |  AMP | 2*40GB | 4*40GB | 4*80GB |
 
 > [!NOTE]
 > We are working hard to reduce the VRAM in RL training, LoRA support will be integrated in next updates.
@@ -101,10 +105,10 @@ We also thank Guangming Sheng and Chi Zhang for helpful discussions.
 
 ```bibtex
 @misc{zheng2025easyr1,
-  title = {EasyR1: An Efficient, Scalable, Multi-Modality RL Training Framework},
-  author = {Yaowei Zheng, Junting Lu, Shenzhi Wang, Yuwen Xiong},
+  title        = {EasyR1: An Efficient, Scalable, Multi-Modality RL Training Framework},
+  author       = {Yaowei Zheng, Junting Lu, Shenzhi Wang, Yuwen Xiong},
   howpublished = {\url{https://github.com/hiyouga/EasyR1}},
-  year = {2025}
+  year         = {2025}
 }
 ```
 

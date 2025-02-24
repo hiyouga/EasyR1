@@ -56,9 +56,9 @@ class FSDPVLLMShardingManager(BaseShardingManager):
             self.gen_random_states = None
 
     def __enter__(self):
-        log_gpu_memory_usage("Before state_dict() in sharding manager memory")
+        log_gpu_memory_usage("Before state_dict() in sharding manager")
         actor_weights = self.module.state_dict()
-        log_gpu_memory_usage("After state_dict() in sharding manager memory")
+        log_gpu_memory_usage("After state_dict() in sharding manager")
 
         self.inference_engine.wake_up()
         load_dtensor_weights(

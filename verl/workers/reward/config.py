@@ -20,5 +20,5 @@ from dataclasses import dataclass
 
 @dataclass
 class RewardConfig:
-    reward_type: str = "custom"
+    reward_type: str = "function"
     compute_score: str = "math"
