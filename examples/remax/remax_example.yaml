@@ -1,0 +1,66 @@
+data:
+  train_files: hiyouga/math12k@train
+  val_files: hiyouga/math12k@test
+  prompt_key: problem
+  max_prompt_length: 2048
+  max_response_length: 2048
+  rollout_batch_size: 512
+  shuffle: true
+  seed: 1
+  max_pixels: 4194304
+  min_pixels: 262144
+
+algorithm:
+  adv_estimator: remax
+  kl_coef: 0.0
+
+worker:
+  actor:
+    global_batch_size: 128
+    micro_batch_size_per_device_for_update: 1
+    micro_batch_size_per_device_for_experience: 2
+    max_grad_norm: 1.0
+    use_kl_loss: true
+    kl_loss_coef: 1.0e-3
+    kl_loss_type: low_var_kl
+    model:
+      model_path: Qwen/Qwen2.5-7B-Instruct
+      enable_gradient_checkpointing: true
+    optim:
+      lr: 1.0e-6
+      weight_decay: 1.0e-2
+    fsdp:
+      param_offload: false
+      optimizer_offload: false
+      torch_dtype: null
+    offload:
+      param_offload: true
+      optimizer_offload: true
+
+  rollout:
+    temperature: 1.0
+    tensor_parallel_size: 2
+    gpu_memory_utilization: 0.6
+    n: 5
+    enable_chunked_prefill: true
+
+  ref:
+    offload:
+      param_offload: true
+
+  reward:
+    reward_type: function
+    compute_score: math
+
+trainer:
+  total_episodes: 15
+  logger: ["console", "wandb"]
+  project_name: easy_r1
+  experiment_name: qwen2_5_7b_remax_math
+  n_gpus_per_node: 8
+  nnodes: 1
+  save_freq: 5
+  test_freq: 5
+  val_before_train: true
+  val_only: false
+  save_checkpoint_path: null
