@@ -35,7 +35,7 @@ We provide a [Dockerfile](./Dockerfile) to easily build environments.
 
 | Method                   | Bits |  1.5B  |   3B   |   7B   |
 | ------------------------ | ---- | ------ | ------ | ------ |
-| GRPO Full Fine-Tuning    |  AMP | 2*40GB | 4*40GB | 4*80GB |
+| GRPO Full Fine-Tuning    |  AMP | 2*24GB | 2*40GB | 4*40GB |
 
 > [!NOTE]
 > We are working hard to reduce the VRAM in RL training, LoRA support will be integrated in next updates.
