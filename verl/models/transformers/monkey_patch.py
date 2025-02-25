@@ -34,11 +34,12 @@ def apply_monkey_patch_to_llama():
 
 
 def apply_monkey_patch_to_qwen2():
-    from transformers.models.qwen2.modeling_qwen2 import Qwen2FlashAttention2
+    from transformers.models.qwen2.modeling_qwen2 import Qwen2FlashAttention2, Qwen2ForCausalLM
 
-    from verl.models.transformers.qwen2 import qwen2_flash_attn_forward
+    from verl.models.transformers.qwen2 import qwen2_flash_attn_forward, qwen2_causal_lm_forward
 
     Qwen2FlashAttention2.forward = qwen2_flash_attn_forward
+    Qwen2ForCausalLM.forward = qwen2_causal_lm_forward
 
 
 _PATCH_NAME_TO_FUNC = {
