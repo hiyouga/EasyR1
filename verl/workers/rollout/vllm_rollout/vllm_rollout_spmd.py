@@ -58,14 +58,12 @@ class vLLMRollout(BaseRollout):
         if not config.enforce_eager and config.free_cache_engine:
             raise ValueError("CUDA graph should be disabled when `free_cache_engine` is True.")
 
+        if config.max_num_batched_tokens < config.prompt_length + config.response_length:
+            raise ValueError("max_num_batched_tokens should be greater than prompt_length + response_length.")
+
         vllm_init_kwargs = {}
         if config.limit_images > 0:
             vllm_init_kwargs = {"limit_mm_per_prompt": {"image": config.limit_images}}
-
-
-        if config.max_num_batched_tokens < config.prompt_length + config.response_length:
-            raise ValueError("max_num_batched_tokens should be greater than prompt_length + response_length. \
-                            Please set/modify the rollout.max_num_batched_tokens、data.max_prompt_length、data.max_response_length in the config yaml ")
 
         self.inference_engine = LLM(
             model=model_path,

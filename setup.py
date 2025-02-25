@@ -23,6 +23,11 @@ def get_requires():
         return lines
 
 
+extra_require = {
+    "dev": ["pre-commit", "ruff"],
+}
+
+
 def main():
     setup(
         name="verl",
@@ -35,6 +40,7 @@ def main():
         author_email="zhangchi.usc1992@bytedance.com, gmsheng@connect.hku.hk, hiyouga@buaa.edu.cn",
         description="",
         install_requires=get_requires(),
+        extras_require=extra_require,
         long_description=open("README.md", encoding="utf-8").read(),
         long_description_content_type="text/markdown",
     )
