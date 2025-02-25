@@ -49,10 +49,11 @@ class CustomRewardManager:
             # decode
             sequences = torch.cat((valid_prompt_ids, valid_response_ids))
             sequences_str = self.tokenizer.decode(sequences, skip_special_tokens=True)
+            response_str = self.tokenizer.decode(valid_response_ids, skip_special_tokens=True)
 
             ground_truth = data_item.non_tensor_batch["answer"]
 
-            score = self.compute_score(sequences_str, ground_truth)
+            score = self.compute_score(response_str, ground_truth)
             reward_tensor[i, valid_response_length - 1] = score
 
             if already_print < self.num_examine:
