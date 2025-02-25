@@ -120,7 +120,9 @@ class RLHFDataset(Dataset):
                 index = 0
                 while "<image>" in prompt:
                     prompt = prompt.replace(
-                        "<image>", "<|placeholder|>" * (image_grid_thw[index].prod() // merge_length), 1
+                        "<image>",
+                        "<|vision_start|>" + "<|placeholder|>" * (image_grid_thw[index].prod() // merge_length) + "<|vision_end|>",
+                        1
                     )
                     index += 1
 
