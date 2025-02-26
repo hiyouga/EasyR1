@@ -184,6 +184,7 @@ class FSDPWorker(Worker):
                 model = auto_class.from_config(
                     self.model_config,
                     torch_dtype=torch_dtype,
+                    attn_implementation="flash_attention_2",
                     trust_remote_code=model_config.trust_remote_code,
                 )
 

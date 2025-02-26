@@ -25,6 +25,5 @@ def r1v_compute_score(predict_str: str, ground_truth: str) -> float:
     acc_reward = r1v_accuracy_reward(predict_str, ground_truth)
     format_reward = r1v_format_reward(predict_str)
     reward = acc_reward + format_reward
-    print(predict_str, ground_truth)
     reward /= 2
     return reward

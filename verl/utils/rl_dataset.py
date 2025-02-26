@@ -101,9 +101,8 @@ class RLHFDataset(Dataset):
         """
         row_dict = self.dataset[index]
         messages = [
-            {"role": "user", "content": f"<image>\n{row_dict[self.prompt_key].replace('<image>', '').strip()}\nOutput the thinking process in <think> </think> and final answer (number) in <answer> </answer> tags."},
-            # {"role": "system", "content": r"Please reason step by step, and put your final answer within \boxed{}."},
-            # {"role": "user", "content": row_dict[self.prompt_key]},
+            {"role": "system", "content": r"Please reason step by step, and put your final answer within \boxed{}."},
+            {"role": "user", "content": row_dict[self.prompt_key]},
         ]
         prompt = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
 
