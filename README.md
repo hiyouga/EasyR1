@@ -35,7 +35,7 @@ We provide a [Dockerfile](./Dockerfile) to easily build environments.
 
 | Method                   | Bits |  1.5B  |   3B   |   7B   |
 | ------------------------ | ---- | ------ | ------ | ------ |
-| GRPO Full Fine-Tuning    |  AMP | 2*24GB | 2*40GB | 4*40GB |
+| GRPO Full Fine-Tuning    |  AMP | 2*24GB | 4*40GB | 8*40GB |
 
 > [!NOTE]
 > We are working hard to reduce the VRAM in RL training, LoRA support will be integrated in next updates.
@@ -50,7 +50,6 @@ We provide a [Dockerfile](./Dockerfile) to easily build environments.
 git clone https://github.com/hiyouga/EasyR1.git
 cd EasyR1
 pip install -e .
-pip install git+https://github.com/hiyouga/MathRuler.git
 ```
 
 ### GRPO Training
@@ -80,9 +79,13 @@ The dataset should strictly follow the example data format.
 - Vision-text dataset: https://huggingface.co/datasets/hiyouga/geometry3k
     - Required columns: images, problem, answer
 
+## Other Baselines
+
+- [CLEVR-70k-Counting](examples/run_qwen2_5_vl_2b_clevr.sh): Train the Qwen2.5-VL-3B-Instruct model on counting problem.
+
 ## TODO
 
-- Support PPO, Remax, Reinforce++ and RLOO for VLMs.
+- Support PPO, Reinforce++ and RLOO for VLMs.
 - Support padding-free training for VLMs.
 - Support ulysses parallelism for VLMs.
 - Support more VLM architectures.
@@ -100,14 +103,14 @@ These features are temporarily disabled for now, we plan to fix them one-by-one 
 
 ## Citation
 
-Core contributors: [Yaowei Zheng](https://github.com/hiyouga), [Junting Lu](https://github.com/AL-377), [Shenzhi Wang](https://github.com/Shenzhi-Wang) and Yuwen Xiong
+Core contributors: [Yaowei Zheng](https://github.com/hiyouga), [Junting Lu](https://github.com/AL-377), [Shenzhi Wang](https://github.com/Shenzhi-Wang), [Zhangchi Feng](https://github.com/BUAADreamer), [Dongdong Kuang](https://github.com/Kuangdd01) and Yuwen Xiong
 
 We also thank Guangming Sheng and Chi Zhang for helpful discussions.
 
 ```bibtex
 @misc{zheng2025easyr1,
   title        = {EasyR1: An Efficient, Scalable, Multi-Modality RL Training Framework},
-  author       = {Yaowei Zheng, Junting Lu, Shenzhi Wang, Yuwen Xiong},
+  author       = {Yaowei Zheng, Junting Lu, Shenzhi Wang, Zhangchi Feng, Dongdong Kuang, Yuwen Xiong},
   howpublished = {\url{https://github.com/hiyouga/EasyR1}},
   year         = {2025}
 }

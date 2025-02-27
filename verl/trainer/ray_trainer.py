@@ -366,6 +366,7 @@ class RayPPOTrainer:
             prompt_key=self.config.data.prompt_key,
             max_prompt_length=self.config.data.max_prompt_length,
             truncation="right",
+            system_prompt=self.config.data.system_prompt,
             min_pixels=self.config.data.min_pixels,
             max_pixels=self.config.data.max_pixels,
         )
@@ -393,6 +394,7 @@ class RayPPOTrainer:
             prompt_key=self.config.data.prompt_key,
             max_prompt_length=self.config.data.max_prompt_length,
             truncation="right",
+            system_prompt=self.config.data.system_prompt,
             min_pixels=self.config.data.min_pixels,
             max_pixels=self.config.data.max_pixels,
         )

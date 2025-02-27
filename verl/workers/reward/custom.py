@@ -49,8 +49,7 @@ class CustomRewardManager:
             valid_response_ids = response_ids[:valid_response_length]
 
             # decode
-            sequences = torch.cat((valid_prompt_ids, valid_response_ids))
-            sequences_str = self.tokenizer.decode(sequences, skip_special_tokens=True)
+            prompt_str = self.tokenizer.decode(valid_prompt_ids, skip_special_tokens=True)
             response_str = self.tokenizer.decode(valid_response_ids, skip_special_tokens=True)
 
             ground_truth = data_item.non_tensor_batch["answer"]
@@ -60,7 +59,8 @@ class CustomRewardManager:
 
             if already_print < self.num_examine:
                 already_print += 1
-                print("[generation]", sequences_str)
+                print("[prompt]", prompt_str)
+                print("[response]", response_str)
                 print("[ground_truth]", ground_truth)
                 print("[score]", score)
 

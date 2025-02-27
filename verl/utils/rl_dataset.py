@@ -74,6 +74,7 @@ class RLHFDataset(Dataset):
         prompt_key="prompt",
         max_prompt_length=1024,
         truncation="error",
+        system_prompt=None,
         max_pixels=None,
         min_pixels=None,
     ):
@@ -82,6 +83,7 @@ class RLHFDataset(Dataset):
         self.prompt_key = prompt_key
         self.max_prompt_length = max_prompt_length
         self.truncation = truncation
+        self.system_prompt = system_prompt
         self.max_pixels = max_pixels
         self.min_pixels = min_pixels
 
@@ -101,7 +103,7 @@ class RLHFDataset(Dataset):
         """
         row_dict = self.dataset[index]
         messages = [
-            {"role": "system", "content": r"Please reason step by step, and put your final answer within \boxed{}."},
+            {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": row_dict[self.prompt_key]},
         ]
         prompt = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
