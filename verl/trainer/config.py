@@ -41,6 +41,7 @@ class DataConfig:
     rollout_batch_size: int = 512
     return_raw_input_ids: bool = False
     return_raw_prompt: bool = False
+    system_prompt: str = r"Please reason step by step, and put your final answer within \boxed{}."
     shuffle: bool = True
     seed: int = 1
     max_pixels: int = 4194304

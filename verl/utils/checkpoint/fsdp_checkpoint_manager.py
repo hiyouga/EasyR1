@@ -19,7 +19,7 @@ import torch
 import torch.distributed
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import ShardedOptimStateDictConfig, ShardedStateDictConfig, StateDictType
-from transformers import PreTrainedTokenizer
+from transformers import PreTrainedTokenizer, ProcessorMixin
 
 from .checkpoint_manager import BaseCheckpointManager
 
@@ -45,10 +45,11 @@ class FSDPCheckpointManager(BaseCheckpointManager):
         optimizer: torch.optim.Optimizer,
         lr_scheduler: torch.optim.lr_scheduler.LRScheduler,
         tokenizer: PreTrainedTokenizer,
+        processor: ProcessorMixin,
         *args,
         **kwargs,
     ):
-        super().__init__(model, optimizer, lr_scheduler, tokenizer)
+        super().__init__(model, optimizer, lr_scheduler, tokenizer, processor)
 
     def load_checkpoint(self, path=None, *args, **kwargs):
         if path is None:
@@ -129,7 +130,10 @@ class FSDPCheckpointManager(BaseCheckpointManager):
             hf_local_path = os.path.join(local_path, "huggingface")
             os.makedirs(hf_local_path, exist_ok=True)
             self.model._fsdp_wrapped_module.config.save_pretrained(hf_local_path)
-            self.tokenizer.save_pretrained(hf_local_path)
+            if self.processor:
+                self.processor.save_pretrained(hf_local_path)
+            else:
+                self.tokenizer.save_pretrained(hf_local_path)
 
         torch.distributed.barrier()
 
