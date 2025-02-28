@@ -21,7 +21,7 @@ import torch
 import torch.distributed
 from filelock import FileLock
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from transformers import PreTrainedTokenizer
+from transformers import PreTrainedTokenizer, ProcessorMixin
 
 
 class BaseCheckpointManager:
@@ -45,6 +45,7 @@ class BaseCheckpointManager:
         optimizer: torch.optim.Optimizer,
         lr_scheduler: torch.optim.lr_scheduler.LRScheduler,
         tokenizer: PreTrainedTokenizer,
+        processor: ProcessorMixin
     ):
         self.previous_global_step = None
         self.previous_save_local_path = None
@@ -53,6 +54,7 @@ class BaseCheckpointManager:
         self.optimizer = optimizer
         self.lr_scheduler = lr_scheduler
         self.tokenizer = tokenizer
+        self.processor = processor
 
         assert isinstance(self.model, FSDP)
         self.rank = torch.distributed.get_rank()

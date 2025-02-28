@@ -37,7 +37,7 @@ from transformers.modeling_utils import no_init_weights
 from verl import DataProto
 from verl.single_controller.base import Worker
 from verl.single_controller.base.decorator import Dispatch, register
-from verl.utils import get_tokenizer
+from verl.utils import get_tokenizer, get_processor
 from verl.utils.checkpoint.fsdp_checkpoint_manager import FSDPCheckpointManager
 from verl.utils.flops_counter import FlopsCounter
 from verl.utils.fsdp_utils import (
@@ -138,6 +138,7 @@ class FSDPWorker(Worker):
         padding_free: bool = False,
     ) -> None:
         self.tokenizer = get_tokenizer(model_config.tokenizer_path, trust_remote_code=model_config.trust_remote_code)
+        self.processor = get_processor(model_config.tokenizer_path)
         self.model_config = AutoConfig.from_pretrained(
             model_config.model_path,
             trust_remote_code=model_config.trust_remote_code,
@@ -325,6 +326,7 @@ class FSDPWorker(Worker):
                 optimizer=self.optimizer,
                 lr_scheduler=self.lr_scheduler,
                 tokenizer=self.tokenizer,
+                processor=self.processor
             )
 
         torch.cuda.empty_cache()
