@@ -380,7 +380,7 @@ class RayPPOTrainer:
         self.train_dataloader = DataLoader(
             dataset=self.train_dataset,
             batch_size=self.config.data.rollout_batch_size,
-            num_workers=8,
+            num_workers=16,
             drop_last=True,
             collate_fn=collate_fn,
             sampler=sampler,
@@ -398,12 +398,15 @@ class RayPPOTrainer:
         )
         self.val_dataloader = DataLoader(
             dataset=self.val_dataset,
-            batch_size=len(self.val_dataset),
-            num_workers=8,
+            batch_size=self.config.data.rollout_batch_size,  # len(self.val_dataset)
+            num_workers=16,
             shuffle=False,
             drop_last=False,
             collate_fn=collate_fn,
         )
+
+        print(f"Size of train dataloader: {len(self.train_dataloader)}")
+        print(self.train_dataset)
 
         assert len(self.train_dataloader) >= 1
         assert len(self.val_dataloader) >= 1

@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import math
+import os
 from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
@@ -89,8 +90,11 @@ class RLHFDataset(Dataset):
             data_path, data_split = data_path.split("@")
         else:
             data_split = "train"
-
-        self.dataset = load_dataset(data_path, split=data_split)
+        if '.json' in data_path:
+            self.dataset = load_dataset('json', data_files=data_path, split='train')
+        else:
+            self.dataset = load_dataset(data_path, split=data_split)
+        self.data_dir = os.path.dirname(data_path)
 
     def __len__(self):
         return len(self.dataset)
@@ -108,9 +112,19 @@ class RLHFDataset(Dataset):
 
         if "images" in row_dict:  # expand image token
             raw_prompt = prompt.replace("<image>", "<|vision_start|><|image_pad|><|vision_end|>")
-            row_dict["images"] = [
-                process_image(image, self.max_pixels, self.min_pixels) for image in row_dict["images"]
-            ]
+            if isinstance(row_dict["images"][0], str):
+                image_objects = [Image.open(os.path.join(self.data_dir, image)) for image in row_dict["images"]]
+                row_dict["images"] = image_objects
+
+            processed_images = []
+            for image in row_dict["images"]:
+                try:
+                    processed_images.append(process_image(image, self.max_pixels, self.min_pixels))
+                except Exception as e:
+                    print(f"Error processing image: {e}")
+                    placeholder_image = Image.new("RGB", (224, 224), (255, 255, 255))
+                    processed_images.append(process_image(placeholder_image, self.max_pixels, self.min_pixels))
+            row_dict["images"] = processed_images
             image_inputs = self.processor.image_processor(row_dict["images"], return_tensors="pt")
             image_grid_thw = image_inputs["image_grid_thw"]
             row_dict.update(image_inputs)
@@ -152,3 +166,16 @@ class RLHFDataset(Dataset):
         row_dict["position_ids"] = position_ids
         row_dict["raw_prompt_ids"] = self.tokenizer.encode(raw_prompt, add_special_tokens=False)
         return row_dict
+
+
+if __name__ == '__main__':
+    dataset = RLHFDataset(
+        data_path='/mnt/8T/high_modality/geom_train.jsonl',
+        tokenizer=None,
+        processor=None,
+        prompt_key='prompt',
+        max_prompt_length=1024,
+        truncation='error',
+        max_pixels=None,
+        min_pixels=None,
+    )
