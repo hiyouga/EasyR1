@@ -2,13 +2,13 @@ data:
   train_files: /scratch/high_modality/geom_train.jsonl
   val_files: /scratch/high_modality/geom_valid.jsonl
   prompt_key: problem
-  max_prompt_length: 2048
-  max_response_length: 2048
+  max_prompt_length: 8192
+  max_response_length: 4096
   rollout_batch_size: 512
   shuffle: true
   seed: 1
-  max_pixels: 4194304
-  min_pixels: 262144
+  max_pixels: 1048576
+  min_pixels: 65536
 
 algorithm:
   adv_estimator: grpo
