@@ -32,7 +32,7 @@ class RolloutConfig:
     enable_chunked_prefill: bool = False
     tensor_parallel_size: int = 2
     max_num_batched_tokens: int = 8192
-    max_num_seqs: int = 1024
+    max_num_seqs: int = 256
     disable_log_stats: bool = True
     do_sample: bool = True
     n: int = 1

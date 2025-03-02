@@ -115,8 +115,14 @@ class RLHFDataset(Dataset):
         if "images" in row_dict:  # expand image token
             raw_prompt = prompt.replace("<image>", "<|vision_start|><|image_pad|><|vision_end|>")
             if isinstance(row_dict["images"][0], str):
-                image_objects = [Image.open(os.path.join(self.data_dir, image)) for image in row_dict["images"]]
-                row_dict["images"] = image_objects
+                images = []
+                for image in row_dict["images"]:
+                    try:
+                        images.append(Image.open(os.path.join(self.data_dir, image)))
+                    except Exception as e:
+                        print(f"Error loading image: {e}")
+                        images.append(Image.new("RGB", (224, 224), (255, 255, 255)))
+                row_dict["images"] = images
 
             processed_images = []
             for image in row_dict["images"]:
