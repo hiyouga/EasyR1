@@ -3,7 +3,6 @@ set -x
 /home/dvdai/miniconda3/bin/conda activate test
 
 export VLLM_ATTENTION_BACKEND=XFORMERS
-export RAY_BACKEND_LOG_LEVEL=debug
 #export MKL_SERVICE_FORCE_INTEL=1
 
 python -m verl.trainer.main \

@@ -17,7 +17,7 @@ import torch
 from transformers import PreTrainedTokenizer
 
 from verl import DataProto
-from verl.utils.reward_score import math_compute_score, r1v_compute_score
+from verl.utils.reward_score import math_compute_score, r1v_compute_score, medical_compute_score
 
 
 class CustomRewardManager:
@@ -28,6 +28,8 @@ class CustomRewardManager:
             self.compute_score = math_compute_score
         elif compute_score == "r1v":
             self.compute_score = r1v_compute_score
+        elif compute_score == "medical":
+            self.compute_score = medical_compute_score
         else:
             raise NotImplementedError()
 

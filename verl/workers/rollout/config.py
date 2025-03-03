@@ -36,7 +36,7 @@ class RolloutConfig:
     disable_log_stats: bool = True
     do_sample: bool = True
     n: int = 1
-    limit_images: int = 0
+    limit_images: int = 8
     """auto keys"""
     prompt_length: int = field(default=-1, init=False)
     response_length: int = field(default=-1, init=False)

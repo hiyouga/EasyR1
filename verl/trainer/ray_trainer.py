@@ -27,6 +27,7 @@ from typing import Any, Dict, Optional, Type
 
 import numpy as np
 import torch
+import wandb
 from codetiming import Timer
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 from transformers import PreTrainedTokenizer, ProcessorMixin
@@ -42,6 +43,7 @@ from verl.utils.rl_dataset import RLHFDataset, collate_fn
 from verl.utils.torch_functional import masked_mean
 from verl.utils.tracking import Tracking
 from verl.workers.fsdp_workers import FSDPWorker
+from verl.utils.reward_score.evaluation import *
 
 
 WorkerType = Type[Worker]
@@ -477,6 +479,7 @@ class RayPPOTrainer:
         self.validation_table = new_table
 
     def _validate(self):
+        """Evaluate the model on validation data with enhanced medical metrics."""
         reward_tensor_lst = []
         data_source_lst = []
 
@@ -485,12 +488,20 @@ class RayPPOTrainer:
         sample_outputs = []
         sample_scores = []
 
+        # New lists for metric calculation
+        all_predictions = []
+        all_ground_truths = []
+        all_data_sources = []
+
         for test_data in self.val_dataloader:
             test_batch = DataProto.from_single_dict(test_data)
-            # Store original inputs
+
+            # Store original inputs and ground truths
             input_ids = test_batch.batch["input_ids"]
             input_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in input_ids]
             sample_inputs.extend(input_texts)
+            ground_truths = test_batch.non_tensor_batch["answer"]
+            data_sources = test_batch.non_tensor_batch.get("data_source", ["unknown"] * len(input_texts))
 
             if "pixel_values" in test_batch.non_tensor_batch.keys():
                 test_gen_batch = test_batch.pop(
@@ -505,12 +516,10 @@ class RayPPOTrainer:
 
             test_gen_batch.meta_info = {"do_sample": False}
 
-            # pad to be divisible by dp_size
             test_gen_batch_padded, pad_size = pad_dataproto_to_divisor(
                 test_gen_batch, self.actor_rollout_wg.world_size
             )
             test_output_gen_batch_padded = self.actor_rollout_wg.generate_sequences(test_gen_batch_padded)
-            # unpad
             test_output_gen_batch = unpad_dataproto(test_output_gen_batch_padded, pad_size=pad_size)
             print("validation generation end")
 
@@ -519,9 +528,14 @@ class RayPPOTrainer:
             output_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in output_ids]
             sample_outputs.extend(output_texts)
 
+            # Collect for metrics calculation
+            all_predictions.extend(output_texts)
+            all_ground_truths.extend(ground_truths)
+            all_data_sources.extend(data_sources)
+
             test_batch = test_batch.union(test_output_gen_batch)
 
-            # evaluate using reward_function
+            # Evaluate using reward_function
             reward_tensor = self.val_reward_fn(test_batch)
 
             # Store scores
@@ -538,7 +552,7 @@ class RayPPOTrainer:
         reward_tensor = torch.cat(reward_tensor_lst, dim=0).sum(-1).cpu()  # (batch_size,)
         data_sources = np.concatenate(data_source_lst, axis=0)
 
-        # evaluate test_score based on data source
+        # Evaluate test_score based on data source
         data_source_reward = {}
         for i in range(reward_tensor.shape[0]):
             data_source = data_sources[i]
@@ -549,6 +563,24 @@ class RayPPOTrainer:
         metric_dict = {}
         for data_source, rewards in data_source_reward.items():
             metric_dict[f"val/test_score/{data_source}"] = np.mean(rewards)
+
+        # Global metrics
+        global_metrics = compute_classification_metrics(all_predictions, all_ground_truths)
+
+        # Add global metrics to results
+        for metric_name, value in global_metrics.items():
+            if metric_name.startswith("global/"):
+                metric_dict[f"val/{metric_name}"] = value
+
+        # Per data source metrics
+        source_metrics = compute_metrics_by_data_source(all_predictions, all_ground_truths, all_data_sources)
+
+        # # Add per-source metrics to results
+        for source, metrics in source_metrics.items():
+            for metric_name, value in metrics.items():
+                metric_dict[f"{source}/{metric_name}"] = value
+
+        wandb.log(metric_dict, step=self.global_steps + 1)
 
         return metric_dict
 

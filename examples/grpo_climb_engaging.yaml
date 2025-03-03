@@ -1,14 +1,14 @@
 data:
   train_files: /scratch/high_modality/geom_train.jsonl
-  val_files: /scratch/high_modality/geom_valid.jsonl
+  val_files: /scratch/high_modality/geom_valid_mini.jsonl
   prompt_key: problem
   max_prompt_length: 8192
-  max_response_length: 4096
+  max_response_length: 2048
   rollout_batch_size: 512
   shuffle: true
   seed: 1
-  max_pixels: 1048576
-  min_pixels: 65536
+  max_pixels: 524288
+  min_pixels: 32768
 
 algorithm:
   adv_estimator: grpo
@@ -16,9 +16,9 @@ algorithm:
 
 worker:
   actor:
-    global_batch_size: 128
-    micro_batch_size_per_device_for_update: 1
-    micro_batch_size_per_device_for_experience: 2
+    global_batch_size: 256
+    micro_batch_size_per_device_for_update: 4
+    micro_batch_size_per_device_for_experience: 8
     max_grad_norm: 1.0
     use_kl_loss: true
     kl_loss_coef: 1.0e-3
@@ -50,7 +50,7 @@ worker:
 
   reward:
     reward_type: function
-    compute_score: math
+    compute_score: medical
 
 trainer:
   total_episodes: 15
@@ -59,8 +59,8 @@ trainer:
   experiment_name: qwen2_5_7b_math
   n_gpus_per_node: 8
   nnodes: 1
-  save_freq: 5
-  test_freq: 5
+  save_freq: 2
+  test_freq: 2
   val_before_train: true
   val_only: false
   save_checkpoint_path: null
