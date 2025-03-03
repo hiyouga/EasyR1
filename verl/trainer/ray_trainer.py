@@ -580,8 +580,6 @@ class RayPPOTrainer:
             for metric_name, value in metrics.items():
                 metric_dict[f"{source}/{metric_name}"] = value
 
-        wandb.log(metric_dict, step=self.global_steps + 1)
-
         return metric_dict
 
     def init_workers(self):
