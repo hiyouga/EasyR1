@@ -15,10 +15,12 @@
 
 from typing import Optional
 
-from transformers import AutoConfig, AutoProcessor, AutoTokenizer, PreTrainedTokenizer, ProcessorMixin
+from transformers import AutoProcessor, AutoTokenizer, PreTrainedTokenizer, ProcessorMixin
 
 
-def get_tokenizer(model_path, correct_pad_token=True, correct_gemma=True, **kwargs) -> PreTrainedTokenizer:
+def get_tokenizer(
+    model_path: str, correct_pad_token: bool = True, correct_gemma: bool = True, **kwargs
+) -> PreTrainedTokenizer:
     """Create a huggingface pretrained tokenizer.
 
     Args:
@@ -31,10 +33,9 @@ def get_tokenizer(model_path, correct_pad_token=True, correct_gemma=True, **kwar
         transformers.PreTrainedTokenizer: The pretrained tokenizer.
 
     """
-    config = AutoConfig.from_pretrained(model_path)
     tokenizer = AutoTokenizer.from_pretrained(model_path, **kwargs)
 
-    if correct_gemma and getattr(config, "model_type", None) in ["gemma", "gemma2"]:
+    if correct_gemma and tokenizer.bos_token == "<bos>":
         # the EOS token in gemma2 is ambiguious, which may worsen RL performance.
         # https://huggingface.co/google/gemma-2-2b-it/commit/17a01657f5c87135bcdd0ec7abb4b2dece04408a
         print("Found gemma model. Set eos_token and eos_token_id to <end_of_turn> and 107.")
@@ -46,7 +47,7 @@ def get_tokenizer(model_path, correct_pad_token=True, correct_gemma=True, **kwar
     return tokenizer
 
 
-def get_processor(model_path, **kwargs) -> Optional[ProcessorMixin]:
+def get_processor(model_path: str, **kwargs) -> Optional[ProcessorMixin]:
     try:
         processor = AutoProcessor.from_pretrained(model_path, **kwargs)
     except Exception:

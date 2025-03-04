@@ -48,7 +48,7 @@ class PrecisionType:
         return precision in BFLOAT_LIST
 
     @staticmethod
-    def to_dtype(precision):
+    def to_dtype(precision) -> torch.dtype:
         if precision in HALF_LIST:
             return torch.float16
         elif precision in FLOAT_LIST:
@@ -59,12 +59,12 @@ class PrecisionType:
             raise RuntimeError(f"unexpected precision: {precision}")
 
     @staticmethod
-    def to_str(precision):
+    def to_str(precision: torch.dtype) -> str:
         if precision == torch.float16:
-            return "fp16"
+            return "float16"
         elif precision == torch.float32:
-            return "fp32"
+            return "float32"
         elif precision == torch.bfloat16:
-            return "bf16"
+            return "bfloat16"
         else:
             raise RuntimeError(f"unexpected precision: {precision}")

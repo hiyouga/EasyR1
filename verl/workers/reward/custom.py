@@ -16,8 +16,8 @@
 import torch
 from transformers import PreTrainedTokenizer
 
-from verl import DataProto
-from verl.utils.reward_score import math_compute_score, r1v_compute_score
+from ...protocol import DataProto
+from ...utils.reward_score import math_compute_score, r1v_compute_score
 
 
 class CustomRewardManager:
@@ -52,7 +52,7 @@ class CustomRewardManager:
             prompt_str = self.tokenizer.decode(valid_prompt_ids, skip_special_tokens=True)
             response_str = self.tokenizer.decode(valid_response_ids, skip_special_tokens=True)
 
-            ground_truth = data_item.non_tensor_batch["answer"]
+            ground_truth = data_item.non_tensor_batch["ground_truth"]
 
             score = self.compute_score(response_str, ground_truth)
             reward_tensor[i, valid_response_length - 1] = score

@@ -19,7 +19,7 @@ import os
 from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from typing import Optional, Tuple
 
-from verl.workers.config import WorkerConfig
+from ..workers.config import WorkerConfig
 
 
 def recursive_post_init(dataclass_obj):
@@ -36,12 +36,12 @@ class DataConfig:
     train_files: str = ""
     val_files: str = ""
     prompt_key: str = "prompt"
+    answer_key: str = "answer"
+    image_key: str = "images"
     max_prompt_length: int = 512
     max_response_length: int = 512
     rollout_batch_size: int = 512
-    return_raw_input_ids: bool = False
-    return_raw_prompt: bool = False
-    system_prompt: str = r"Please reason step by step, and put your final answer within \boxed{}."
+    system_prompt: Optional[str] = None
     shuffle: bool = True
     seed: int = 1
     max_pixels: int = 4194304
@@ -52,7 +52,7 @@ class DataConfig:
 class AlgorithmConfig:
     gamma: float = 1.0
     lam: float = 1.0
-    adv_estimator: str = "gae"
+    adv_estimator: str = "grpo"
     kl_penalty: str = "kl"
     kl_type: str = "fixed"
     kl_coef: float = 1e-3
@@ -67,14 +67,14 @@ class TrainerConfig:
     project_name: str = "easy_r1"
     experiment_name: str = "demo"
     logger: Tuple[str] = ("console", "wandb")
-    val_generations_to_log_to_wandb: int = 0
     nnodes: int = 1
     n_gpus_per_node: int = 8
     save_freq: int = -1
     load_checkpoint_path: Optional[str] = None
     val_before_train: bool = True
     val_only: bool = False
-    test_freq: int = -1
+    val_generations_to_log_to_wandb: int = 1
+    val_freq: int = -1
     critic_warmup: int = 0
     remove_previous_ckpt: bool = False
     del_local_ckpt_after_load: bool = False

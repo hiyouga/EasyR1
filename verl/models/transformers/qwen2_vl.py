@@ -1,11 +1,40 @@
-from typing import Optional
+# Copyright 2024 The Qwen team, Alibaba Group and the HuggingFace Inc. team
+# Copyright 2024 Bytedance Ltd. and/or its affiliates
+# Based on:
+# https://github.com/huggingface/transformers/blob/v4.49.0/src/transformers/models/qwen2_vl/modeling_qwen2_vl.py
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+from typing import Optional, Tuple
 
 import torch
-from transformers.models.qwen2_5_vl.processing_qwen2_5_vl import Qwen2_5_VLProcessor
+
+from .flash_attention_utils import flash_attention_forward
+
+
+try:
+    from transformers.models.qwen2_vl.modeling_qwen2_vl import (
+        Qwen2VLAttention,
+        apply_multimodal_rotary_pos_emb,
+        repeat_kv,
+    )
+    from transformers.models.qwen2_vl.processing_qwen2_vl import Qwen2VLProcessor
+except ImportError:
+    pass
 
 
 def get_rope_index(
-    processor: Qwen2_5_VLProcessor,
+    processor: "Qwen2VLProcessor",
     input_ids: torch.Tensor,
     image_grid_thw: Optional[torch.Tensor] = None,
     video_grid_thw: Optional[torch.Tensor] = None,
@@ -105,3 +134,56 @@ def get_rope_index(
             position_ids = torch.arange(input_ids.shape[1], device=input_ids.device).view(1, -1).expand(3, -1)
 
     return position_ids
+
+
+def qwen2_vl_attn_forward(
+    self: "Qwen2VLAttention",
+    hidden_states: torch.Tensor,
+    attention_mask: Optional[torch.Tensor] = None,
+    position_ids: Optional[torch.LongTensor] = None,
+    position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # will become mandatory in v4.46
+    **kwargs,
+) -> Tuple[torch.Tensor, None, None]:
+    bsz, q_len, _ = hidden_states.size()  # q_len = seq_length / sp_size
+    query_states = self.q_proj(hidden_states)  # (batch_size, seq_length / sp_size, num_heads * head_size)
+    key_states = self.k_proj(hidden_states)
+    value_states = self.v_proj(hidden_states)
+
+    query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
+    key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+    value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+
+    # Because the input can be padded, the absolute sequence length depends on the max position id.
+    if position_embeddings is None:
+        cos, sin = self.rotary_emb(value_states, position_ids)
+    else:
+        cos, sin = position_embeddings
+
+    query_states, key_states = apply_multimodal_rotary_pos_emb(
+        query_states, key_states, cos, sin, self.rope_scaling["mrope_section"]
+    )
+    key_states = repeat_kv(key_states, self.num_key_value_groups)
+    value_states = repeat_kv(value_states, self.num_key_value_groups)
+    dropout_rate = 0.0 if not self.training else self.attention_dropout
+
+    sliding_window = None
+    if (
+        self.config.use_sliding_window
+        and getattr(self.config, "sliding_window", None) is not None
+        and self.layer_idx >= self.config.max_window_layers
+    ):
+        sliding_window = self.config.sliding_window
+
+    attn_output, _ = flash_attention_forward(
+        self,
+        query_states,
+        key_states,
+        value_states,
+        attention_mask,
+        dropout=dropout_rate,
+        sliding_window=sliding_window,
+        position_ids=position_ids,  # important: pass position ids
+    )  # (batch_size, seq_length, num_head / sp_size, head_size)
+    attn_output = attn_output.reshape(bsz, q_len, self.hidden_size).contiguous()
+    attn_output = self.o_proj(attn_output)
+    return attn_output, None, None

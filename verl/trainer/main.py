@@ -20,12 +20,12 @@ import json
 import ray
 from omegaconf import OmegaConf
 
-from verl.single_controller.ray import RayWorkerGroup
-from verl.trainer.config import PPOConfig
-from verl.trainer.ray_trainer import RayPPOTrainer, ResourcePoolManager, Role
-from verl.utils import get_processor, get_tokenizer
-from verl.workers.fsdp_workers import FSDPWorker
-from verl.workers.reward import CustomRewardManager
+from ..single_controller.ray import RayWorkerGroup
+from ..utils.tokenizer import get_processor, get_tokenizer
+from ..workers.fsdp_workers import FSDPWorker
+from ..workers.reward import CustomRewardManager
+from .config import PPOConfig
+from .ray_trainer import RayPPOTrainer, ResourcePoolManager, Role
 
 
 def main():

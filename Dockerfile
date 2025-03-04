@@ -37,11 +37,15 @@ RUN pip config set global.index-url "${PIP_INDEX}" && \
     python -m pip install --upgrade pip
 
 # Install torch-2.5.1 + vllm-0.7.3
-RUN pip install --no-cache-dir vllm==0.7.3 torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 tensordict \
+RUN pip install --no-cache-dir vllm==0.7.3 torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 tensordict torchdata \
     transformers>=4.49.0 accelerate datasets peft \
-    ray codetiming hydra-core pandas pyarrow>=15.0.0 pylatexenc qwen-vl-utils
+    ray codetiming hydra-core pandas pyarrow>=15.0.0 pylatexenc qwen-vl-utils wandb liger-kernel \
 
 # Install flash_attn-2.7.4.post1
 RUN pip uninstall -y transformer-engine flash-attn && \
     wget -nv https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.5cxx11abiFALSE-cp310-cp310-linux_x86_64.whl && \
     pip install --no-cache-dir flash_attn-2.7.4.post1+cu12torch2.5cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
+
+# Fix cv2
+RUN pip uninstall -y pynvml nvidia-ml-py && \
+    pip install nvidia-ml-py>=12.560.30 opencv-python-headless==4.11.0.86 fastapi==0.115.6

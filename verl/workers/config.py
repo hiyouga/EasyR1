@@ -17,10 +17,10 @@ ActorRolloutRef config
 
 from dataclasses import dataclass, field
 
-from verl.workers.actor import ActorConfig, FSDPConfig, ModelConfig, OptimConfig, RefConfig
-from verl.workers.critic import CriticConfig
-from verl.workers.reward import RewardConfig
-from verl.workers.rollout import RolloutConfig
+from .actor import ActorConfig, FSDPConfig, ModelConfig, OptimConfig, RefConfig
+from .critic import CriticConfig
+from .reward import RewardConfig
+from .rollout import RolloutConfig
 
 
 __all__ = [
@@ -47,4 +47,5 @@ class WorkerConfig:
 
     def post_init(self):
         self.ref.padding_free = self.actor.padding_free
+        self.ref.ulysses_sequence_parallel_size = self.actor.ulysses_sequence_parallel_size
         self.ref.micro_batch_size_per_device_for_experience = self.actor.micro_batch_size_per_device_for_experience

@@ -47,8 +47,8 @@ class OptimConfig:
 @dataclass
 class FSDPConfig:
     enable_full_shard: bool = True
-    param_offload: bool = False
-    optimizer_offload: bool = False
+    enable_cpu_offload: bool = False
+    enable_rank0_init: bool = False
     torch_dtype: Optional[str] = None
     mp_param_dtype: str = "bf16"
     mp_reduce_dtype: str = "fp32"
@@ -57,16 +57,16 @@ class FSDPConfig:
 
 @dataclass
 class OffloadConfig:
-    param_offload: bool = False
-    optimizer_offload: bool = False
+    offload_params: bool = False
+    offload_optimizer: bool = False
 
 
 @dataclass
 class ActorConfig:
     strategy: str = "fsdp"
     global_batch_size: int = 256
-    micro_batch_size_per_device_for_update: int = field(default=-1, init=False)
-    micro_batch_size_per_device_for_experience: int = field(default=-1, init=False)
+    micro_batch_size_per_device_for_update: int = 4
+    micro_batch_size_per_device_for_experience: int = 16
     max_grad_norm: float = 1.0
     clip_ratio: float = 0.2
     entropy_coeff: float = 1e-3
@@ -83,10 +83,6 @@ class ActorConfig:
     """auto keys"""
     global_batch_size_per_device: int = field(default=-1, init=False)
 
-    def post_init(self):
-        if self.ppo_epochs != 1:
-            raise NotImplementedError
-
 
 @dataclass
 class RefConfig:
@@ -95,3 +91,4 @@ class RefConfig:
     """auto keys"""
     micro_batch_size_per_device_for_experience: int = field(default=-1, init=False)
     padding_free: bool = field(default=False, init=False)
+    ulysses_sequence_parallel_size: int = field(default=1, init=False)

@@ -15,11 +15,27 @@
 Utilities to create common models
 """
 
+from functools import lru_cache
+from typing import Tuple
+
 import torch
+import torch.distributed as dist
 from torch import nn
 
 
-def get_model_size(model: nn.Module, scale="auto"):
+@lru_cache
+def is_rank0() -> int:
+    return (not dist.is_initialized()) or (dist.get_rank() == 0)
+
+
+def print_gpu_memory_usage(prefix: str) -> None:
+    if is_rank0():
+        memory_allocated = torch.cuda.memory_allocated() / 1024**3
+        memory_reserved = torch.cuda.memory_reserved() / 1024**3
+        print(f"{prefix} memory allocated (GB): {memory_allocated}, memory reserved (GB): {memory_reserved}.")
+
+
+def get_model_size(model: nn.Module, scale: str = "auto") -> Tuple[float, str]:
     n_params = sum(p.numel() for p in model.parameters())
 
     if scale == "auto":
@@ -41,18 +57,14 @@ def get_model_size(model: nn.Module, scale="auto"):
     elif scale == "":
         pass
     else:
-        raise NotImplementedError(f"Unknown scale {scale}")
+        raise NotImplementedError(f"Unknown scale {scale}.")
 
     return n_params, scale
 
 
-def print_model_size(model: nn.Module, name: str = None):
+def print_model_size(model: nn.Module, name: str = None) -> None:
     n_params, scale = get_model_size(model, scale="auto")
     if name is None:
         name = model.__class__.__name__
 
     print(f"{name} contains {n_params:.2f}{scale} parameters")
-
-
-def compute_position_id_with_mask(mask):
-    return torch.clip(torch.cumsum(mask, dim=-1) - 1, min=0, max=None)

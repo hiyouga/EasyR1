@@ -26,13 +26,11 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import numpy as np
 import ray
 import torch
-import torch.distributed as dist
 from numpy.typing import NDArray
 from tensordict import TensorDict
-from torch.distributed import ProcessGroup
 from torch.utils.data import DataLoader
 
-from verl.utils.py_functional import union_two_dict
+from .utils.py_functional import union_two_dict
 
 
 try:
@@ -89,21 +87,22 @@ def union_tensor_dict(tensor_dict1: TensorDict, tensor_dict2: TensorDict) -> Ten
             f"Two tensor dict must have identical batch size. Got {tensor_dict1.batch_size} and {tensor_dict2.batch_size}"
         )
 
-    for key, value in tensor_dict2.items():
-        if key in tensor_dict1 and not torch.equal(tensor_dict1[key], value):
+    for key in tensor_dict2.keys():
+        if key in tensor_dict1 and not torch.equal(tensor_dict1[key], tensor_dict2[key]):
             raise ValueError(f"Key already exists: {key}.")
 
-        tensor_dict1[key] = value
+        tensor_dict1[key] = tensor_dict2[key]
 
     return tensor_dict1
 
 
-def union_numpy_dict(
-    tensor_dict1: Dict[str, Union[List, NDArray]], tensor_dict2: Dict[str, Union[List, NDArray]]
-) -> Dict[str, Union[List, NDArray]]:
-    for key, value in tensor_dict2.items():
-        if key in tensor_dict1 and isinstance(value, np.ndarray) and not np.all(tensor_dict1[key] == value):
-            raise ValueError(f"Key already exists: {key}.")
+def union_numpy_dict(tensor_dict1: Dict[str, NDArray], tensor_dict2: Dict[str, NDArray]) -> Dict[str, NDArray]:
+    for key in tensor_dict2.keys():
+        if key in tensor_dict1:
+            assert isinstance(tensor_dict2[key], np.ndarray)
+            assert isinstance(tensor_dict1[key], np.ndarray)
+            if not np.all(tensor_dict1[key] == tensor_dict2[key]):
+                raise ValueError(f"Key already exists: {key}.")
 
         tensor_dict1[key] = tensor_dict2[key]
 
@@ -151,6 +150,7 @@ def collate_fn(data_items: list["DataProtoItem"]):
 
     batch = torch.stack(batch).contiguous()
     non_tensor_batch = batch_collate(non_tensor_batch)
+    non_tensor_batch = {key: np.array(value, dtype=object) for key, value in non_tensor_batch.items()}
     return DataProto(batch=batch, non_tensor_batch=non_tensor_batch)
 
 
@@ -229,8 +229,7 @@ class DataProto:
 
         size_of_numpy_array = 0
         for value in self.non_tensor_batch.values():
-            if isinstance(value, np.ndarray):
-                size_of_numpy_array += value.nbytes
+            size_of_numpy_array += value.nbytes
 
         size_of_numpy_array /= 1024**3
         size_of_tensordict /= 1024**3
@@ -254,13 +253,13 @@ class DataProto:
                 assert len(val) == batch_size, f"key {key} length {len(val)} is not equal to batch size {batch_size}."
 
     @classmethod
-    def from_single_dict(cls, data: Dict[str, Union[torch.Tensor, list, NDArray]], meta_info=None):
+    def from_single_dict(cls, data: Dict[str, Union[torch.Tensor, NDArray]], meta_info=None):
         tensors = {}
         non_tensors = {}
         for key, value in data.items():
             if isinstance(value, torch.Tensor):
                 tensors[key] = value
-            elif isinstance(value, (list, np.ndarray)):
+            elif isinstance(value, np.ndarray):
                 non_tensors[key] = value
             else:
                 raise ValueError(f"Unsupported type in data {type(value)}")
@@ -472,8 +471,6 @@ class DataProto:
         assert len(self) % chunks == 0, (
             f"only support equal chunk. Got size of DataProto {len(self)} and chunk {chunks}."
         )
-        chunk_size = len(self) // chunks
-
         if self.batch is not None:
             batch_lst = self.batch.chunk(chunks=chunks, dim=0)
         else:
@@ -481,12 +478,8 @@ class DataProto:
 
         non_tensor_batch_lst = [{} for _ in range(chunks)]
         for key, value in self.non_tensor_batch.items():
-            assert isinstance(value, (list, np.ndarray))
-            if isinstance(value, np.ndarray):
-                non_tensor_lst = np.array_split(value, chunks)
-            else:
-                non_tensor_lst = [value[i : i + chunk_size] for i in range(0, len(self), chunk_size)]
-
+            assert isinstance(value, np.ndarray)
+            non_tensor_lst = np.array_split(value, chunks)
             assert len(non_tensor_lst) == chunks
             for i in range(chunks):
                 non_tensor_batch_lst[i][key] = non_tensor_lst[i]
@@ -524,12 +517,7 @@ class DataProto:
 
         non_tensor_batch = batch_collate([d.non_tensor_batch for d in data])
         for key, value in non_tensor_batch.items():
-            if isinstance(value[0], np.ndarray):
-                non_tensor_batch[key] = np.concatenate(value, axis=0)
-            else:
-                non_tensor_batch[key] = []
-                for item in value:
-                    non_tensor_batch[key].extend(item)
+            non_tensor_batch[key] = np.concatenate(value, axis=0)
 
         return DataProto(batch=new_batch, non_tensor_batch=non_tensor_batch, meta_info=data[0].meta_info)
 
@@ -574,55 +562,16 @@ class DataProto:
 
         repeated_non_tensor_batch = {}
         for key, value in self.non_tensor_batch.items():
-            if isinstance(value, np.ndarray):
-                if interleave:
-                    repeated_non_tensor_batch[key] = np.repeat(value, repeat_times, axis=0)
-                else:
-                    repeated_non_tensor_batch[key] = np.tile(value, (repeat_times,) + (1,) * (value.ndim - 1))
+            if interleave:
+                repeated_non_tensor_batch[key] = np.repeat(value, repeat_times, axis=0)
             else:
-                if interleave:
-                    repeated_non_tensor_batch[key] = [item for item in value for _ in range(repeat_times)]
-                else:
-                    repeated_non_tensor_batch[key] = [item for _ in range(repeat_times) for item in value]
+                repeated_non_tensor_batch[key] = np.tile(value, (repeat_times,) + (1,) * (value.ndim - 1))
 
         return DataProto(
             batch=repeated_batch,
             non_tensor_batch=repeated_non_tensor_batch,
             meta_info=self.meta_info,
         )
-
-    def broadcast(self, src: int, group: Optional[ProcessGroup] = None):
-        for key in self.batch.sorted_keys:
-            dist.broadcast(self.batch[key], src=src, group=group, async_op=False)
-
-        object_list = [self.non_tensor_batch]
-        dist.broadcast_object_list(object_list, src=src, group=group)
-        self.non_tensor_batch = object_list[0]
-
-    def all_gather(self, group: Optional[ProcessGroup] = None):
-        world_size = dist.get_world_size(group)
-        output = {}
-        for key in self.batch.sorted_keys:
-            value = self.batch[key].contiguous()
-            output[key] = [torch.empty_like(value) for _ in range(world_size)]
-            dist.all_gather(output[key], value, group=group, async_op=False)
-            output[key] = torch.cat(output[key], dim=0)
-
-        self.batch = TensorDict(output, batch_size=self.batch.batch_size[0] * world_size)
-
-        # all gather non_tensor_batch
-        all_non_tensor_batch = [None for _ in range(world_size)]
-        dist.all_gather_object(all_non_tensor_batch, self.non_tensor_batch, group=group)
-        non_tensor_batch = defaultdict(list)
-        for key, value in self.non_tensor_batch.items():
-            if isinstance(value, np.ndarray):
-                non_tensor_batch[key] = np.concatenate([batch[key] for batch in all_non_tensor_batch])
-            else:
-                for batch in all_non_tensor_batch:
-                    non_tensor_batch[key].extend(batch[key])
-
-        self.non_tensor_batch = non_tensor_batch
-        self.check_consistency()
 
 
 @dataclass

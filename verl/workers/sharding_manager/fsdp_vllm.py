@@ -13,6 +13,7 @@
 # limitations under the License.
 
 
+import numpy as np
 import torch
 import torch.distributed as dist
 from torch.distributed.device_mesh import DeviceMesh
@@ -21,10 +22,10 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataP
 from vllm import LLM
 from vllm.distributed import parallel_state as vllm_ps
 
-from verl import DataProto
-from verl.utils.performance import log_gpu_memory_usage
-from verl.workers.rollout.vllm_rollout import load_dtensor_weights
-
+from ...protocol import DataProto
+from ...utils import torch_functional as VF
+from ...utils.model_utils import print_gpu_memory_usage
+from ..rollout.vllm_rollout import load_dtensor_weights
 from .base import BaseShardingManager
 
 
@@ -56,28 +57,28 @@ class FSDPVLLMShardingManager(BaseShardingManager):
             self.gen_random_states = None
 
     def __enter__(self):
-        log_gpu_memory_usage("Before state_dict() in sharding manager")
+        print_gpu_memory_usage("Before state_dict() in sharding manager")
         actor_weights = self.module.state_dict()
-        log_gpu_memory_usage("After state_dict() in sharding manager")
+        print_gpu_memory_usage("After state_dict() in sharding manager")
 
         self.inference_engine.wake_up()
         load_dtensor_weights(
             actor_weights, self.inference_engine.llm_engine.model_executor.driver_worker.worker.model_runner.model
         )
-        log_gpu_memory_usage("After sync model weights in sharding manager")
+        print_gpu_memory_usage("After sync model weights in sharding manager")
 
         del actor_weights
         torch.cuda.empty_cache()
-        log_gpu_memory_usage("After del state_dict and empty_cache in sharding manager")
+        print_gpu_memory_usage("After del state_dict and empty_cache in sharding manager")
         # important: need to manually set the random states of each tp to be identical.
         if self.device_mesh is not None:
             self.torch_random_states = torch.cuda.get_rng_state()
             torch.cuda.set_rng_state(self.gen_random_states)
 
     def __exit__(self, exc_type, exc_value, traceback):
-        log_gpu_memory_usage("Before vllm offload in sharding manager")
+        print_gpu_memory_usage("Before vllm offload in sharding manager")
         self.inference_engine.sleep(level=1)
-        log_gpu_memory_usage("After vllm offload in sharding manager")
+        print_gpu_memory_usage("After vllm offload in sharding manager")
 
         self.module.train()
         torch.cuda.empty_cache()  # add empty cache after each compute
@@ -88,9 +89,19 @@ class FSDPVLLMShardingManager(BaseShardingManager):
             torch.cuda.set_rng_state(self.torch_random_states)
 
     def preprocess_data(self, data: DataProto) -> DataProto:
-        tp_group = vllm_ps.get_tensor_model_parallel_group().device_group
-        data = data.to("cuda")
-        data.all_gather(tp_group)
+        tp_size = vllm_ps.get_tensor_model_parallel_world_size()
+        group = vllm_ps.get_tensor_model_parallel_group().device_group
+
+        prev_device = data.batch.device
+        data.batch = data.batch.cuda(device=torch.cuda.current_device())
+        data.batch = VF.allgather_dict_tensors(data.batch.contiguous(), size=tp_size, group=group, dim=0)
+        data.batch = data.batch.to(prev_device)
+        # all gather non_tensor_batch
+        all_non_tensor_batch = [None for _ in range(tp_size)]
+        torch.distributed.all_gather_object(all_non_tensor_batch, data.non_tensor_batch, group=group)
+        data.non_tensor_batch = {
+            k: np.concatenate([d[k] for d in all_non_tensor_batch]) for k in data.non_tensor_batch
+        }
         return data
 
     def postprocess_data(self, data: DataProto) -> DataProto:

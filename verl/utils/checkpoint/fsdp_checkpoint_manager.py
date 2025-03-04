@@ -14,12 +14,13 @@
 
 import os
 import warnings
+from typing import Union
 
 import torch
 import torch.distributed
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import ShardedOptimStateDictConfig, ShardedStateDictConfig, StateDictType
-from transformers import PreTrainedTokenizer, ProcessorMixin
+from transformers import PreTrainedModel, PreTrainedTokenizer, ProcessorMixin
 
 from .checkpoint_manager import BaseCheckpointManager
 
@@ -44,14 +45,11 @@ class FSDPCheckpointManager(BaseCheckpointManager):
         model: FSDP,
         optimizer: torch.optim.Optimizer,
         lr_scheduler: torch.optim.lr_scheduler.LRScheduler,
-        tokenizer: PreTrainedTokenizer,
-        processor: ProcessorMixin,
-        *args,
-        **kwargs,
+        processing_class: Union[PreTrainedTokenizer, ProcessorMixin],
     ):
-        super().__init__(model, optimizer, lr_scheduler, tokenizer, processor)
+        super().__init__(model, optimizer, lr_scheduler, processing_class)
 
-    def load_checkpoint(self, path=None, *args, **kwargs):
+    def load_checkpoint(self, path: str = None, del_local_after_load: bool = False):
         if path is None:
             return
 
@@ -67,42 +65,43 @@ class FSDPCheckpointManager(BaseCheckpointManager):
         extra_state_dict = torch.load(local_extra_state_path)
         lr_scheduler_state_dict = extra_state_dict["lr_scheduler"]
 
-        state_dict_cfg = ShardedStateDictConfig(offload_to_cpu=True)
-        optim_cfg = ShardedOptimStateDictConfig(offload_to_cpu=True)
-        with FSDP.state_dict_type(self.model, StateDictType.SHARDED_STATE_DICT, state_dict_cfg, optim_cfg):
+        state_dict_config = ShardedStateDictConfig(offload_to_cpu=True)
+        optim_config = ShardedOptimStateDictConfig(offload_to_cpu=True)
+        with FSDP.state_dict_type(self.model, StateDictType.SHARDED_STATE_DICT, state_dict_config, optim_config):
             self.model.load_state_dict(model_state_dict)
             if self.optimizer is not None:
                 self.optimizer.load_state_dict(optimizer_state_dict)
+
         # recover random state
         if "rng" in extra_state_dict:
-            # 'rng' may not exist for backward compatibility
             self.load_rng_state(extra_state_dict["rng"])
 
         if self.lr_scheduler is not None:
             self.lr_scheduler.load_state_dict(lr_scheduler_state_dict)
 
-    def save_checkpoint(self, local_path: str, global_step: int, remove_previous_ckpt=False, *args, **kwargs):
+    def save_checkpoint(self, local_path: str, global_step: int, remove_previous_ckpt: bool = False):
         # record the previous global step
         self.previous_global_step = global_step
 
         # remove previous local_path
-        # TODO: shall we remove previous ckpt every save?
         if remove_previous_ckpt:
             self.remove_previous_save_local_path()
+
         local_path = self.local_mkdir(local_path)
         torch.distributed.barrier()
 
         # every rank will save its own model and optim shard
-        state_dict_cfg = ShardedStateDictConfig(offload_to_cpu=True)
-        optim_cfg = ShardedOptimStateDictConfig(offload_to_cpu=True)
+        state_dict_config = ShardedStateDictConfig(offload_to_cpu=True)
+        optim_config = ShardedOptimStateDictConfig(offload_to_cpu=True)
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            with FSDP.state_dict_type(self.model, StateDictType.SHARDED_STATE_DICT, state_dict_cfg, optim_cfg):
+            with FSDP.state_dict_type(self.model, StateDictType.SHARDED_STATE_DICT, state_dict_config, optim_config):
                 model_state_dict = self.model.state_dict()
                 if self.optimizer is not None:
                     optimizer_state_dict = self.optimizer.state_dict()
                 else:
                     optimizer_state_dict = None
+
                 if self.lr_scheduler is not None:
                     lr_scheduler_state_dict = self.lr_scheduler.state_dict()
                 else:
@@ -116,11 +115,13 @@ class FSDPCheckpointManager(BaseCheckpointManager):
                 optim_path = os.path.join(local_path, f"optim_world_size_{self.world_size}_rank_{self.rank}.pt")
                 extra_path = os.path.join(local_path, f"extra_state_world_size_{self.world_size}_rank_{self.rank}.pt")
 
-                print(f"[rank-{self.rank}]: Saving model to {os.path.abspath(model_path)}")
-                print(f"[rank-{self.rank}]: Saving checkpoint to {os.path.abspath(model_path)}")
-                print(f"[rank-{self.rank}]: Saving extra_state to {os.path.abspath(extra_path)}")
+                print(f"[rank-{self.rank}]: Saving model to {os.path.abspath(model_path)}.")
+                print(f"[rank-{self.rank}]: Saving checkpoint to {os.path.abspath(model_path)}.")
+                print(f"[rank-{self.rank}]: Saving extra_state to {os.path.abspath(extra_path)}.")
                 torch.save(model_state_dict, model_path)
-                torch.save(optimizer_state_dict, optim_path)  # TODO: address optimizer is None
+                if self.optimizer is not None:
+                    torch.save(optimizer_state_dict, optim_path)
+
                 torch.save(extra_state_dict, extra_path)
 
         # wait for everyone to dump to local
@@ -129,12 +130,10 @@ class FSDPCheckpointManager(BaseCheckpointManager):
         if self.rank == 0:
             hf_local_path = os.path.join(local_path, "huggingface")
             os.makedirs(hf_local_path, exist_ok=True)
+            assert isinstance(self.model._fsdp_wrapped_module, PreTrainedModel)
             self.model._fsdp_wrapped_module.config.save_pretrained(hf_local_path)
-            if self.processor:
-                self.processor.save_pretrained(hf_local_path)
-            else:
-                self.tokenizer.save_pretrained(hf_local_path)
+            self.model._fsdp_wrapped_module.generation_config.save_pretrained(hf_local_path)
+            self.processing_class.save_pretrained(hf_local_path)
 
         torch.distributed.barrier()
-
         self.previous_save_local_path = local_path

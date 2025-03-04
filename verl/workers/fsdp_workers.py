@@ -15,6 +15,7 @@
 The main entry point to run the PPO algorithm
 """
 
+import os
 from typing import Literal
 
 import torch
@@ -34,13 +35,13 @@ from transformers import (
 )
 from transformers.modeling_utils import no_init_weights
 
-from verl import DataProto
-from verl.single_controller.base import Worker
-from verl.single_controller.base.decorator import Dispatch, register
-from verl.utils import get_tokenizer, get_processor
-from verl.utils.checkpoint.fsdp_checkpoint_manager import FSDPCheckpointManager
-from verl.utils.flops_counter import FlopsCounter
-from verl.utils.fsdp_utils import (
+from ..models.monkey_patch import apply_ulysses_patch
+from ..protocol import DataProto
+from ..single_controller.base import Worker
+from ..single_controller.base.decorator import Dispatch, register
+from ..utils.checkpoint.fsdp_checkpoint_manager import FSDPCheckpointManager
+from ..utils.flops_counter import FlopsCounter
+from ..utils.fsdp_utils import (
     get_fsdp_wrap_policy,
     get_init_fn,
     load_fsdp_model,
@@ -48,16 +49,16 @@ from verl.utils.fsdp_utils import (
     offload_fsdp_model,
     offload_fsdp_optimizer,
 )
-from verl.utils.model_utils import print_model_size
-from verl.utils.performance import log_gpu_memory_usage
-from verl.utils.torch_dtypes import PrecisionType
-from verl.utils.torch_functional import get_constant_schedule_with_warmup
-from verl.workers.actor import DataParallelPPOActor
-from verl.workers.config import FSDPConfig, ModelConfig, OptimConfig, WorkerConfig
-from verl.workers.critic import DataParallelPPOCritic
-from verl.workers.rollout.vllm_rollout import vLLMRollout
-from verl.workers.sharding_manager import FSDPVLLMShardingManager
-from verl.workers.sharding_manager.fsdp_ulysses import FSDPUlyssesShardingManager
+from ..utils.model_utils import print_gpu_memory_usage, print_model_size
+from ..utils.tokenizer import get_processor, get_tokenizer
+from ..utils.torch_dtypes import PrecisionType
+from ..utils.torch_functional import get_constant_schedule_with_warmup
+from .actor import DataParallelPPOActor
+from .config import FSDPConfig, ModelConfig, OptimConfig, WorkerConfig
+from .critic import DataParallelPPOCritic
+from .rollout.vllm_rollout import vLLMRollout
+from .sharding_manager import FSDPVLLMShardingManager
+from .sharding_manager.fsdp_ulysses import FSDPUlyssesShardingManager
 
 
 class FSDPWorker(Worker):
@@ -74,8 +75,10 @@ class FSDPWorker(Worker):
 
         # build device mesh for FSDP
         # TODO: support FSDP hybrid shard for larger model
+        local_rank = os.getenv("LOCAL_RANK")
         world_size = dist.get_world_size()
-        self.device_mesh = init_device_mesh("cuda", mesh_shape=(world_size,), mesh_dim_names=["fsdp"])
+        self.device_mesh = init_device_mesh("cuda", mesh_shape=(world_size,), mesh_dim_names=("fsdp",))
+        torch.cuda.set_device(f"cuda:{local_rank}")
 
         # build device mesh for Ulysses Sequence Parallel
         self.ulysses_sequence_parallel_size = self.config.actor.ulysses_sequence_parallel_size
@@ -99,14 +102,13 @@ class FSDPWorker(Worker):
         self._use_param_offload = False
         self._use_optimizer_offload = False
         if self._is_actor:
-            self._use_param_offload = self.config.actor.offload.param_offload
-            self._use_optimizer_offload = self.config.actor.offload.optimizer_offload
+            self._use_param_offload = self.config.actor.offload.offload_params
+            self._use_optimizer_offload = self.config.actor.offload.offload_optimizer
         elif self._is_critic:
-            self._use_param_offload = self.config.critic.offload.param_offload
-            self._use_optimizer_offload = self.config.critic.offload.optimizer_offload
-        elif self._is_ref:
-            # NOTE: it seems that manual offload is slowly than FSDP offload
-            self._use_param_offload = self.config.ref.offload.param_offload
+            self._use_param_offload = self.config.critic.offload.offload_params
+            self._use_optimizer_offload = self.config.critic.offload.offload_optimizer
+        elif self._is_ref:  # NOTE: it seems that manual offload is slowly than FSDP offload
+            self._use_param_offload = self.config.ref.offload.offload_params
 
         # normalize config
         if self._is_actor:
@@ -156,7 +158,8 @@ class FSDPWorker(Worker):
         self.print_rank0(f"Model config: {self.model_config}")
 
         if padding_free:
-            raise NotImplementedError("Padding free is not implemented yet.")
+            apply_ulysses_patch(self.model_config.model_type)
+            self.print_rank0("Ulysses patch applied!")
 
         if fsdp_config.torch_dtype is None:
             torch_dtype = torch.float32 if self._is_actor or self._is_critic else torch.bfloat16
@@ -170,13 +173,13 @@ class FSDPWorker(Worker):
         else:
             auto_class = AutoModelForCausalLM
 
-        if self.rank == 0:
+        if (not fsdp_config.enable_rank0_init) or self.rank == 0:
             model = auto_class.from_pretrained(
                 model_config.model_path,
                 config=self.model_config,
                 torch_dtype=torch_dtype,
                 attn_implementation="flash_attention_2",
-                device_map="cpu",
+                device_map="cpu" if fsdp_config.enable_rank0_init else "cuda",
                 low_cpu_mem_usage=True,
                 trust_remote_code=model_config.trust_remote_code,
             )
@@ -199,7 +202,7 @@ class FSDPWorker(Worker):
         if self.rank == 0:
             print_model_size(model)
 
-        log_gpu_memory_usage("After init from huggingface model")
+        print_gpu_memory_usage("After init from huggingface model")
         mixed_precision = MixedPrecision(
             param_dtype=PrecisionType.to_dtype(fsdp_config.mp_param_dtype),
             reduce_dtype=PrecisionType.to_dtype(fsdp_config.mp_reduce_dtype),
@@ -211,10 +214,17 @@ class FSDPWorker(Worker):
         else:
             sharding_strategy = ShardingStrategy.SHARD_GRAD_OP
 
-        if fsdp_config.param_offload or fsdp_config.optimizer_offload:
-            cpu_offload = CPUOffload(offload_params=fsdp_config.param_offload)
+        if fsdp_config.enable_cpu_offload:
+            cpu_offload = CPUOffload(offload_params=True)
         else:
             cpu_offload = None
+
+        if fsdp_config.enable_rank0_init:
+            sync_module_states = True
+            param_init_fn = get_init_fn(model, device="cuda") if self.rank != 0 else None
+        else:
+            sync_module_states = False
+            param_init_fn = None
 
         if self.rank == 0:
             print(f"FSDP wrap policy: {auto_wrap_policy}.")
@@ -225,14 +235,14 @@ class FSDPWorker(Worker):
             cpu_offload=cpu_offload,
             auto_wrap_policy=auto_wrap_policy,
             mixed_precision=mixed_precision,
-            param_init_fn=get_init_fn(model, device="cuda") if self.rank != 0 else None,
+            param_init_fn=param_init_fn,
             device_id=torch.cuda.current_device(),
-            sync_module_states=True,
+            sync_module_states=sync_module_states,
             forward_prefetch=False,
             use_orig_params=False,
             device_mesh=self.device_mesh,
         )
-        log_gpu_memory_usage("After Actor FSDP init")
+        print_gpu_memory_usage("After actor FSDP init")
 
         if self._is_actor or self._is_critic:
             self.optimizer = torch.optim.AdamW(
@@ -248,7 +258,7 @@ class FSDPWorker(Worker):
         else:
             self.optimizer, self.lr_scheduler = None, None
 
-        log_gpu_memory_usage("After actor optimizer init")
+        print_gpu_memory_usage("After actor optimizer init")
 
     def _build_rollout(self) -> None:
         # TODO(sgm): support FSDP hybrid shard for larger model
@@ -258,20 +268,20 @@ class FSDPWorker(Worker):
             f"rollout world_size: {self.world_size} is not divisible by tp_size: {tp_size}"
         )
         rollout_device_mesh = init_device_mesh("cuda", mesh_shape=(dp_size, tp_size), mesh_dim_names=["dp", "tp"])
-        log_gpu_memory_usage("Before building vllm rollout")
+        print_gpu_memory_usage("Before building vllm rollout")
         self.rollout = vLLMRollout(
             model_path=self.config.actor.model.model_path,
             config=self.config.rollout,
             tokenizer=self.tokenizer,
         )
-        log_gpu_memory_usage("After building vllm rollout")
+        print_gpu_memory_usage("After building vllm rollout")
 
         self.rollout_sharding_manager = FSDPVLLMShardingManager(
             module=self.fsdp_module,
             inference_engine=self.rollout.inference_engine,
             device_mesh=rollout_device_mesh,
         )
-        log_gpu_memory_usage("After building sharding manager")
+        print_gpu_memory_usage("After building sharding manager")
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
     def init_model(self):
@@ -297,7 +307,7 @@ class FSDPWorker(Worker):
             self.unwrapped_model = self.fsdp_module._fsdp_wrapped_module
             if self._use_optimizer_offload and not self._is_critic:
                 offload_fsdp_optimizer(optimizer=self.optimizer)
-                log_gpu_memory_usage("After offload actor optimizer during init")
+                print_gpu_memory_usage("After offload actor optimizer during init")
 
         if self._is_actor:
             self.actor = DataParallelPPOActor(
@@ -317,7 +327,10 @@ class FSDPWorker(Worker):
             self._build_rollout()
 
         if self._is_ref:
-            self.ref_policy = DataParallelPPOActor(config=self.config.ref, actor_module=self.fsdp_module)
+            self.ref_policy = DataParallelPPOActor(
+                config=self.config.ref,
+                actor_module=self.fsdp_module,
+            )
 
         if self._is_actor or self._is_critic:
             self.flops_counter = FlopsCounter(self.model_config)
@@ -325,8 +338,7 @@ class FSDPWorker(Worker):
                 model=self.fsdp_module,
                 optimizer=self.optimizer,
                 lr_scheduler=self.lr_scheduler,
-                tokenizer=self.tokenizer,
-                processor=self.processor
+                processing_class=self.processor if self.processor is not None else self.tokenizer,
             )
 
         torch.cuda.empty_cache()
@@ -361,6 +373,7 @@ class FSDPWorker(Worker):
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def update_actor(self, data: DataProto):
         assert self._is_actor
+        data = data.to("cuda")
 
         if self._use_param_offload:
             load_fsdp_model(self.fsdp_module)
@@ -368,7 +381,7 @@ class FSDPWorker(Worker):
         if self._use_optimizer_offload:
             load_fsdp_optimizer(optimizer=self.optimizer)
 
-        log_gpu_memory_usage("Before update policy")
+        print_gpu_memory_usage("Before update policy")
         with self.ulysses_sharding_manager:
             data = self.ulysses_sharding_manager.preprocess_data(data=data)
             with Timer(name="update_policy", logger=None) as timer:
@@ -382,12 +395,11 @@ class FSDPWorker(Worker):
             self.lr_scheduler.step()
             lr = self.lr_scheduler.get_last_lr()[0]
             metrics["actor/lr"] = lr
-            log_gpu_memory_usage("After update policy")
+            print_gpu_memory_usage("After update policy")
 
             # TODO: here, we should return all metrics
             output = DataProto(meta_info={"metrics": metrics})
             output = self.ulysses_sharding_manager.postprocess_data(data=output)
-            output = output.to("cpu")
 
         if self._use_param_offload:
             offload_fsdp_model(self.fsdp_module)
@@ -395,12 +407,14 @@ class FSDPWorker(Worker):
         if self._use_optimizer_offload:
             offload_fsdp_optimizer(optimizer=self.optimizer)
 
+        output = output.to("cpu")
         torch.cuda.empty_cache()
         return output
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def generate_sequences(self, prompts: DataProto):
         assert self._is_rollout
+        prompts = prompts.to("cuda")
 
         if self._use_param_offload:
             load_fsdp_model(self.fsdp_module)
@@ -422,22 +436,21 @@ class FSDPWorker(Worker):
             if self._use_optimizer_offload:
                 offload_fsdp_optimizer(optimizer=self.optimizer)
 
-            log_gpu_memory_usage("After entering rollout sharding manager")
-
+            print_gpu_memory_usage("After entering rollout sharding manager")
             prompts = self.rollout_sharding_manager.preprocess_data(prompts)
             output = self.rollout.generate_sequences(prompts=prompts)
-            log_gpu_memory_usage("After rollout generation")
-
             output = self.rollout_sharding_manager.postprocess_data(output)
+            print_gpu_memory_usage("After rollout generation")
 
         output = output.to("cpu")
         torch.cuda.empty_cache()  # clear kv cache
-        log_gpu_memory_usage("After recompute log prob")
+        print_gpu_memory_usage("After recompute log prob")
         return output
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def compute_log_prob(self, data: DataProto):
         assert self._is_actor
+        data = data.to("cuda")
         if self._use_param_offload:
             load_fsdp_model(self.fsdp_module)
 
@@ -452,8 +465,6 @@ class FSDPWorker(Worker):
             )
             output = self.ulysses_sharding_manager.postprocess_data(output)
 
-        output = output.to("cpu")
-
         # https://pytorch.org/docs/stable/notes/fsdp.html#fsdp-notes
         # unshard the root FSDP module
         if self.world_size > 1:
@@ -462,13 +473,15 @@ class FSDPWorker(Worker):
         if self._use_param_offload:
             offload_fsdp_model(self.fsdp_module)
 
+        output = output.to("cpu")
         torch.cuda.empty_cache()
-        log_gpu_memory_usage("After compute_log_prob")
+        print_gpu_memory_usage("After compute_log_prob")
         return output
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def compute_ref_log_prob(self, data: DataProto):
         assert self._is_ref
+        data = data.to("cuda")
         if self._use_param_offload:
             load_fsdp_model(self.fsdp_module)
 
@@ -479,8 +492,6 @@ class FSDPWorker(Worker):
             output = DataProto.from_dict(tensors={"ref_log_prob": output})
             output = self.ulysses_sharding_manager.postprocess_data(output)
 
-        output = output.to("cpu")
-
         # https://pytorch.org/docs/stable/notes/fsdp.html#fsdp-notes
         # unshard the root FSDP module
         if self.world_size > 1:
@@ -489,8 +500,9 @@ class FSDPWorker(Worker):
         if self._use_param_offload:
             offload_fsdp_model(self.fsdp_module)
 
+        output = output.to("cpu")
         torch.cuda.empty_cache()
-        log_gpu_memory_usage("After compute_ref_log_prob")
+        print_gpu_memory_usage("After compute_ref_log_prob")
         return output
 
     """CriticWorker"""
@@ -498,6 +510,7 @@ class FSDPWorker(Worker):
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def compute_values(self, data: DataProto):
         assert self._is_critic
+        data = data.to("cuda")
         if self._use_param_offload:
             load_fsdp_model(self.fsdp_module)
 
@@ -507,15 +520,16 @@ class FSDPWorker(Worker):
             output = DataProto.from_dict(tensors={"values": values})
             output = self.ulysses_sharding_manager.postprocess_data(data=output)
 
-        output = output.to("cpu")
         if self._use_param_offload:
             offload_fsdp_model(self.fsdp_module)
 
+        output = output.to("cpu")
         torch.cuda.empty_cache()
         return output
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def update_critic(self, data: DataProto):
+        data = data.to("cuda")
         if self._use_param_offload:
             load_fsdp_model(self.fsdp_module)
 
@@ -539,12 +553,12 @@ class FSDPWorker(Worker):
             output = DataProto(batch=None, meta_info={"metrics": metrics})
             output = self.ulysses_sharding_manager.postprocess_data(data=output)
 
-        output = output.to("cpu")
         if self._use_param_offload:
             offload_fsdp_model(self.fsdp_module)
 
         if self._use_optimizer_offload:
             offload_fsdp_optimizer(optimizer=self.optimizer)
 
+        output = output.to("cpu")
         torch.cuda.empty_cache()
         return output

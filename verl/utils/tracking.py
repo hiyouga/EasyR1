@@ -18,7 +18,7 @@ A unified tracking interface that supports logging data to different backend
 import os
 from typing import List, Union
 
-from verl.utils.logger.aggregate_logger import LocalLogger
+from .logger.aggregate_logger import LocalLogger
 
 
 class Tracking:
@@ -65,7 +65,7 @@ class Tracking:
             self.logger["swanlab"] = swanlab
 
         if "console" in default_backend:
-            self.console_logger = LocalLogger(print_to_console=True)
+            self.console_logger = LocalLogger()
             self.logger["console"] = self.console_logger
 
     def log(self, data, step, backend=None):

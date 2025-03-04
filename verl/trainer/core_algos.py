@@ -1,5 +1,5 @@
+# Copyright 2022 The HuggingFace Team
 # Copyright 2024 Bytedance Ltd. and/or its affiliates
-# Copyright 2022 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,20 +18,26 @@ The function implemented in this file should be used by trainer with different d
 implement PPO
 """
 
+from abc import ABC, abstractmethod
 from collections import defaultdict
 from typing import TYPE_CHECKING, Tuple
 
 import numpy as np
 import torch
 
-import verl.utils.torch_functional as verl_F
+from ..utils import torch_functional as VF
 
 
 if TYPE_CHECKING:
-    from verl.trainer.config import AlgorithmConfig
+    from .config import AlgorithmConfig
 
 
-class AdaptiveKLController:
+class KLController(ABC):
+    @abstractmethod
+    def update(self, current_kl: float, n_steps: int) -> None: ...
+
+
+class AdaptiveKLController(KLController):
     """
     Adaptive KL controller described in the paper:
     https://arxiv.org/pdf/1909.08593.pdf
@@ -42,26 +48,26 @@ class AdaptiveKLController:
         self.target = target_kl
         self.horizon = horizon
 
-    def update(self, current_kl, n_steps):
+    def update(self, current_kl: float, n_steps: int) -> None:
         target = self.target
         proportional_error = np.clip(current_kl / target - 1, -0.2, 0.2)
         mult = 1 + proportional_error * n_steps / self.horizon
         self.value *= mult
 
 
-class FixedKLController:
+class FixedKLController(KLController):
     """Fixed KL controller."""
 
-    def __init__(self, kl_coef: float):
-        self.value = kl_coef
+    def __init__(self, init_kl_coef: float):
+        self.value = init_kl_coef
 
-    def update(self, current_kl, n_steps):
+    def update(self, current_kl: float, n_steps: int) -> None:
         pass
 
 
-def get_kl_controller(algorithm_config: "AlgorithmConfig"):
+def get_kl_controller(algorithm_config: "AlgorithmConfig") -> KLController:
     if algorithm_config.kl_type == "fixed":
-        kl_ctrl = FixedKLController(kl_coef=algorithm_config.kl_coef)
+        kl_ctrl = FixedKLController(init_kl_coef=algorithm_config.kl_coef)
     elif algorithm_config.kl_type == "adaptive":
         assert algorithm_config.kl_horizon > 0, f"horizon must be larger than 0. Got {algorithm_config.kl_horizon}."
         kl_ctrl = AdaptiveKLController(
@@ -70,18 +76,19 @@ def get_kl_controller(algorithm_config: "AlgorithmConfig"):
             horizon=algorithm_config.kl_horizon,
         )
     else:
-        raise ValueError("Unknown kl_ctrl type")
+        raise ValueError(f"Unknown kl type: {algorithm_config.kl_type}.")
 
     return kl_ctrl
 
 
+@torch.no_grad()
 def compute_gae_advantage_return(
     token_level_rewards: torch.Tensor,
     values: torch.Tensor,
     eos_mask: torch.Tensor,
     gamma: torch.Tensor,
     lam: torch.Tensor,
-):
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """Adapted from https://github.com/huggingface/trl/blob/main/trl/trainer/ppo_trainer.py
 
     Args:
@@ -103,27 +110,26 @@ def compute_gae_advantage_return(
             shape: (bs, response_length)
 
     """
-    with torch.no_grad():
-        lastgaelam = 0
-        advantages_reversed = []
-        gen_len = token_level_rewards.shape[-1]
+    lastgaelam = 0
+    advantages_reversed = []
+    gen_len = token_level_rewards.shape[-1]
+    for t in reversed(range(gen_len)):
+        nextvalues = values[:, t + 1] if t < gen_len - 1 else 0.0
+        delta = token_level_rewards[:, t] + gamma * nextvalues - values[:, t]
+        lastgaelam = delta + gamma * lam * lastgaelam
+        advantages_reversed.append(lastgaelam)
 
-        for t in reversed(range(gen_len)):
-            nextvalues = values[:, t + 1] if t < gen_len - 1 else 0.0
-            delta = token_level_rewards[:, t] + gamma * nextvalues - values[:, t]
-            lastgaelam = delta + gamma * lam * lastgaelam
-            advantages_reversed.append(lastgaelam)
-        advantages = torch.stack(advantages_reversed[::-1], dim=1)
-
-        returns = advantages + values
-        advantages = verl_F.masked_whiten(advantages, eos_mask)
+    advantages = torch.stack(advantages_reversed[::-1], dim=1)
+    returns = advantages + values
+    advantages = VF.masked_whiten(advantages, eos_mask)
     return advantages, returns
 
 
 # NOTE(sgm): this implementation only consider outcome supervision, where the reward is a scalar.
+@torch.no_grad()
 def compute_grpo_outcome_advantage(
     token_level_rewards: torch.Tensor, eos_mask: torch.Tensor, index: torch.Tensor, epsilon: float = 1e-6
-):
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Compute advantage for GRPO, operating only on Outcome reward
     (with only one scalar reward for each response).
@@ -141,34 +147,80 @@ def compute_grpo_outcome_advantage(
     """
     response_length = token_level_rewards.shape[-1]
     scores = token_level_rewards.sum(dim=-1)
-
     id2score = defaultdict(list)
-    id2mean = {}
-    id2std = {}
+    id2mean, id2std = {}, {}
 
-    with torch.no_grad():
-        bsz = scores.shape[0]
-        for i in range(bsz):
-            id2score[index[i]].append(scores[i])
-        for idx in id2score:
-            if len(id2score[idx]) == 1:
-                id2mean[idx] = torch.tensor(0.0)
-                id2std[idx] = torch.tensor(1.0)
-            elif len(id2score[idx]) > 1:
-                id2mean[idx] = torch.mean(torch.tensor(id2score[idx]))
-                id2std[idx] = torch.std(torch.tensor([id2score[idx]]))
-            else:
-                raise ValueError(f"no score in prompt index: {idx}")
-        for i in range(bsz):
-            scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + epsilon)
-        scores = scores.unsqueeze(-1).tile([1, response_length]) * eos_mask
+    bsz = scores.shape[0]
+    for i in range(bsz):
+        id2score[index[i]].append(scores[i])
 
+    for idx in id2score:
+        if len(id2score[idx]) == 1:
+            id2mean[idx] = torch.tensor(0.0)
+            id2std[idx] = torch.tensor(1.0)
+        elif len(id2score[idx]) > 1:
+            id2mean[idx] = torch.mean(torch.tensor(id2score[idx]))
+            id2std[idx] = torch.std(torch.tensor([id2score[idx]]))
+        else:
+            raise ValueError(f"no score in prompt index: {idx}")
+
+    for i in range(bsz):
+        scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + epsilon)
+
+    scores = scores.unsqueeze(-1).tile([1, response_length]) * eos_mask
     return scores, scores
 
 
+@torch.no_grad()
+def compute_rloo_outcome_advantage(
+    token_level_rewards: torch.Tensor, eos_mask: torch.Tensor, index: torch.Tensor, epsilon: float = 1e-6
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Compute advantage for RLOO based on https://arxiv.org/abs/2402.14740
+    Args:
+        token_level_rewards: `(torch.Tensor)`
+            shape: (bs, response_length)
+        eos_mask: `(torch.Tensor)`
+            shape: (bs, response_length)
+
+    Returns:
+        advantages: `(torch.Tensor)`
+            shape: (bs, response_length)
+        Returns: `(torch.Tensor)`
+            shape: (bs, response_length)
+    """
+    response_length = token_level_rewards.shape[-1]
+    scores = token_level_rewards.sum(dim=-1)
+
+    id2score = defaultdict(list)
+    id2mean = {}
+    bsz = scores.shape[0]
+    for i in range(bsz):
+        id2score[index[i]].append(scores[i])
+
+    for idx in id2score:
+        if len(id2score[idx]) == 1:
+            id2mean[idx] = torch.tensor(0.0)
+        elif len(id2score[idx]) > 1:
+            id2mean[idx] = torch.mean(torch.tensor(id2score[idx]))
+        else:
+            raise ValueError(f"no score in prompt index: {idx}.")
+
+    for i in range(bsz):
+        response_num = len(id2score[index[i]])
+        if response_num > 1:
+            scores[i] = scores[i] * response_num / (response_num - 1) - id2mean[index[i]] * response_num / (
+                response_num - 1
+            )
+
+    scores = scores.unsqueeze(-1).tile([1, response_length]) * eos_mask
+    return scores, scores
+
+
+@torch.no_grad()
 def compute_reinforce_plus_plus_outcome_advantage(
     token_level_rewards: torch.Tensor, eos_mask: torch.Tensor, gamma: torch.Tensor
-):
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Compute advantage for REINFORCE++.
     This implementation is based on the paper: https://arxiv.org/abs/2501.03262
@@ -184,26 +236,23 @@ def compute_reinforce_plus_plus_outcome_advantage(
         Returns: `(torch.Tensor)`
             shape: (bs, response_length)
     """
+    returns = torch.zeros_like(token_level_rewards)
+    running_return = 0
+    for t in reversed(range(token_level_rewards.shape[1])):
+        running_return = token_level_rewards[:, t] + gamma * running_return
+        returns[:, t] = running_return
+        # Reset after EOS
+        running_return = running_return * eos_mask[:, t]
 
-    with torch.no_grad():
-        returns = torch.zeros_like(token_level_rewards)
-        running_return = 0
-
-        for t in reversed(range(token_level_rewards.shape[1])):
-            running_return = token_level_rewards[:, t] + gamma * running_return
-            returns[:, t] = running_return
-            # Reset after EOS
-            running_return = running_return * eos_mask[:, t]
-
-        advantages = verl_F.masked_whiten(returns, eos_mask)
-        advantages = advantages * eos_mask
-
+    advantages = VF.masked_whiten(returns, eos_mask)
+    advantages = advantages * eos_mask
     return advantages, returns
 
 
+@torch.no_grad()
 def compute_remax_outcome_advantage(
     token_level_rewards: torch.Tensor, reward_baselines: torch.Tensor, eos_mask: torch.Tensor
-):
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Compute advantage for ReMax, operating only on Outcome reward
     This implementation is based on the paper: https://arxiv.org/abs/2310.10505
@@ -225,22 +274,25 @@ def compute_remax_outcome_advantage(
     """
     response_length = token_level_rewards.shape[-1]
     # scores = token_level_rewards.sum(dim=-1)
-
-    with torch.no_grad():
-        returns = (token_level_rewards * eos_mask).flip(dims=[-1]).cumsum(dim=-1).flip(dims=[-1])
-        advantages = returns - reward_baselines.unsqueeze(-1).tile([1, response_length]) * eos_mask
-
+    returns = (token_level_rewards * eos_mask).flip(dims=[-1]).cumsum(dim=-1).flip(dims=[-1])
+    advantages = returns - reward_baselines.unsqueeze(-1).tile([1, response_length]) * eos_mask
     return advantages, returns
 
 
-def compute_rewards(token_level_scores, old_log_prob, ref_log_prob, kl_ratio):
+def compute_rewards(
+    token_level_scores: torch.Tensor, old_log_prob: torch.Tensor, ref_log_prob: torch.Tensor, kl_ratio: float
+) -> torch.Tensor:
     kl = old_log_prob - ref_log_prob
     return token_level_scores - kl * kl_ratio
 
 
 def compute_policy_loss(
-    old_log_prob, log_prob, advantages, eos_mask, cliprange
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    old_log_prob: torch.Tensor,
+    log_prob: torch.Tensor,
+    advantages: torch.Tensor,
+    eos_mask: torch.Tensor,
+    cliprange: float,
+) -> Tuple[torch.Tensor, float, float]:
     """Adapted from https://github.com/huggingface/trl/blob/main/trl/trainer/ppo_trainer.py#L1122
 
     Args:
@@ -260,21 +312,20 @@ def compute_policy_loss(
             policy gradient loss computed via PPO
         pg_clipfrac: (float)
             a float number indicating the fraction of policy gradient loss being clipped
-
     """
     negative_approx_kl = log_prob - old_log_prob
     ratio = torch.exp(negative_approx_kl)
-    ppo_kl = verl_F.masked_mean(-negative_approx_kl, eos_mask)
+    ppo_kl = VF.masked_mean(-negative_approx_kl, eos_mask)
 
     pg_losses = -advantages * ratio
     pg_losses2 = -advantages * torch.clamp(ratio, 1.0 - cliprange, 1.0 + cliprange)
 
-    pg_loss = verl_F.masked_mean(torch.max(pg_losses, pg_losses2), eos_mask)
-    pg_clipfrac = verl_F.masked_mean(torch.gt(pg_losses2, pg_losses).float(), eos_mask)
+    pg_loss = VF.masked_mean(torch.max(pg_losses, pg_losses2), eos_mask)
+    pg_clipfrac = VF.masked_mean(torch.gt(pg_losses2, pg_losses).float(), eos_mask)
     return pg_loss, pg_clipfrac, ppo_kl
 
 
-def compute_entropy_loss(logits, eos_mask):
+def compute_entropy_loss(logits: torch.Tensor, eos_mask: torch.Tensor) -> torch.Tensor:
     """Compute Categorical entropy loss
 
     Args:
@@ -288,12 +339,14 @@ def compute_entropy_loss(logits, eos_mask):
 
     """
     # compute entropy
-    entropy = verl_F.entropy_from_logits(logits)  # (bs, response_len)
-    entropy_loss = verl_F.masked_mean(entropy, mask=eos_mask)
+    entropy = VF.entropy_from_logits(logits)  # (bs, response_len)
+    entropy_loss = VF.masked_mean(entropy, mask=eos_mask)
     return entropy_loss
 
 
-def compute_value_loss(vpreds, returns, values, eos_mask, cliprange_value):
+def compute_value_loss(
+    vpreds: torch.Tensor, returns: torch.Tensor, values: torch.Tensor, eos_mask: torch.Tensor, cliprange_value: float
+) -> Tuple[torch.Tensor, float]:
     """Compute the value loss. Copied from https://github.com/huggingface/trl/blob/main/trl/trainer/ppo_trainer.py#L1151
 
     Args:
@@ -309,26 +362,25 @@ def compute_value_loss(vpreds, returns, values, eos_mask, cliprange_value):
             value function loss
         vf_clipfrac: a float
             The ratio of vf being clipped
-
     """
-    vpredclipped = verl_F.clip_by_value(vpreds, values - cliprange_value, values + cliprange_value)
+    vpredclipped = VF.clip_by_value(vpreds, values - cliprange_value, values + cliprange_value)
     vf_losses1 = (vpreds - returns) ** 2
     vf_losses2 = (vpredclipped - returns) ** 2
-    vf_loss = 0.5 * verl_F.masked_mean(torch.max(vf_losses1, vf_losses2), eos_mask)
-    vf_clipfrac = verl_F.masked_mean(torch.gt(vf_losses2, vf_losses1).float(), eos_mask)
+    vf_loss = 0.5 * VF.masked_mean(torch.max(vf_losses1, vf_losses2), eos_mask)
+    vf_clipfrac = VF.masked_mean(torch.gt(vf_losses2, vf_losses1).float(), eos_mask)
     return vf_loss, vf_clipfrac
 
 
-def kl_penalty(logprob: torch.FloatTensor, ref_logprob: torch.FloatTensor, kl_penalty) -> torch.Tensor:
+def kl_penalty(logprob: torch.FloatTensor, ref_logprob: torch.FloatTensor, kl_penalty: str) -> torch.Tensor:
     """Compute KL divergence given logprob and ref_logprob.
     Copied from https://github.com/huggingface/trl/blob/main/trl/trainer/ppo_trainer.py#L1104
 
     Args:
-        logprob:
-        ref_logprob:
+        logprob: torch.Tensor
+        ref_logprob: torch.Tensor
 
     Returns:
-
+        kl_div: torch.Tensor
     """
     if kl_penalty == "kl":
         return logprob - ref_logprob

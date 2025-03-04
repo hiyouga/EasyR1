@@ -13,6 +13,8 @@
 # limitations under the License.
 
 import os
+import random
+import string
 import time
 from typing import Any, Dict, List, Tuple
 from unittest.mock import patch
@@ -23,17 +25,14 @@ from ray.util import list_named_actors
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy, PlacementGroupSchedulingStrategy
 
-from verl.single_controller.base import ClassWithInitArgs, ResourcePool, Worker, WorkerGroup
-from verl.single_controller.base.decorator import MAGIC_ATTR
+from ..base import ClassWithInitArgs, ResourcePool, Worker, WorkerGroup
+from ..base.decorator import MAGIC_ATTR
 
 
 __all__ = ["Worker"]
 
 
 def get_random_string(length: int) -> str:
-    import random
-    import string
-
     letters_digits = string.ascii_letters + string.digits
     return "".join(random.choice(letters_digits) for _ in range(length))
 

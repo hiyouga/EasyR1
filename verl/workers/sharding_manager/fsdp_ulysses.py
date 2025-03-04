@@ -15,11 +15,13 @@
 Contains a resharding manager that binds weights from FSDP zero3 to XPerfGPT
 """
 
+import numpy as np
+import torch
 from torch.distributed.device_mesh import DeviceMesh
 
-from verl import DataProto
-from verl.utils.ulysses import get_ulysses_sequence_parallel_group, set_ulysses_sequence_parallel_group
-
+from ...protocol import DataProto
+from ...utils import torch_functional as VF
+from ...utils.ulysses import get_ulysses_sequence_parallel_group, set_ulysses_sequence_parallel_group
 from .base import BaseShardingManager
 
 
@@ -48,9 +50,19 @@ class FSDPUlyssesShardingManager(BaseShardingManager):
         In Ulysses, we need to make sure the same data is used across a SP group
         """
         if self.device_mesh is not None:
-            sp_group = self.device_mesh["sp"].get_group()
-            data = data.to("cuda")
-            data.all_gather(sp_group)
+            sp_size = self.device_mesh["sp"].size()
+            group = self.device_mesh["sp"].get_group()
+
+            prev_device = data.batch.device
+            data.batch = data.batch.cuda(device=torch.cuda.current_device())
+            data.batch = VF.allgather_dict_tensors(data.batch.contiguous(), size=sp_size, group=group, dim=0)
+            data.batch = data.batch.to(prev_device)
+            # all gather non_tensor_batch
+            all_non_tensor_batch = [None for _ in range(sp_size)]
+            torch.distributed.all_gather_object(all_non_tensor_batch, data.non_tensor_batch, group=group)
+            data.non_tensor_batch = {
+                k: np.concatenate([d[k] for d in all_non_tensor_batch]) for k in data.non_tensor_batch
+            }
 
         return data
 

@@ -29,6 +29,12 @@ EasyR1 is efficient and scalable due to the design of **[HybirdEngine](https://a
 
 We provide a [Dockerfile](./Dockerfile) to easily build environments.
 
+Use [pre-built docker image](https://hub.docker.com/r/hiyouga/verl):
+
+```bash
+docker pull hiyouga/verl:ngc-th2.5.1-cu120-vllm0.7.3-rc1
+```
+
 ### Hardware Requirements
 
 \* *estimated*
@@ -71,22 +77,18 @@ python3 scripts/model_merger.py --local_dir path_to_your_last_actor_checkpoint
 
 ## Custom Dataset
 
-The dataset should strictly follow the example data format.
+Please refer to the example datasets to prepare your own dataset.
 
 - Text dataset: https://huggingface.co/datasets/hiyouga/math12k
-    - Required columns: problem, answer
-
 - Vision-text dataset: https://huggingface.co/datasets/hiyouga/geometry3k
-    - Required columns: images, problem, answer
 
 ## Other Baselines
 
-- [CLEVR-70k-Counting](examples/run_qwen2_5_vl_2b_clevr.sh): Train the Qwen2.5-VL-3B-Instruct model on counting problem.
+- [CLEVR-70k-Counting](examples/run_qwen2_5_vl_3b_clevr.sh): Train the Qwen2.5-VL-3B-Instruct model on counting problem.
 
 ## TODO
 
 - Support PPO, Reinforce++ and RLOO for VLMs.
-- Support padding-free training for VLMs.
 - Support ulysses parallelism for VLMs.
 - Support more VLM architectures.
 
@@ -94,7 +96,7 @@ The dataset should strictly follow the example data format.
 
 These features are temporarily disabled for now, we plan to fix them one-by-one in the future updates.
 
-- Vision language models are not compatible with padding-free training and ulysses parallelism yet.
+- Vision language models are not compatible with ulysses parallelism yet.
 - Vision language models are not compatible with `enable_chunked_prefill` unless [vLLM v1](https://blog.vllm.ai/2025/01/27/v1-alpha-release.html) is supported.
 
 ## Discussion Group
