@@ -13,6 +13,7 @@ EasyR1 is efficient and scalable due to the design of **[HybirdEngine](https://a
 
 - Supported algorithms
   - GRPO
+  - Remax
   - others RL algorithms (comming soon)
 
 - Supported datasets
@@ -91,6 +92,9 @@ Please refer to the example datasets to prepare your own dataset.
 - Support PPO, Reinforce++ and RLOO for VLMs.
 - Support ulysses parallelism for VLMs.
 - Support more VLM architectures.
+
+> [!NOTE]
+> We will not provide scripts for supervised fine-tuning and inference in this project. If you have such requirements, we recommend using [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory).
 
 ### Known bugs
 
