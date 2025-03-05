@@ -83,6 +83,12 @@ Please refer to the example datasets to prepare your own dataset.
 - Text dataset: https://huggingface.co/datasets/hiyouga/math12k
 - Vision-text dataset: https://huggingface.co/datasets/hiyouga/geometry3k
 
+## How to Understand GRPO in EasyR1
+
+![image](assets/easyr1_grpo.png)
+
+- To learn about the GRPO algorithm, you can refer to [Hugging Face's blog](https://huggingface.co/learn/cookbook/fine_tuning_llm_grpo_trl).
+
 ## Other Baselines
 
 - [CLEVR-70k-Counting](examples/run_qwen2_5_vl_3b_clevr.sh): Train the Qwen2.5-VL-3B-Instruct model on counting problem.
