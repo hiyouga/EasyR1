@@ -383,7 +383,7 @@ class RayPPOTrainer:
         self.train_dataloader = DataLoader(
             dataset=self.train_dataset,
             batch_size=self.config.data.rollout_batch_size,
-            num_workers=16,
+            num_workers=8,
             drop_last=True,
             collate_fn=collate_fn,
             sampler=sampler,
@@ -403,7 +403,7 @@ class RayPPOTrainer:
         self.val_dataloader = DataLoader(
             dataset=self.val_dataset,
             batch_size=self.config.data.rollout_batch_size,  # len(self.val_dataset)
-            num_workers=16,
+            num_workers=8,
             shuffle=False,
             drop_last=False,
             collate_fn=collate_fn,
@@ -492,6 +492,7 @@ class RayPPOTrainer:
         all_predictions = []
         all_ground_truths = []
         all_data_sources = []
+        all_datasets = []
 
         for test_data in self.val_dataloader:
             test_batch = DataProto.from_single_dict(test_data)
@@ -502,6 +503,7 @@ class RayPPOTrainer:
             sample_inputs.extend(input_texts)
             ground_truths = test_batch.non_tensor_batch["answer"]
             data_sources = test_batch.non_tensor_batch.get("data_source", ["unknown"] * len(input_texts))
+            datasets = test_batch.non_tensor_batch.get("dataset", ["unknown"] * len(input_texts))
 
             if "pixel_values" in test_batch.non_tensor_batch.keys():
                 test_gen_batch = test_batch.pop(
@@ -532,6 +534,7 @@ class RayPPOTrainer:
             all_predictions.extend(output_texts)
             all_ground_truths.extend(ground_truths)
             all_data_sources.extend(data_sources)
+            all_datasets.extend(datasets)
 
             test_batch = test_batch.union(test_output_gen_batch)
 
@@ -564,21 +567,10 @@ class RayPPOTrainer:
         for data_source, rewards in data_source_reward.items():
             metric_dict[f"val/test_score/{data_source}"] = np.mean(rewards)
 
-        # Global metrics
-        global_metrics = compute_classification_metrics(all_predictions, all_ground_truths)
-
-        # Add global metrics to results
-        for metric_name, value in global_metrics.items():
-            if metric_name.startswith("global/"):
-                metric_dict[f"val/{metric_name}"] = value
-
         # Per data source metrics
-        source_metrics = compute_metrics_by_data_source(all_predictions, all_ground_truths, all_data_sources)
-
-        # # Add per-source metrics to results
-        for source, metrics in source_metrics.items():
-            for metric_name, value in metrics.items():
-                metric_dict[f"{source}/{metric_name}"] = value
+        metrics = compute_metrics_by_data_source(all_predictions, all_ground_truths,
+                                                        all_data_sources, all_datasets)
+        metric_dict.update(**metrics)
 
         return metric_dict
 

@@ -291,11 +291,15 @@ class RLHFDataset(Dataset):
 
             if "images" in row_dict and len(row_dict["images"]) > 0:
                 data_source = row_dict["images"][0].split("/")[0]
+                dataset = row_dict["images"][0].split("/")[1]
             elif "videos" in row_dict and len(row_dict["videos"]) > 0:
                 data_source = row_dict["videos"][0].split("/")[0]
+                dataset = row_dict["videos"][0].split("/")[1]
             else:
                 data_source = "text"
+                dataset = "text"
             row_dict["data_source"] = data_source
+            row_dict["dataset"] = dataset
 
             # Ensure we have at least one image/frame
             if not processed_images:
@@ -373,5 +377,6 @@ class RLHFDataset(Dataset):
                 "position_ids": torch.zeros(1, dtype=torch.long),
                 "raw_prompt_ids": torch.ones(1, dtype=torch.long),
                 "data_source": "fallback",
+                "dataset": "fallback"
             }
             return fallback_dict
