@@ -87,7 +87,7 @@ Please refer to the example datasets to prepare your own dataset.
 
 ![image](assets/easyr1_grpo.png)
 
-- To learn about the GRPO algorithm, you can refer to [Hugging Face's blog](https://huggingface.co/learn/cookbook/fine_tuning_llm_grpo_trl).
+- To learn about the GRPO algorithm, you can refer to [Hugging Face's blog](https://huggingface.co/docs/trl/v0.15.2/en/grpo_trainer#looking-deeper-into-the-grpo-method).
 
 ## Other Baselines
 

@@ -36,10 +36,10 @@ worker:
     fsdp:
       enable_full_shard: true
       enable_cpu_offload: false
-      enable_rank0_init: false
+      enable_rank0_init: true
     offload:
-      offload_params: false
-      offload_optimizer: false
+      offload_params: true
+      offload_optimizer: true
 
   rollout:
     temperature: 1.0
