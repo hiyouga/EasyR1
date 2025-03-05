@@ -17,7 +17,7 @@ import warnings
 from typing import Union
 
 import torch
-import torch.distributed
+import torch.distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import ShardedOptimStateDictConfig, ShardedStateDictConfig, StateDictType
 from transformers import PreTrainedModel, PreTrainedTokenizer, ProcessorMixin
@@ -49,7 +49,7 @@ class FSDPCheckpointManager(BaseCheckpointManager):
     ):
         super().__init__(model, optimizer, lr_scheduler, processing_class)
 
-    def load_checkpoint(self, path: str = None, del_local_after_load: bool = False):
+    def load_checkpoint(self, path: str = None, remove_ckpt_after_load: bool = False):
         if path is None:
             return
 
@@ -60,17 +60,27 @@ class FSDPCheckpointManager(BaseCheckpointManager):
         print(
             f"[rank-{self.rank}]: Loading from {local_model_path} and {local_optim_path} and {local_extra_state_path}"
         )
-        model_state_dict = torch.load(local_model_path)
-        optimizer_state_dict = torch.load(local_optim_path)
-        extra_state_dict = torch.load(local_extra_state_path)
-        lr_scheduler_state_dict = extra_state_dict["lr_scheduler"]
+        model_state_dict = torch.load(local_model_path, weights_only=False)
+        optimizer_state_dict = torch.load(local_optim_path, weights_only=False)
+        extra_state_dict = torch.load(local_extra_state_path, weights_only=False)
 
+        if remove_ckpt_after_load:
+            try:
+                os.remove(local_model_path)
+                os.remove(local_optim_path)
+                os.remove(local_extra_state_path)
+            except Exception as e:
+                print(f"[rank-{self.rank}]: remove ckpt file after loading failed, exception {e} will be ignored.")
+
+        lr_scheduler_state_dict = extra_state_dict["lr_scheduler"]
         state_dict_config = ShardedStateDictConfig(offload_to_cpu=True)
         optim_config = ShardedOptimStateDictConfig(offload_to_cpu=True)
-        with FSDP.state_dict_type(self.model, StateDictType.SHARDED_STATE_DICT, state_dict_config, optim_config):
-            self.model.load_state_dict(model_state_dict)
-            if self.optimizer is not None:
-                self.optimizer.load_state_dict(optimizer_state_dict)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            with FSDP.state_dict_type(self.model, StateDictType.SHARDED_STATE_DICT, state_dict_config, optim_config):
+                self.model.load_state_dict(model_state_dict)
+                if self.optimizer is not None:
+                    self.optimizer.load_state_dict(optimizer_state_dict)
 
         # recover random state
         if "rng" in extra_state_dict:
@@ -88,7 +98,7 @@ class FSDPCheckpointManager(BaseCheckpointManager):
             self.remove_previous_save_local_path()
 
         local_path = self.local_mkdir(local_path)
-        torch.distributed.barrier()
+        dist.barrier()
 
         # every rank will save its own model and optim shard
         state_dict_config = ShardedStateDictConfig(offload_to_cpu=True)
@@ -125,7 +135,7 @@ class FSDPCheckpointManager(BaseCheckpointManager):
                 torch.save(extra_state_dict, extra_path)
 
         # wait for everyone to dump to local
-        torch.distributed.barrier()
+        dist.barrier()
 
         if self.rank == 0:
             hf_local_path = os.path.join(local_path, "huggingface")
@@ -135,5 +145,5 @@ class FSDPCheckpointManager(BaseCheckpointManager):
             self.model._fsdp_wrapped_module.generation_config.save_pretrained(hf_local_path)
             self.processing_class.save_pretrained(hf_local_path)
 
-        torch.distributed.barrier()
+        dist.barrier()
         self.previous_save_local_path = local_path

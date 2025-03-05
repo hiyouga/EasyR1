@@ -69,16 +69,16 @@ class TrainerConfig:
     logger: Tuple[str] = ("console", "wandb")
     nnodes: int = 1
     n_gpus_per_node: int = 8
-    save_freq: int = -1
-    load_checkpoint_path: Optional[str] = None
+    critic_warmup: int = 0
+    val_freq: int = -1
     val_before_train: bool = True
     val_only: bool = False
-    val_generations_to_log_to_wandb: int = 1
-    val_freq: int = -1
-    critic_warmup: int = 0
+    val_generations_to_log: int = 1
+    save_freq: int = -1
     remove_previous_ckpt: bool = False
-    del_local_ckpt_after_load: bool = False
+    remove_ckpt_after_load: bool = False
     save_checkpoint_path: Optional[str] = None
+    load_checkpoint_path: Optional[str] = None
 
     def post_init(self):
         if self.save_checkpoint_path is None:

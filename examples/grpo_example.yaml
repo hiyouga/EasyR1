@@ -30,9 +30,11 @@ worker:
     model:
       model_path: Qwen/Qwen2.5-7B-Instruct
       enable_gradient_checkpointing: true
+      trust_remote_code: false
     optim:
       lr: 1.0e-6
       weight_decay: 1.0e-2
+      lr_warmup_ratio: 0.0
     fsdp:
       enable_full_shard: true
       enable_cpu_offload: false
@@ -43,10 +45,12 @@ worker:
 
   rollout:
     temperature: 1.0
-    tensor_parallel_size: 2
-    gpu_memory_utilization: 0.5
     n: 5
-    enable_chunked_prefill: true
+    gpu_memory_utilization: 0.5
+    enforce_eager: false
+    enable_chunked_prefill: false
+    tensor_parallel_size: 2
+    limit_images: 1
 
   ref:
     offload:
@@ -63,9 +67,12 @@ trainer:
   experiment_name: qwen2_5_7b_math
   n_gpus_per_node: 8
   nnodes: 1
-  save_freq: 5
   val_freq: 5
   val_before_train: true
   val_only: false
-  val_generations_to_log_to_wandb: 1
+  val_generations_to_log: 1
+  save_freq: 5
+  remove_previous_ckpt: false
+  remove_ckpt_after_load: false
   save_checkpoint_path: null
+  load_checkpoint_path: null

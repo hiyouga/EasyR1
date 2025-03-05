@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import warnings
 
 import numpy as np
 import torch
@@ -39,11 +40,13 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         self.module = module
         self.inference_engine = inference_engine
         self.device_mesh = device_mesh
-        FSDP.set_state_dict_type(
-            self.module,
-            state_dict_type=StateDictType.SHARDED_STATE_DICT,
-            state_dict_config=ShardedStateDictConfig(),
-        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            FSDP.set_state_dict_type(
+                self.module,
+                state_dict_type=StateDictType.SHARDED_STATE_DICT,
+                state_dict_config=ShardedStateDictConfig(),
+            )
 
         # Note that torch_random_states may be different on each dp rank
         self.torch_random_states = torch.cuda.get_rng_state()

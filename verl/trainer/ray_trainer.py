@@ -27,7 +27,8 @@ from typing import Any, Dict, Optional, Type
 import numpy as np
 import torch
 from codetiming import Timer
-from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
+from torch.utils.data import RandomSampler, SequentialSampler
+from torchdata.stateful_dataloader import StatefulDataLoader
 from transformers import PreTrainedTokenizer, ProcessorMixin
 
 from ..protocol import DataProto, pad_dataproto_to_divisor, unpad_dataproto
@@ -389,7 +390,7 @@ class RayPPOTrainer:
         else:
             sampler = SequentialSampler(data_source=self.train_dataset)
 
-        self.train_dataloader = DataLoader(
+        self.train_dataloader = StatefulDataLoader(
             dataset=self.train_dataset,
             batch_size=self.config.data.rollout_batch_size,
             sampler=sampler,
@@ -412,7 +413,7 @@ class RayPPOTrainer:
             min_pixels=self.config.data.min_pixels,
             max_pixels=self.config.data.max_pixels,
         )
-        self.val_dataloader = DataLoader(
+        self.val_dataloader = StatefulDataLoader(
             dataset=self.val_dataset,
             batch_size=len(self.val_dataset),
             shuffle=False,
@@ -434,18 +435,18 @@ class RayPPOTrainer:
         self.training_steps = training_steps
         self.config.worker.actor.optim.training_steps = training_steps
         self.config.worker.critic.optim.training_steps = training_steps
-        print(f"Total training steps: {self.training_steps}.")
+        print(f"Total training steps: {self.training_steps}")
 
-    def _maybe_log_val_generations_to_wandb(self, inputs, outputs, scores):
-        """Log a table of validation samples to wandb"""
+    def _maybe_log_val_generations(self, inputs, outputs, scores):
+        """Log a table of validation samples"""
 
-        generations_to_log = self.config.trainer.val_generations_to_log_to_wandb
+        generations_to_log = self.config.trainer.val_generations_to_log
 
         if generations_to_log == 0:
             return
 
         if generations_to_log > 0 and "wandb" not in self.config.trainer.logger:
-            print("WARNING: `val_generations_to_log_to_wandb` is set, but no wandb logger is found.")
+            print("WARNING: `val_generations_to_log` is set, but no wandb logger is found.")
             return
 
         import wandb
@@ -532,7 +533,7 @@ class RayPPOTrainer:
 
             reward_tensor_lst.append(reward_tensor)
 
-        self._maybe_log_val_generations_to_wandb(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores)
+        self._maybe_log_val_generations(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores)
         reward_score = torch.cat(reward_tensor_lst, dim=0).sum(-1).mean().item()
         return {"val/test_score": reward_score}
 
@@ -608,45 +609,56 @@ class RayPPOTrainer:
 
     def _save_checkpoint(self):
         # path: {save_checkpoint_path}/global_step_{global_steps}/actor
-        local_global_step_folder = os.path.join(
-            self.config.trainer.save_checkpoint_path, f"global_step_{self.global_steps}"
-        )
-        actor_local_path = os.path.join(local_global_step_folder, "actor")
+        folder_path = os.path.join(self.config.trainer.save_checkpoint_path, f"global_step_{self.global_steps}")
+        actor_path = os.path.join(folder_path, "actor")
 
         self.actor_rollout_wg.save_checkpoint(
-            actor_local_path,
+            actor_path,
             self.global_steps,
             remove_previous_ckpt=self.config.trainer.remove_previous_ckpt,
         )
 
         if self.use_critic:
-            critic_local_path = os.path.join(local_global_step_folder, "critic")
+            critic_path = os.path.join(folder_path, "critic")
             self.critic_wg.save_checkpoint(
-                critic_local_path,
+                critic_path,
                 self.global_steps,
                 remove_previous_ckpt=self.config.trainer.remove_previous_ckpt,
             )
 
-        local_latest_checkpointed_iteration = os.path.join(
-            self.config.trainer.save_checkpoint_path, "latest_checkpointed_iteration.txt"
-        )
-        with open(local_latest_checkpointed_iteration, "w") as f:
+        dataloader_path = os.path.join(folder_path, "dataloader.pt")
+        dataloader_state_dict = self.train_dataloader.state_dict()
+        torch.save(dataloader_state_dict, dataloader_path)
+
+        last_global_step_path = os.path.join(self.config.trainer.save_checkpoint_path, "latest_global_step.txt")
+        with open(last_global_step_path, "w") as f:
             f.write(str(self.global_steps))
 
     def _load_checkpoint(self) -> None:
         if self.config.trainer.load_checkpoint_path is None:
             return
 
-        print(f"Load from checkpoint: {self.config.trainer.load_checkpoint_path}")
+        if "global_step_" not in self.config.trainer.load_checkpoint_path.strip(os.path.sep).split(os.path.sep)[-1]:
+            raise ValueError("`load_checkpoint_path` should be in `global_step_xxx` format.")
+
+        print(f"Load from checkpoint: {self.config.trainer.load_checkpoint_path}.")
+        self.global_steps = int(self.config.trainer.load_checkpoint_path.split("global_step_")[-1])
         actor_path = os.path.join(self.config.trainer.load_checkpoint_path, "actor")
-        critic_path = os.path.join(self.config.trainer.load_checkpoint_path, "critic")
         self.actor_rollout_wg.load_checkpoint(
-            actor_path, del_local_after_load=self.config.trainer.del_local_ckpt_after_load
+            actor_path, remove_ckpt_after_load=self.config.trainer.remove_ckpt_after_load
         )
         if self.use_critic:
+            critic_path = os.path.join(self.config.trainer.load_checkpoint_path, "critic")
             self.critic_wg.load_checkpoint(
-                critic_path, del_local_after_load=self.config.trainer.del_local_ckpt_after_load
+                critic_path, remove_ckpt_after_load=self.config.trainer.remove_ckpt_after_load
             )
+
+        dataloader_path = os.path.join(self.config.trainer.load_checkpoint_path, "dataloader.pt")
+        if os.path.exists(dataloader_path):
+            dataloader_state_dict = torch.load(dataloader_path, weights_only=False)
+            self.train_dataloader.load_state_dict(dataloader_state_dict)
+        else:
+            print(f"No dataloader state found at {dataloader_path}, will start from scratch.")
 
     def _balance_batch(self, batch: DataProto, metrics: Dict[str, Any], logging_prefix: str = "global_seqlen") -> None:
         """Reorder the data on single controller such that each dp rank gets similar total tokens"""
@@ -677,6 +689,7 @@ class RayPPOTrainer:
             default_backend=self.config.trainer.logger,
             config=self.config.to_dict(),
         )
+        val_metrics: Optional[Dict[str, Any]] = None
         self.global_steps = 0
 
         # load checkpoint before doing anything
@@ -814,7 +827,7 @@ class RayPPOTrainer:
                         and self.global_steps % self.config.trainer.val_freq == 0
                     ):
                         with _timer("testing", timing_raw):
-                            val_metrics: dict = self._validate()
+                            val_metrics = self._validate()
 
                         metrics.update(val_metrics)
 
@@ -831,8 +844,10 @@ class RayPPOTrainer:
 
         # perform validation after training
         if self.val_reward_fn is not None:
-            val_metrics = self._validate()
+            if val_metrics is None or self.global_steps % self.config.trainer.val_freq != 0:
+                val_metrics = self._validate()
+                logger.log(data=val_metrics, step=self.global_steps)
+
             print(f"Final validation metrics: {val_metrics}.")
-            logger.log(data=val_metrics, step=self.global_steps)
 
         self._save_checkpoint()
