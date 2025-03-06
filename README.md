@@ -92,7 +92,8 @@ Please refer to the example datasets to prepare your own dataset.
 
 ![image](assets/easyr1_grpo.png)
 
-- To learn about the GRPO algorithm, you can refer to [Hugging Face's blog](https://huggingface.co/docs/trl/v0.15.2/en/grpo_trainer#looking-deeper-into-the-grpo-method).
+- To learn about the GRPO algorithm, you can refer to [Hugging Face's blog](https://huggingface.co/docs/trl/v0.15.2/en/grpo_trainer).
+- Different from TRL's GRPO trainer, our trainer supports mini-batch update as described in the [original PPO paper](https://arxiv.org/abs/1707.06347).
 
 ## Other Baselines
 

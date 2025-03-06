@@ -38,7 +38,7 @@ RUN pip config set global.index-url "${PIP_INDEX}" && \
 
 # Install torch-2.5.1 + vllm-0.7.3
 RUN pip install --no-cache-dir vllm==0.7.3 torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 tensordict torchdata \
-    transformers>=4.49.0 accelerate datasets peft \
+    transformers>=4.49.0 accelerate datasets peft hf_transfer \
     ray codetiming hydra-core pandas pyarrow>=15.0.0 pylatexenc qwen-vl-utils wandb liger-kernel \
 
 # Install flash_attn-2.7.4.post1

@@ -116,21 +116,38 @@ class FSDPWorker(Worker):
             self.config.actor.global_batch_size_per_device = (
                 self.config.actor.global_batch_size // self.device_mesh.shape[0] * self.ulysses_sequence_parallel_size
             )
-            assert (
+            if (
                 self.config.actor.global_batch_size_per_device
                 % self.config.actor.micro_batch_size_per_device_for_update
-                == 0
-            )
+                != 0
+            ):
+                raise ValueError("Global batch size should be divisible by the micro batch size.")
+
+            if (
+                self.config.actor.fsdp.enable_cpu_offload
+                and self.config.actor.global_batch_size_per_device
+                != self.config.actor.micro_batch_size_per_device_for_update
+            ):
+                raise ValueError("Cannot use FSDP's CPU offload when gradient accumulation is enabled.")
+
         elif self._is_critic:
             self.config.critic.global_batch_size *= self.config.rollout.n
             self.config.critic.global_batch_size_per_device = (
                 self.config.critic.global_batch_size // self.device_mesh.shape[0] * self.ulysses_sequence_parallel_size
             )
-            assert (
+            if (
                 self.config.critic.global_batch_size_per_device
                 % self.config.critic.micro_batch_size_per_device_for_update
-                == 0
-            )
+                != 0
+            ):
+                raise ValueError("Global batch size should be divisible by the micro batch size.")
+
+            if (
+                self.config.critic.fsdp.enable_cpu_offload
+                and self.config.critic.global_batch_size_per_device
+                != self.config.critic.micro_batch_size_per_device_for_update
+            ):
+                raise ValueError("Cannot use FSDP's CPU offload when gradient accumulation is enabled.")
 
     def _build_model_optimizer(
         self,
