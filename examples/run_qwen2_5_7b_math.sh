@@ -1,6 +1,7 @@
 set -x
 
 export VLLM_ATTENTION_BACKEND=XFORMERS
+export VLLM_USE_V1=0
 
 MODEL_PATH=Qwen/Qwen2.5-7B-Instruct  # replace it with your local file path
 

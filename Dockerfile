@@ -11,6 +11,7 @@ ENV NODE_OPTIONS=""
 # Define installation arguments
 ARG APT_SOURCE=https://mirrors.tuna.tsinghua.edu.cn/ubuntu/
 ARG PIP_INDEX=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
+ARG VLLM_COMMIT=227578480d71fc94ef46ca77fb69496412158d68
 
 # Set apt source
 RUN cp /etc/apt/sources.list /etc/apt/sources.list.bak && \
@@ -36,8 +37,13 @@ RUN pip config set global.index-url "${PIP_INDEX}" && \
     pip config set global.extra-index-url "${PIP_INDEX}" && \
     python -m pip install --upgrade pip
 
-# Install torch-2.5.1 + vllm-0.7.3
-RUN pip install --no-cache-dir vllm==0.7.3 torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 tensordict torchdata \
+# Install vllm-0.7.4-nightly
+RUN pip install vllm --pre --extra-index-url "https://wheels.vllm.ai/${VLLM_COMMIT}" && \
+    git clone -b verl_v1 https://github.com/hiyouga/vllm.git && \
+    cp -r vllm/vllm/ /usr/local/lib/python3.10/dist-packages/
+
+# Install torch-2.5.1
+RUN pip install --no-cache-dir torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 tensordict torchdata \
     transformers>=4.49.0 accelerate datasets peft hf_transfer \
     ray codetiming hydra-core pandas pyarrow>=15.0.0 pylatexenc qwen-vl-utils wandb liger-kernel \
 
