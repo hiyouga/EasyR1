@@ -50,6 +50,8 @@ docker pull hiyouga/verl:ngc-th2.5.1-cu120-vllm0.7.3-rc1
 | GRPO Full Fine-Tuning    |  AMP | 2*24GB | 4*40GB | 8*40GB |
 
 > [!NOTE]
+> At least 2 GPU is needed to run EasyR1.
+>
 > We are working hard to reduce the VRAM in RL training, LoRA support will be integrated in next updates.
 
 ## Tutorial: Run Qwen2.5-VL GRPO on [Geometry3K](https://huggingface.co/datasets/hiyouga/geometry3k) Dataset in Just 3 Steps
@@ -76,7 +78,7 @@ bash examples/run_qwen2_5_vl_7b_geo.sh
 python3 scripts/model_merger.py --local_dir path_to_your_last_actor_checkpoint
 ```
 
-> [!NOTE]
+> [!TIP]
 > If you encounter issues with connecting to Hugging Face, consider using `export HF_ENDPOINT=https://hf-mirror.com`.
 >
 > If you want to use SwanLab logger, consider using `bash examples/run_qwen2_5_vl_7b_geo_swanlab.sh`.
@@ -87,6 +89,9 @@ Please refer to the example datasets to prepare your own dataset.
 
 - Text dataset: https://huggingface.co/datasets/hiyouga/math12k
 - Vision-text dataset: https://huggingface.co/datasets/hiyouga/geometry3k
+
+> [!TIP]
+> EasyR1 already supports multi-image dataset.
 
 ## How to Understand GRPO in EasyR1
 
@@ -113,7 +118,6 @@ Please refer to the example datasets to prepare your own dataset.
 These features are temporarily disabled for now, we plan to fix them one-by-one in the future updates.
 
 - Vision language models are not compatible with ulysses parallelism yet.
-- Vision language models are not compatible with `enable_chunked_prefill` unless [vLLM v1](https://blog.vllm.ai/2025/01/27/v1-alpha-release.html) is supported.
 
 ## Discussion Group
 
