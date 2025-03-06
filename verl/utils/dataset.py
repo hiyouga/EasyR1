@@ -105,9 +105,9 @@ class RLHFDataset(Dataset):
             data_split = "train"
 
         if os.path.isdir(data_path):
-            self.dataset = load_dataset("parquet", data_dir=data_path, split="train")
+            self.dataset = load_dataset("parquet", data_dir=data_path, split=data_split)
         elif os.path.isfile(data_path):
-            self.dataset = load_dataset("parquet", data_files=data_path, split="train")
+            self.dataset = load_dataset("parquet", data_files=data_path, split=data_split)
         else:  # remote dataset
             self.dataset = load_dataset(data_path, split=data_split)
 
