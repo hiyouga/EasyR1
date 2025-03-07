@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from copy import deepcopy
 import math
 import os
 from tqdm import tqdm
@@ -118,11 +119,12 @@ class RLHFDataset(Dataset):
         tot_count = self.__len__()
         remove_count = 0
         valid_dataset = []
+        dataset_copy = deepcopy(self.dataset)
         with tqdm(total=tot_count, position=0, leave=True, desc="Filtering Dataset") as pbar:
             for idx in range(tot_count):
                 try:
                     self.__getitem__(idx)
-                    valid_dataset.append(self.dataset[idx])
+                    valid_dataset.append(dataset_copy[idx])
                 except NotImplementedError:
                     remove_count += 1
                 pbar.update(1)
