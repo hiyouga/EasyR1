@@ -35,10 +35,10 @@ EasyR1 is efficient and scalable due to the design of **[HybirdEngine](https://a
 
 We provide a [Dockerfile](./Dockerfile) to easily build environments.
 
-Use [pre-built docker image](https://hub.docker.com/r/hiyouga/verl):
+We recommend using the [pre-built docker image](https://hub.docker.com/r/hiyouga/verl) in EasyR1.
 
 ```bash
-docker pull hiyouga/verl:ngc-th2.5.1-cu120-vllm0.7.3-rc1
+docker pull hiyouga/verl:ngc-th2.5.1-cu120-vllm0.7.4-hotfix
 ```
 
 ### Hardware Requirements
@@ -50,7 +50,7 @@ docker pull hiyouga/verl:ngc-th2.5.1-cu120-vllm0.7.3-rc1
 | GRPO Full Fine-Tuning    |  AMP | 2*24GB | 4*40GB | 8*40GB |
 
 > [!NOTE]
-> At least 2 GPU is needed to run EasyR1.
+> At least 2 GPUs are needed to run EasyR1.
 >
 > We are working hard to reduce the VRAM in RL training, LoRA support will be integrated in next updates.
 

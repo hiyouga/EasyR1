@@ -38,7 +38,7 @@ RUN pip config set global.index-url "${PIP_INDEX}" && \
     python -m pip install --upgrade pip
 
 # Install vllm-0.7.4-nightly
-RUN pip install vllm --pre --extra-index-url "https://wheels.vllm.ai/${VLLM_COMMIT}" && \
+RUN pip install --no-cache-dir vllm --pre --extra-index-url "https://wheels.vllm.ai/${VLLM_COMMIT}" && \
     git clone -b verl_v1 https://github.com/hiyouga/vllm.git && \
     cp -r vllm/vllm/ /usr/local/lib/python3.10/dist-packages/
 
@@ -55,4 +55,4 @@ RUN pip uninstall -y transformer-engine flash-attn && \
 
 # Fix cv2
 RUN pip uninstall -y pynvml nvidia-ml-py && \
-    pip install nvidia-ml-py>=12.560.30 opencv-python-headless==4.11.0.86 fastapi==0.115.6
+    pip install --no-cache-dir nvidia-ml-py>=12.560.30 opencv-python-headless==4.8.0.74 fastapi==0.115.6
