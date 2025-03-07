@@ -14,6 +14,7 @@
 
 import math
 import os
+from tqdm import tqdm
 from collections import defaultdict
 from io import BytesIO
 from typing import Any, Dict, List, Optional, Union
@@ -111,6 +112,23 @@ class RLHFDataset(Dataset):
         else:  # remote dataset
             self.dataset = load_dataset(data_path, split=data_split)
 
+        self._remove_long_data()
+
+    def _remove_long_data(self):
+        tot_count = self.__len__()
+        remove_count = 0
+        valid_dataset = []
+        with tqdm(total=tot_count, position=0, leave=True, desc="Filtering Dataset") as pbar:
+            for idx in range(tot_count):
+                try:
+                    self.__getitem__(idx)
+                    valid_dataset.append(self.dataset[idx])
+                except NotImplementedError:
+                    remove_count += 1
+                pbar.update(1)
+        print(f"{remove_count} out of {tot_count} of data has been removed.")
+        self.dataset = valid_dataset
+
     def __len__(self):
         return len(self.dataset)
 
@@ -121,8 +139,10 @@ class RLHFDataset(Dataset):
             messages.insert(0, {"role": "system", "content": self.system_prompt})
 
         prompt = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+        is_multimodal_input = False
 
         if self.image_key in row_dict:
+            is_multimodal_input = True
             prompt = prompt.replace("<image>", "<|vision_start|><|image_pad|><|vision_end|>")
             row_dict["multi_modal_data"] = {
                 "image": [
@@ -152,7 +172,7 @@ class RLHFDataset(Dataset):
             max_length=self.max_prompt_length,
             pad_token_id=self.tokenizer.pad_token_id,
             left_pad=True,
-            truncation=self.truncation,
+            truncation=self.truncation if not is_multimodal_input else "error",
         )
         row_dict["input_ids"] = input_ids
         row_dict["attention_mask"] = attention_mask
