@@ -128,7 +128,7 @@ class RLHFDataset(Dataset):
                 except NotImplementedError:
                     remove_count += 1
                 pbar.update(1)
-        print(f"{remove_count} out of {tot_count} of data has been removed.")
+        print(f"{remove_count} out of {tot_count} data have been removed.")
         self.dataset = valid_dataset
 
     def __len__(self):
