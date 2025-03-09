@@ -19,5 +19,5 @@ python3 -m verl.trainer.main \
     worker.rollout.tensor_parallel_size=1 \
     worker.rollout.enable_chunked_prefill=false \
     worker.reward.compute_score=r1v \
-    trainer.experiment_name=qwen2_5_vl_3b_clevr \
+    trainer.experiment_name=qwen2_5_vl_3b_geoqa8k \
     trainer.n_gpus_per_node=8
