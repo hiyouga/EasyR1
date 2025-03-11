@@ -4,7 +4,7 @@ data:
   prompt_key: problem
   answer_key: answer
   image_key: images
-  max_prompt_length: 1024
+  max_prompt_length: 2048
   max_response_length: 2048
   rollout_batch_size: 512
   shuffle: true
