@@ -32,6 +32,7 @@ worker:
       model_path: Qwen/Qwen2.5-7B-Instruct
       enable_gradient_checkpointing: true
       trust_remote_code: false
+      freeze_vision_tower: false
     optim:
       lr: 1.0e-6
       weight_decay: 1.0e-2
@@ -51,11 +52,15 @@ worker:
     enforce_eager: false
     enable_chunked_prefill: false
     tensor_parallel_size: 2
-    limit_images: 1
+    limit_images: 0
 
   ref:
+    fsdp:
+      enable_full_shard: true
+      enable_cpu_offload: true
+      enable_rank0_init: true
     offload:
-      offload_params: true
+      offload_params: false
 
   reward:
     reward_type: function

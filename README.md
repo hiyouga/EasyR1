@@ -106,6 +106,10 @@ We also implemented the following two baselines from [R1-V](https://github.com/d
 - [CLEVR-70k-Counting](examples/run_qwen2_5_vl_3b_clevr.sh): Train the Qwen2.5-VL-3B-Instruct model on counting problem.
 - [GeoQA-8k](examples/run_qwen2_5_vl_3b_geoqa8k.sh): Train the Qwen2.5-VL-3B-Instruct model on GeoQA problem.
 
+## Awesome Work using EasyR1
+
+- TBD
+
 ## TODO
 
 - Support PPO, Reinforce++ and RLOO for VLMs.

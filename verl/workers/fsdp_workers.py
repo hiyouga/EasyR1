@@ -16,7 +16,7 @@ The main entry point to run the PPO algorithm
 """
 
 import os
-from typing import Literal
+from typing import Literal, Optional
 
 import torch
 import torch.distributed as dist
@@ -112,7 +112,10 @@ class FSDPWorker(Worker):
 
         # normalize config
         if self._is_actor:
-            self.config.actor.global_batch_size *= self.config.rollout.n
+            if self.config.rollout.n > 1:
+                self.config.actor.global_batch_size *= self.config.rollout.n
+                self.print_rank0(f"Use global batch size {self.config.actor.global_batch_size}.")
+
             self.config.actor.global_batch_size_per_device = (
                 self.config.actor.global_batch_size // self.device_mesh.shape[0] * self.ulysses_sequence_parallel_size
             )
@@ -131,7 +134,10 @@ class FSDPWorker(Worker):
                 raise ValueError("Cannot use FSDP's CPU offload when gradient accumulation is enabled.")
 
         elif self._is_critic:
-            self.config.critic.global_batch_size *= self.config.rollout.n
+            if self.config.rollout.n > 1:
+                self.config.critic.global_batch_size *= self.config.rollout.n
+                self.print_rank0(f"Use global batch size {self.config.critic.global_batch_size}.")
+
             self.config.critic.global_batch_size_per_device = (
                 self.config.critic.global_batch_size // self.device_mesh.shape[0] * self.ulysses_sequence_parallel_size
             )
@@ -153,11 +159,19 @@ class FSDPWorker(Worker):
         self,
         model_config: ModelConfig,
         fsdp_config: FSDPConfig,
-        optim_config: OptimConfig,
+        optim_config: Optional[OptimConfig],
         padding_free: bool = False,
     ) -> None:
-        self.tokenizer = get_tokenizer(model_config.tokenizer_path, trust_remote_code=model_config.trust_remote_code)
-        self.processor = get_processor(model_config.tokenizer_path)
+        self.tokenizer = get_tokenizer(
+            model_config.tokenizer_path,
+            trust_remote_code=model_config.trust_remote_code,
+            use_fast=True,
+        )
+        self.processor = get_processor(
+            model_config.tokenizer_path,
+            trust_remote_code=model_config.trust_remote_code,
+            use_fast=True,
+        )
         self.model_config = AutoConfig.from_pretrained(
             model_config.model_path,
             trust_remote_code=model_config.trust_remote_code,
@@ -215,6 +229,17 @@ class FSDPWorker(Worker):
         if model_config.enable_gradient_checkpointing:
             model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
 
+        if not (self._is_actor or self._is_critic):
+            model.requires_grad_(False)
+
+        if model_config.freeze_vision_tower:
+            if hasattr(model, "visual"):
+                model.visual.requires_grad_(False)
+                fsdp_config.use_orig_params = True
+                self.print_rank0("Vision tower is set to not trainable.")
+            else:
+                self.print_rank0("No vision tower found.")
+
         dist.barrier()
         if self.rank == 0:
             print_model_size(model)
@@ -226,6 +251,8 @@ class FSDPWorker(Worker):
             buffer_dtype=PrecisionType.to_dtype(fsdp_config.mp_buffer_dtype),
         )
         auto_wrap_policy = get_fsdp_wrap_policy(model)
+        self.print_rank0(f"FSDP wrap policy: {auto_wrap_policy}.")
+
         if fsdp_config.enable_full_shard:
             sharding_strategy = ShardingStrategy.FULL_SHARD
         else:
@@ -243,9 +270,6 @@ class FSDPWorker(Worker):
             sync_module_states = False
             param_init_fn = None
 
-        if self.rank == 0:
-            print(f"FSDP wrap policy: {auto_wrap_policy}.")
-
         self.fsdp_module = FSDP(
             model,
             sharding_strategy=sharding_strategy,
@@ -256,7 +280,7 @@ class FSDPWorker(Worker):
             device_id=torch.cuda.current_device(),
             sync_module_states=sync_module_states,
             forward_prefetch=False,
-            use_orig_params=False,
+            use_orig_params=fsdp_config.use_orig_params,
             device_mesh=self.device_mesh,
         )
         print_gpu_memory_usage("After actor FSDP init")
@@ -307,11 +331,18 @@ class FSDPWorker(Worker):
             fsdp_config = self.config.critic.fsdp
             optim_config = self.config.critic.optim
             padding_free = self.config.critic.padding_free
-        else:
+        elif self._is_actor:
             model_config = self.config.actor.model
             fsdp_config = self.config.actor.fsdp
             optim_config = self.config.actor.optim
             padding_free = self.config.actor.padding_free
+        elif self._is_ref:
+            model_config = self.config.actor.model
+            fsdp_config = self.config.ref.fsdp
+            optim_config = None
+            padding_free = self.config.ref.padding_free
+        else:
+            raise ValueError("Unknown role.")
 
         if self._is_actor or self._is_critic or self._is_ref:
             self._build_model_optimizer(
@@ -322,7 +353,7 @@ class FSDPWorker(Worker):
             )
             # get the original unwrapped module
             self.unwrapped_model = self.fsdp_module._fsdp_wrapped_module
-            if self._use_optimizer_offload and not self._is_critic:
+            if self._use_optimizer_offload:
                 offload_fsdp_optimizer(optimizer=self.optimizer)
                 print_gpu_memory_usage("After offload actor optimizer during init")
 

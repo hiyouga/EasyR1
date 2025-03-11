@@ -26,6 +26,7 @@ class ModelConfig:
     override_config: Dict[str, Any] = field(default_factory=dict)
     enable_gradient_checkpointing: bool = True
     trust_remote_code: bool = True
+    freeze_vision_tower: bool = False
 
     def post_init(self):
         if self.tokenizer_path is None:
@@ -49,6 +50,7 @@ class FSDPConfig:
     enable_full_shard: bool = True
     enable_cpu_offload: bool = False
     enable_rank0_init: bool = False
+    use_orig_params: bool = False
     torch_dtype: Optional[str] = None
     mp_param_dtype: str = "bf16"
     mp_reduce_dtype: str = "fp32"
@@ -87,6 +89,7 @@ class ActorConfig:
 @dataclass
 class RefConfig:
     strategy: str = "fsdp"
+    fsdp: FSDPConfig = field(default_factory=FSDPConfig)
     offload: OffloadConfig = field(default_factory=OffloadConfig)
     """auto keys"""
     micro_batch_size_per_device_for_experience: int = field(default=-1, init=False)

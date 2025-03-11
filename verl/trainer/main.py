@@ -49,8 +49,16 @@ def main_task(config: PPOConfig):
     config.deep_post_init()
     print(json.dumps(config.to_dict(), indent=2))
     # instantiate tokenizer
-    tokenizer = get_tokenizer(config.worker.actor.model.model_path)
-    processor = get_processor(config.worker.actor.model.model_path, use_fast=True)
+    tokenizer = get_tokenizer(
+        config.worker.actor.model.model_path,
+        trust_remote_code=config.worker.actor.model.trust_remote_code,
+        use_fast=True,
+    )
+    processor = get_processor(
+        config.worker.actor.model.model_path,
+        trust_remote_code=config.worker.actor.model.trust_remote_code,
+        use_fast=True,
+    )
 
     # define worker classes
     ray_worker_group_cls = RayWorkerGroup
