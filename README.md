@@ -108,7 +108,8 @@ We also implemented the following two baselines from [R1-V](https://github.com/d
 
 ## Awesome Work using EasyR1
 
-- [MMR1](https://github.com/LengSicong/MMR1): Advancing the Frontiers of Multimodal Reasoning.
+- MMR1: Advancing the Frontiers of Multimodal Reasoning ([repo](https://github.com/LengSicong/MMR1)).
+- Vision-R1: Incentivizing Reasoning Capability in Multimodal Large Language Models ([paper](https://arxiv.org/abs/2503.06749), [repo](https://github.com/Osilly/Vision-R1)).
 
 ## TODO
 
