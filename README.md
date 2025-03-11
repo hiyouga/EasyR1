@@ -108,7 +108,7 @@ We also implemented the following two baselines from [R1-V](https://github.com/d
 
 ## Awesome Work using EasyR1
 
-- TBD
+- [MMR1](https://github.com/LengSicong/MMR1): Advancing the Frontiers of Multimodal Reasoning.
 
 ## TODO
 
