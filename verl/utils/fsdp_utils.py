@@ -128,6 +128,7 @@ def offload_fsdp_optimizer(optimizer: Optimizer, empty_cache: bool = True):
 def load_fsdp_optimizer(optimizer: Optimizer, empty_cache: bool = True):
     if not optimizer.state:
         return
+
     for param_group in optimizer.param_groups:
         for param in param_group["params"]:
             state = optimizer.state[param]

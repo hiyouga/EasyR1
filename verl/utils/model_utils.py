@@ -30,8 +30,8 @@ def is_rank0() -> int:
 
 def print_gpu_memory_usage(prefix: str) -> None:
     if is_rank0():
-        memory_allocated = torch.cuda.memory_allocated() / 1024**3
-        memory_reserved = torch.cuda.memory_reserved() / 1024**3
+        memory_allocated = torch.cuda.memory_allocated() / (1024**3)
+        memory_reserved = torch.cuda.memory_reserved() / (1024**3)
         print(f"{prefix} memory allocated: {memory_allocated:.2f} GB, memory reserved: {memory_reserved:.2f} GB.")
 
 
