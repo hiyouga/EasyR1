@@ -12,8 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .dtensor_weight_loaders import load_dtensor_weights
 from .vllm_rollout_spmd import vLLMRollout
 
 
-__all__ = ["vLLMRollout", "load_dtensor_weights"]
+__all__ = ["vLLMRollout"]

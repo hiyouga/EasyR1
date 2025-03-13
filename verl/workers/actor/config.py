@@ -52,6 +52,7 @@ class FSDPConfig:
     enable_rank0_init: bool = False
     use_orig_params: bool = False
     torch_dtype: Optional[str] = None
+    fsdp_size: int = -1
     mp_param_dtype: str = "bf16"
     mp_reduce_dtype: str = "fp32"
     mp_buffer_dtype: str = "fp32"

@@ -28,9 +28,11 @@ import ray
 import torch
 from numpy.typing import NDArray
 from tensordict import TensorDict
+from torch.distributed import ProcessGroup
 from torch.utils.data import DataLoader
 
 from .utils.py_functional import union_two_dict
+from .utils.torch_functional import allgather_dict_tensors
 
 
 try:
@@ -620,3 +622,15 @@ class DataProtoFuture:
         if self.dispatch_fn is not None:
             output = self.dispatch_fn(output)  # split in batch dim, select using dp
         return output
+
+
+def all_gather_data_proto(data: DataProto, size: int, group: ProcessGroup) -> None:
+    # Note that this is an inplace operator just like torch.distributed.all_gather
+    prev_device = data.batch.device
+    data.batch = data.batch.cuda(device=torch.cuda.current_device())
+    data.batch = allgather_dict_tensors(data.batch.contiguous(), size=size, group=group, dim=0)
+    data.batch = data.batch.to(prev_device)
+    # all gather non_tensor_batch
+    all_non_tensor_batch = [None for _ in range(size)]
+    torch.distributed.all_gather_object(all_non_tensor_batch, data.non_tensor_batch, group=group)
+    data.non_tensor_batch = {k: np.concatenate([d[k] for d in all_non_tensor_batch]) for k in data.non_tensor_batch}

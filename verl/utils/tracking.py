@@ -16,7 +16,8 @@ A unified tracking interface that supports logging data to different backend
 """
 
 import os
-from typing import List, Union
+from dataclasses import dataclass
+from typing import List, Tuple, Union
 
 from .logger.aggregate_logger import LocalLogger
 
@@ -86,3 +87,53 @@ class _MlflowLoggingAdapter:
         import mlflow  # type: ignore
 
         mlflow.log_metrics(metrics=data, step=step)
+
+
+@dataclass
+class ValGenerationsLogger:
+    def log(self, loggers: List[str], samples: List[Tuple[str, str, float]], step: int):
+        if "wandb" in loggers:
+            self.log_generations_to_wandb(samples, step)
+        if "swanlab" in loggers:
+            self.log_generations_to_swanlab(samples, step)
+
+    def log_generations_to_wandb(self, samples: List[Tuple[str, str, float]], step: int) -> None:
+        """Log samples to wandb as a table"""
+        import wandb  # type: ignore
+
+        # Create column names for all samples
+        columns = ["step"] + sum(
+            [[f"input_{i + 1}", f"output_{i + 1}", f"score_{i + 1}"] for i in range(len(samples))], []
+        )
+
+        if not hasattr(self, "validation_table"):
+            # Initialize the table on first call
+            self.validation_table = wandb.Table(columns=columns)
+
+        # Create a new table with same columns and existing data
+        # Workaround for https://github.com/wandb/wandb/issues/2981#issuecomment-1997445737
+        new_table = wandb.Table(columns=columns, data=self.validation_table.data)
+
+        # Add new row with all data
+        row_data = []
+        row_data.append(step)
+        for sample in samples:
+            row_data.extend(sample)
+
+        new_table.add_data(*row_data)
+
+        # Update reference and log
+        wandb.log({"val/generations": new_table}, step=step)
+        self.validation_table = new_table
+
+    def log_generations_to_swanlab(self, samples: List[Tuple[str, str, float]], step: int) -> None:
+        """Log samples to swanlab as text"""
+        import swanlab  # type: ignore
+
+        swanlab_text_list = []
+        for i, sample in enumerate(samples):
+            row_text = f"input: {sample[0]}\n\n---\n\noutput: {sample[1]}\n\n---\n\nscore: {sample[2]}"
+            swanlab_text_list.append(swanlab.Text(row_text, caption=f"sample {i + 1}"))
+
+        # Log to swanlab
+        swanlab.log({"val/generations": swanlab_text_list}, step=step)

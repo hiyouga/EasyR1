@@ -13,20 +13,19 @@
 # limitations under the License.
 
 import warnings
+from typing import Dict, Iterable, Tuple, Union
 
-import numpy as np
 import torch
 import torch.distributed as dist
+from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp.api import ShardedStateDictConfig, StateDictType
 from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataParallel as FSDP
 from vllm import LLM
 from vllm.distributed import parallel_state as vllm_ps
 
-from ...protocol import DataProto
-from ...utils import torch_functional as VF
+from ...protocol import DataProto, all_gather_data_proto
 from ...utils.model_utils import print_gpu_memory_usage
-from ..rollout.vllm_rollout import load_dtensor_weights
 from .base import BaseShardingManager
 
 
@@ -48,6 +47,11 @@ class FSDPVLLMShardingManager(BaseShardingManager):
                 state_dict_config=ShardedStateDictConfig(),
             )
 
+        self.world_size = dist.get_world_size()
+        self.tp_size = vllm_ps.get_tensor_model_parallel_world_size()
+        self.tp_rank = vllm_ps.get_tensor_model_parallel_rank()
+        self.tp_group = vllm_ps.get_tensor_model_parallel_group().device_group
+
         # Note that torch_random_states may be different on each dp rank
         self.torch_random_states = torch.cuda.get_rng_state()
         # get a random rng states
@@ -58,6 +62,12 @@ class FSDPVLLMShardingManager(BaseShardingManager):
             torch.cuda.set_rng_state(self.torch_random_states)
         else:
             self.gen_random_states = None
+
+    def _make_weight_iterator(
+        self, actor_weights: Dict[str, Union[torch.Tensor, DTensor]]
+    ) -> Iterable[Tuple[str, torch.Tensor]]:
+        for name, tensor in actor_weights.items():
+            yield name, tensor.full_tensor() if self.world_size != 1 else tensor
 
     def __enter__(self):
         # NOTE: Basically, we only need `torch.cuda.empty_cache()` before vllm wake_up and
@@ -73,9 +83,8 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         print_gpu_memory_usage("After state_dict() in sharding manager")
 
         self.inference_engine.wake_up()
-        load_dtensor_weights(
-            actor_weights, self.inference_engine.llm_engine.model_executor.driver_worker.worker.model_runner.model
-        )
+        model = self.inference_engine.llm_engine.model_executor.driver_worker.worker.model_runner.model
+        model.load_weights(self._make_weight_iterator(actor_weights))
         print_gpu_memory_usage("After sync model weights in sharding manager")
 
         del actor_weights
@@ -99,25 +108,13 @@ class FSDPVLLMShardingManager(BaseShardingManager):
             torch.cuda.set_rng_state(self.torch_random_states)
 
     def preprocess_data(self, data: DataProto) -> DataProto:
-        tp_size = vllm_ps.get_tensor_model_parallel_world_size()
-        group = vllm_ps.get_tensor_model_parallel_group().device_group
-
-        prev_device = data.batch.device
-        data.batch = data.batch.cuda(device=torch.cuda.current_device())
-        data.batch = VF.allgather_dict_tensors(data.batch.contiguous(), size=tp_size, group=group, dim=0)
-        data.batch = data.batch.to(prev_device)
-        # all gather non_tensor_batch
-        all_non_tensor_batch = [None for _ in range(tp_size)]
-        torch.distributed.all_gather_object(all_non_tensor_batch, data.non_tensor_batch, group=group)
-        data.non_tensor_batch = {
-            k: np.concatenate([d[k] for d in all_non_tensor_batch]) for k in data.non_tensor_batch
-        }
+        """All gather across tp group to make each rank has identical input."""
+        all_gather_data_proto(data, size=self.tp_size, group=self.tp_group)
         return data
 
     def postprocess_data(self, data: DataProto) -> DataProto:
-        dp_rank = dist.get_rank()
-        tp_size = vllm_ps.get_tensor_model_parallel_world_size()
-        if tp_size > 1:
-            data = data.chunk(chunks=tp_size)[dp_rank % tp_size]
+        """Get chunk data of this tp rank since we do all gather in preprocess."""
+        if self.tp_size > 1:
+            data = data.chunk(chunks=self.tp_size)[self.tp_rank]
 
         return data
