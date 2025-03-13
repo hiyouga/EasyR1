@@ -366,6 +366,12 @@ class RayPPOTrainer:
         else:
             self.use_critic = False
 
+        if self.config.data.rollout_batch_size % self.config.worker.actor.global_batch_size != 0:
+            raise ValueError("Rollout batch size must be divisible by global batch size.")
+
+        if self.use_critic and self.config.data.rollout_batch_size % self.config.worker.critic.global_batch_size != 0:
+            raise ValueError("Rollout batch size must be divisible by global batch size.")
+
         self._create_dataloader()
 
     def _create_dataloader(self):
