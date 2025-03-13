@@ -389,7 +389,6 @@ class FSDPWorker(Worker):
                 processing_class=self.processor if self.processor is not None else self.tokenizer,
             )
 
-        torch.cuda.empty_cache()
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
     def save_checkpoint(self, path: str, global_step: int = 0, remove_previous_ckpt: bool = False):
@@ -415,6 +414,9 @@ class FSDPWorker(Worker):
         dist.barrier()
         if self._use_param_offload:
             offload_fsdp_model(self.fsdp_module)
+        
+        if self._use_optimizer_offload:
+            offload_fsdp_optimizer(self.actor_optimizer)
 
     """ActorRolloutRefWorker"""
 
@@ -456,7 +458,6 @@ class FSDPWorker(Worker):
             offload_fsdp_optimizer(optimizer=self.optimizer)
 
         output = output.to("cpu")
-        torch.cuda.empty_cache()
         return output
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
@@ -491,7 +492,6 @@ class FSDPWorker(Worker):
             print_gpu_memory_usage("After rollout generation")
 
         output = output.to("cpu")
-        torch.cuda.empty_cache()  # clear kv cache
         print_gpu_memory_usage("After recompute log prob")
         return output
 
@@ -522,7 +522,6 @@ class FSDPWorker(Worker):
             offload_fsdp_model(self.fsdp_module)
 
         output = output.to("cpu")
-        torch.cuda.empty_cache()
         print_gpu_memory_usage("After compute_log_prob")
         return output
 
@@ -549,7 +548,6 @@ class FSDPWorker(Worker):
             offload_fsdp_model(self.fsdp_module)
 
         output = output.to("cpu")
-        torch.cuda.empty_cache()
         print_gpu_memory_usage("After compute_ref_log_prob")
         return output
 
@@ -572,7 +570,6 @@ class FSDPWorker(Worker):
             offload_fsdp_model(self.fsdp_module)
 
         output = output.to("cpu")
-        torch.cuda.empty_cache()
         return output
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
@@ -608,5 +605,4 @@ class FSDPWorker(Worker):
             offload_fsdp_optimizer(optimizer=self.optimizer)
 
         output = output.to("cpu")
-        torch.cuda.empty_cache()
         return output
