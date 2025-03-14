@@ -435,7 +435,7 @@ class FSDPWorker(Worker):
             offload_fsdp_model(self.fsdp_module)
 
         if self._use_optimizer_offload:
-            offload_fsdp_optimizer(self.actor_optimizer)
+            offload_fsdp_optimizer(self.optimizer)
 
     """ActorRolloutRefWorker"""
 
