@@ -18,6 +18,7 @@ The main entry point to run the PPO algorithm
 import os
 from typing import Literal, Optional
 
+import numpy as np
 import psutil
 import torch
 import torch.distributed as dist
@@ -469,9 +470,12 @@ class FSDPWorker(Worker):
             lr = self.lr_scheduler.get_last_lr()[0]
             metrics["actor/lr"] = lr
 
-            # TODO: here, we should return all metrics
-            output = DataProto(meta_info={"metrics": metrics})
-            output = self.ulysses_sharding_manager.postprocess_data(data=output)
+            # Metrics should be in non_tensor_batch instead of meta_info, as DataProto not concat meta_info.
+            output = DataProto(
+                non_tensor_batch={
+                    metric: np.array([value] if np.isscalar(value) else value) for metric, value in metrics.items()
+                }
+            )
 
         if self._use_param_offload:
             offload_fsdp_model(self.fsdp_module)
@@ -613,8 +617,12 @@ class FSDPWorker(Worker):
             lr = self.lr_scheduler.get_last_lr()[0]
             metrics["critic/lr"] = lr
 
-            output = DataProto(batch=None, meta_info={"metrics": metrics})
-            output = self.ulysses_sharding_manager.postprocess_data(data=output)
+            # Metrics should be in non_tensor_batch instead of meta_info, as DataProto not concat meta_info.
+            output = DataProto(
+                non_tensor_batch={
+                    metric: np.array([value] if np.isscalar(value) else value) for metric, value in metrics.items()
+                }
+            )
 
         if self._use_param_offload:
             offload_fsdp_model(self.fsdp_module)

@@ -280,7 +280,10 @@ def compute_remax_outcome_advantage(
 
 
 def compute_rewards(
-    token_level_scores: torch.Tensor, old_log_prob: torch.Tensor, ref_log_prob: torch.Tensor, kl_ratio: float
+    token_level_scores: torch.Tensor,
+    old_log_prob: torch.Tensor,
+    ref_log_prob: torch.Tensor,
+    kl_ratio: float,
 ) -> torch.Tensor:
     kl = old_log_prob - ref_log_prob
     return token_level_scores - kl * kl_ratio
@@ -293,7 +296,9 @@ def compute_policy_loss(
     eos_mask: torch.Tensor,
     cliprange: float,
 ) -> Tuple[torch.Tensor, float, float]:
-    """Adapted from https://github.com/huggingface/trl/blob/main/trl/trainer/ppo_trainer.py#L1122
+    """Compute the policy loss.
+
+    Adapted from https://github.com/huggingface/trl/blob/v0.15.0/trl/trainer/ppo_trainer.py#L568
 
     Args:
         old_log_prob: `(torch.Tensor)`
@@ -315,10 +320,11 @@ def compute_policy_loss(
     """
     negative_approx_kl = log_prob - old_log_prob
     ratio = torch.exp(negative_approx_kl)
+    clipped_ratio = torch.exp(torch.clamp(negative_approx_kl, np.log(1.0 - cliprange), np.log(1.0 + cliprange)))
     ppo_kl = VF.masked_mean(-negative_approx_kl, eos_mask)
 
-    pg_losses = -advantages * ratio
-    pg_losses2 = -advantages * torch.clamp(ratio, 1.0 - cliprange, 1.0 + cliprange)
+    pg_losses = -advantages * ratio  # may be -torch.inf
+    pg_losses2 = -advantages * clipped_ratio  # clip ratio before torch.exp to avoid nan
 
     pg_loss = VF.masked_mean(torch.max(pg_losses, pg_losses2), eos_mask)
     pg_clipfrac = VF.masked_mean(torch.gt(pg_losses2, pg_losses).float(), eos_mask)
@@ -326,7 +332,9 @@ def compute_policy_loss(
 
 
 def compute_entropy_loss(logits: torch.Tensor, eos_mask: torch.Tensor) -> torch.Tensor:
-    """Compute Categorical entropy loss
+    """Compute categorical entropy loss.
+
+    Adapted from https://github.com/huggingface/trl/blob/v0.15.0/trl/trainer/ppo_trainer.py#L582
 
     Args:
         logits: `(torch.Tensor)`
@@ -345,17 +353,27 @@ def compute_entropy_loss(logits: torch.Tensor, eos_mask: torch.Tensor) -> torch.
 
 
 def compute_value_loss(
-    vpreds: torch.Tensor, returns: torch.Tensor, values: torch.Tensor, eos_mask: torch.Tensor, cliprange_value: float
+    vpreds: torch.Tensor,
+    returns: torch.Tensor,
+    values: torch.Tensor,
+    eos_mask: torch.Tensor,
+    cliprange_value: float,
 ) -> Tuple[torch.Tensor, float]:
-    """Compute the value loss. Copied from https://github.com/huggingface/trl/blob/main/trl/trainer/ppo_trainer.py#L1151
+    """Compute the value loss.
+
+    Copied from https://github.com/huggingface/trl/blob/v0.15.0/trl/trainer/ppo_trainer.py#L556
 
     Args:
         vpreds (`torch.FloatTensor`):
             Predicted values of the value head, shape (`batch_size`, `response_length`)
-        values (`torch.FloatTensor`):
-            Old values of value head, shape (`batch_size`, `response_length`)
         returns: (`torch.FloatTensor`):
             Ground truth returns, shape (`batch_size`, `response_length`)
+        values (`torch.FloatTensor`):
+            Old values of value head, shape (`batch_size`, `response_length`)
+        eos_mask: `(torch.Tensor)`
+            shape: (bs, response_length)
+        cliprange_value: (float)
+            The clip range for value net used in PPO. See https://arxiv.org/abs/1707.06347
 
     Returns:
         vf_loss: a scalar (`torch.FloatTensor`):
@@ -364,8 +382,8 @@ def compute_value_loss(
             The ratio of vf being clipped
     """
     vpredclipped = VF.clip_by_value(vpreds, values - cliprange_value, values + cliprange_value)
-    vf_losses1 = (vpreds - returns) ** 2
-    vf_losses2 = (vpredclipped - returns) ** 2
+    vf_losses1 = torch.square(vpreds - returns)
+    vf_losses2 = torch.square(vpredclipped - returns)
     vf_loss = 0.5 * VF.masked_mean(torch.max(vf_losses1, vf_losses2), eos_mask)
     vf_clipfrac = VF.masked_mean(torch.gt(vf_losses2, vf_losses1).float(), eos_mask)
     return vf_loss, vf_clipfrac

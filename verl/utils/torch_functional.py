@@ -91,8 +91,8 @@ def clip_by_value(tensor: torch.Tensor, tensor_min: torch.Tensor, tensor_max: to
 
 def entropy_from_logits(logits: torch.Tensor) -> torch.Tensor:
     """Calculate entropy from logits."""
-    pd = torch.nn.functional.softmax(logits, dim=-1)
-    entropy = torch.logsumexp(logits, dim=-1) - torch.sum(pd * logits, dim=-1)
+    prob_dist = torch.nn.functional.softmax(logits, dim=-1)
+    entropy = torch.logsumexp(logits, dim=-1) - torch.sum(prob_dist * logits, dim=-1)
     return entropy
 
 

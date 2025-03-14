@@ -145,7 +145,7 @@ def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.KLController, kl_penal
     current_kl = VF.masked_mean(kld, mask=response_mask, axis=-1)  # average over sequence
     current_kl = torch.mean(current_kl, dim=0).item()
 
-    # according to https://github.com/huggingface/trl/blob/951ca1841f29114b969b57b26c7d3e80a39f75a0/trl/trainer/ppo_trainer.py#L837
+    # According to https://github.com/huggingface/trl/blob/v0.11.0/trl/trainer/ppo_trainer.py#L880
     kl_ctrl.update(current_kl=current_kl, n_steps=batch_size)
     data.batch["token_level_rewards"] = token_level_rewards
 
@@ -526,10 +526,10 @@ class RayPPOTrainer:
             return
 
         if "global_step_" not in self.config.trainer.load_checkpoint_path.strip(os.path.sep).split(os.path.sep)[-1]:
-            raise ValueError("`load_checkpoint_path` should be in `global_step_xxx` format.")
+            raise ValueError("`load_checkpoint_path` should end with `global_step_*`.")
 
         print(f"Load from checkpoint: {self.config.trainer.load_checkpoint_path}.")
-        self.global_step = int(self.config.trainer.load_checkpoint_path.split("global_step_")[-1])
+        self.global_step = int(self.config.trainer.load_checkpoint_path.strip(os.path.sep).split("global_step_")[-1])
         actor_path = os.path.join(self.config.trainer.load_checkpoint_path, "actor")
         self.actor_rollout_wg.load_checkpoint(
             actor_path, remove_ckpt_after_load=self.config.trainer.remove_ckpt_after_load
@@ -694,16 +694,16 @@ class RayPPOTrainer:
                         with _timer("update_critic", timing_raw):
                             critic_output = self.critic_wg.update_critic(batch)
 
-                        critic_output_metrics = reduce_metrics(critic_output.meta_info["metrics"])
-                        metrics.update(critic_output_metrics)
+                        critic_metrics = reduce_metrics(critic_output.non_tensor_batch)
+                        metrics.update(critic_metrics)
 
                     # update actor
                     if self.config.trainer.critic_warmup <= self.global_step:
                         with _timer("update_actor", timing_raw):
                             actor_output = self.actor_rollout_wg.update_actor(batch)
 
-                        actor_output_metrics = reduce_metrics(actor_output.meta_info["metrics"])
-                        metrics.update(actor_output_metrics)
+                        actor_metrics = reduce_metrics(actor_output.non_tensor_batch)
+                        metrics.update(actor_metrics)
 
                     # validate
                     if (
