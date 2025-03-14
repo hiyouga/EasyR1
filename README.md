@@ -1,5 +1,8 @@
 # EasyR1: An Efficient, Scalable, Multi-Modality RL Training Framework
 
+[![GitHub Repo stars](https://img.shields.io/github/stars/hiyouga/EasyR1)](https://github.com/hiyouga/EasyR1/stargazers)
+[![Twitter](https://img.shields.io/twitter/follow/llamafactory_ai)](https://twitter.com/llamafactory_ai)
+
 This project is a clean fork of the original [veRL](https://github.com/volcengine/verl) project to support vision language models, we thank all the authors for providing such a high-performance RL training framework.
 
 EasyR1 is efficient and scalable due to the design of **[HybirdEngine](https://arxiv.org/abs/2409.19256)** and the latest release of **[vLLM](https://github.com/vllm-project/vllm)**'s SPMD mode.
@@ -13,11 +16,12 @@ EasyR1 is efficient and scalable due to the design of **[HybirdEngine](https://a
 
 - Supported algorithms
   - GRPO
+  - Reinforce++
   - Remax
-  - others RL algorithms (comming soon)
+  - RLOO
 
 - Supported datasets
-  - Any text, vision-text dataset in a [specific format](#custom-dataset).
+  - Any text, vision-text dataset in a [specific format](#custom-dataset)
 
 - Supported tricks
   - Padding-free training
@@ -50,8 +54,6 @@ docker pull hiyouga/verl:ngc-th2.5.1-cu120-vllm0.7.4-hotfix
 | GRPO Full Fine-Tuning    |  AMP | 2*24GB | 4*40GB | 8*40GB |
 
 > [!NOTE]
-> At least 2 GPUs are needed to run EasyR1.
->
 > We are working hard to reduce the VRAM in RL training, LoRA support will be integrated in next updates.
 
 ## Tutorial: Run Qwen2.5-VL GRPO on [Geometry3K](https://huggingface.co/datasets/hiyouga/geometry3k) Dataset in Just 3 Steps
@@ -69,7 +71,7 @@ pip install -e .
 ### GRPO Training
 
 ```bash
-bash examples/run_qwen2_5_vl_7b_geo.sh
+bash examples/qwen2_5_vl_7b_geo3k.sh
 ```
 
 ### Merge Checkpoint in Hugging Face Format
@@ -81,7 +83,7 @@ python3 scripts/model_merger.py --local_dir path_to_your_last_actor_checkpoint
 > [!TIP]
 > If you encounter issues with connecting to Hugging Face, consider using `export HF_ENDPOINT=https://hf-mirror.com`.
 >
-> If you want to use SwanLab logger, consider using `bash examples/run_qwen2_5_vl_7b_geo_swanlab.sh`.
+> If you want to use SwanLab logger, consider using `bash examples/qwen2_5_vl_7b_geo3k_swanlab.sh`.
 
 ## Custom Dataset
 
@@ -100,21 +102,25 @@ Please refer to the example datasets to prepare your own dataset.
 - To learn about the GRPO algorithm, you can refer to [Hugging Face's blog](https://huggingface.co/docs/trl/v0.15.2/en/grpo_trainer).
 - Different from TRL's GRPO trainer, our trainer supports mini-batch update as described in the [original PPO paper](https://arxiv.org/abs/1707.06347).
 
+## How to Run 70B+ Model in Multi-node Environment
+
+Please see the **[veRL's official doc](https://verl.readthedocs.io/en/latest/start/multinode.html)** for multi-node training and Ray debugger.
+
 ## Other Baselines
 
-We also implemented the following two baselines from [R1-V](https://github.com/deep-agent/R1-V) project.
-- [CLEVR-70k-Counting](examples/run_qwen2_5_vl_3b_clevr.sh): Train the Qwen2.5-VL-3B-Instruct model on counting problem.
-- [GeoQA-8k](examples/run_qwen2_5_vl_3b_geoqa8k.sh): Train the Qwen2.5-VL-3B-Instruct model on GeoQA problem.
+We also reproduced the following two baselines of the [R1-V](https://github.com/deep-agent/R1-V) project.
+- [CLEVR-70k-Counting](examples/baselines/qwen2_5_vl_3b_clevr.sh): Train the Qwen2.5-VL-3B-Instruct model on counting problem.
+- [GeoQA-8k](examples/baselines/qwen2_5_vl_3b_geoqa8k.sh): Train the Qwen2.5-VL-3B-Instruct model on GeoQA problem.
 
 ## Awesome Work using EasyR1
 
-- MMR1: Advancing the Frontiers of Multimodal Reasoning ([repo](https://github.com/LengSicong/MMR1)).
-- Vision-R1: Incentivizing Reasoning Capability in Multimodal Large Language Models ([paper](https://arxiv.org/abs/2503.06749), [repo](https://github.com/Osilly/Vision-R1)).
+- **MMR1**: Advancing the Frontiers of Multimodal Reasoning. [![[code]](https://img.shields.io/github/stars/LengSicong/MMR1)](https://github.com/LengSicong/MMR1)
+- **Vision-R1**: Incentivizing Reasoning Capability in Multimodal Large Language Models. [![[code]](https://img.shields.io/github/stars/Osilly/Vision-R1)](https://github.com/Osilly/Vision-R1) [![[arxiv]](https://img.shields.io/badge/arxiv-2503.06749-blue)](https://arxiv.org/abs/2503.06749)
 
 ## TODO
 
-- Support PPO, Reinforce++ and RLOO for VLMs.
-- Support ulysses parallelism for VLMs.
+- Support LoRA (high priority).
+- Support ulysses parallelism for VLMs (middle priority).
 - Support more VLM architectures.
 
 > [!NOTE]

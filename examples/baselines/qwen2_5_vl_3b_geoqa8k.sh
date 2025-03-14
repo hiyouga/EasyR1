@@ -11,13 +11,13 @@ SYSTEM_PROMPT="""A conversation between User and Assistant. The user asks a ques
  <think> reasoning process here </think><answer> answer here </answer>"""
 
 python3 -m verl.trainer.main \
-    config=examples/grpo_example.yaml \
-    data.train_files=BUAADreamer/clevr_count_70k@train \
-    data.val_files=BUAADreamer/clevr_count_70k@test \
+    config=examples/config.yaml \
+    data.train_files=leonardPKU/GEOQA_8K_R1V@train \
+    data.val_files=leonardPKU/GEOQA_8K_R1V@test \
     data.system_prompt="${SYSTEM_PROMPT}" \
     worker.actor.model.model_path=${MODEL_PATH} \
     worker.rollout.tensor_parallel_size=1 \
     worker.rollout.enable_chunked_prefill=false \
     worker.reward.compute_score=r1v \
-    trainer.experiment_name=qwen2_5_vl_3b_clevr \
-    trainer.n_gpus_per_node=2
+    trainer.experiment_name=qwen2_5_vl_3b_geoqa8k \
+    trainer.n_gpus_per_node=8
