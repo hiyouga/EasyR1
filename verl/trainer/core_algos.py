@@ -319,12 +319,14 @@ def compute_policy_loss(
             a float number indicating the fraction of policy gradient loss being clipped
     """
     negative_approx_kl = log_prob - old_log_prob
+    # clamp the ratio before exp to avoid nan
+    # see: https://github.com/pytorch/pytorch/issues/10729
     ratio = torch.exp(negative_approx_kl)
     clipped_ratio = torch.exp(torch.clamp(negative_approx_kl, np.log(1.0 - cliprange), np.log(1.0 + cliprange)))
     ppo_kl = VF.masked_mean(-negative_approx_kl, eos_mask)
 
-    pg_losses = -advantages * ratio  # may be -torch.inf
-    pg_losses2 = -advantages * clipped_ratio  # clip ratio before torch.exp to avoid nan
+    pg_losses = -advantages * ratio
+    pg_losses2 = -advantages * clipped_ratio
 
     pg_loss = VF.masked_mean(torch.max(pg_losses, pg_losses2), eos_mask)
     pg_clipfrac = VF.masked_mean(torch.gt(pg_losses2, pg_losses).float(), eos_mask)
