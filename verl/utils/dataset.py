@@ -31,30 +31,84 @@ logger = logging.getLogger('RLHFDataset')
 
 
 def collate_fn(features: List[Dict[str, Any]]) -> Dict[str, Any]:
+    tensors = defaultdict(list)
+    non_tensors = defaultdict(list)
+    for feature in features:
+        for key, value in feature.items():
+            if isinstance(value, torch.Tensor):
+                tensors[key].append(value)
+            else:
+                non_tensors[key].append(value)
+
+    for key, value in tensors.items():
+        tensors[key] = torch.stack(value, dim=0)
+
+    for key, value in non_tensors.items():
+        non_tensors[key] = np.array(value, dtype=object)
+
+    return {**tensors, **non_tensors}
+
+
+def extract_video_frames(video_path: str, num_frames: int = 4) -> List[ImageObject]:
+    """
+    Extract a specified number of frames uniformly from a video.
+
+    Args:
+        video_path: Path to the video file
+        num_frames: Number of frames to extract
+
+    Returns:
+        List of PIL Image objects
+    """
     try:
-        tensors = defaultdict(list)
-        non_tensors = defaultdict(list)
-        for feature in features:
-            for key, value in feature.items():
-                if isinstance(value, torch.Tensor):
-                    tensors[key].append(value)
-                else:
-                    non_tensors[key].append(value)
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            logger.error(f"Could not open video file: {video_path}")
+            return [Image.new("RGB", (224, 224), (128, 128, 128)) for _ in range(num_frames)]
 
-        for key, value in tensors.items():
-            if key not in ["pixel_values", "image_grid_thw"]:
-                try:
-                    tensors[key] = torch.stack(value, dim=0)
-                except Exception as e:
-                    logger.error(f"Error stacking tensors for key {key}: {str(e)}")
-                    logger.error(traceback.format_exc())
-                    tensors[key] = value
+        # Get video properties
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-        return {**tensors, **non_tensors}
+        if total_frames <= 0:
+            logger.error(f"Invalid frame count for video: {video_path}")
+            return [Image.new("RGB", (224, 224), (128, 128, 128)) for _ in range(num_frames)]
+
+        # Calculate frame indices to extract
+        frames_to_extract = []
+        if num_frames == 1:
+            # Just get the middle frame
+            frames_to_extract = [total_frames // 2]
+        else:
+            # Get frames uniformly distributed across the video
+            for i in range(num_frames):
+                frame_idx = int(i * (total_frames - 1) / (num_frames - 1)) if num_frames > 1 else 0
+                frames_to_extract.append(frame_idx)
+
+        # Extract the frames
+        frames = []
+        for frame_idx in frames_to_extract:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            ret, frame = cap.read()
+
+            if not ret:
+                logger.warning(f"Failed to read frame {frame_idx} from video: {video_path}")
+                frames.append(Image.new("RGB", (224, 224), (128, 128, 128)))
+                continue
+
+            # Convert from BGR to RGB
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            # Convert to PIL Image
+            pil_image = Image.fromarray(frame_rgb)
+            frames.append(pil_image)
+
+        cap.release()
+        return frames
+
     except Exception as e:
-        logger.error(f"Error in collate_fn: {str(e)}")
+        logger.error(f"Error extracting frames from video {video_path}: {str(e)}")
         logger.error(traceback.format_exc())
-        raise
+        # Return placeholder images
+        return [Image.new("RGB", (224, 224), (128, 128, 128)) for _ in range(num_frames)]
 
 
 def process_image(image: ImageObject, max_pixels: int, min_pixels: int) -> ImageObject:
@@ -115,6 +169,7 @@ class RLHFDataset(Dataset):
         self.max_pixels = max_pixels
         self.min_pixels = min_pixels
         self.video_frames = video_frames
+        self.worker_id = 0
 
         if "@" in data_path:
             data_path, data_split = data_path.split("@")
@@ -133,181 +188,127 @@ class RLHFDataset(Dataset):
         return len(self.dataset)
 
     def __getitem__(self, index):
-        """
-        Note that we also return the raw_input_ids so that it can be combined with other chat template
-        """
-        try:
-            logger.debug(f"Worker {self.worker_id}: Processing item {index}")
-            row_dict = self.dataset[index]
+        row_dict: dict = self.dataset[index]
+        messages = [{"role": "user", "content": row_dict[self.prompt_key]}]
+        if self.system_prompt:
+            messages.insert(0, {"role": "system", "content": self.system_prompt})
+        prompt = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
 
-            # Validate prompt exists
-            if self.prompt_key not in row_dict:
-                logger.warning(
-                    f"Worker {self.worker_id}: Item {index} missing prompt key '{self.prompt_key}'. Keys: {list(row_dict.keys())}")
-                # Create a fallback empty prompt
-                row_dict[self.prompt_key] = ""
+        processed_images = []
+        if self.image_key in row_dict and row_dict["images"]:
+            for i, image_item in enumerate(row_dict["images"]):
+                try:
+                    logger.debug(f"Worker {self.worker_id}: Processing image {i} for item {index}")
 
-            messages = [
-                {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": row_dict[self.prompt_key]},
-            ]
+                    if isinstance(image_item, str):
+                        # Load the image if it's a path
+                        full_path = os.path.join(self.data_dir, image_item)
+                        logger.debug(f"Worker {self.worker_id}: Loading image {i} from {full_path}")
 
-            logger.debug(f"Worker {self.worker_id}: Applying chat template for item {index}")
-            prompt = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
-
-            # Process images if they exist
-            processed_images = []
-            if "images" in row_dict and row_dict["images"]:
-                for i, image_item in enumerate(row_dict["images"]):
-                    try:
-                        logger.debug(f"Worker {self.worker_id}: Processing image {i} for item {index}")
-
-                        if isinstance(image_item, str):
-                            # Load the image if it's a path
-                            full_path = os.path.join(self.data_dir, image_item)
-                            logger.debug(f"Worker {self.worker_id}: Loading image {i} from {full_path}")
-
-                            if not os.path.exists(full_path):
-                                logger.warning(f"Worker {self.worker_id}: Image file not found: {full_path}")
-                                image = Image.new("RGB", (224, 224), (255, 255, 255))
-                            else:
-                                image = Image.open(full_path)
+                        if not os.path.exists(full_path):
+                            logger.warning(f"Worker {self.worker_id}: Image file not found: {full_path}")
+                            image = Image.new("RGB", (224, 224), (255, 255, 255))
                         else:
-                            # Use the image directly if it's already a PIL Image
-                            image = image_item
+                            image = Image.open(full_path)
+                    else:
+                        # Use the image directly if it's already a PIL Image
+                        image = image_item
 
-                        # Process the image
-                        processed_images.append(process_image(image, self.max_pixels, self.min_pixels))
+                    # Process the image
+                    processed_images.append(process_image(image, self.max_pixels, self.min_pixels))
 
-                    except Exception as e:
-                        logger.error(f"Worker {self.worker_id}: Error processing image {i} for item {index}: {str(e)}")
-                        logger.error(traceback.format_exc())
-                        placeholder_image = Image.new("RGB", (224, 224), (255, 255, 255))
-                        processed_images.append(process_image(placeholder_image, self.max_pixels, self.min_pixels))
+                except Exception as e:
+                    logger.error(f"Worker {self.worker_id}: Error processing image {i} for item {index}: {str(e)}")
+                    logger.error(traceback.format_exc())
+                    placeholder_image = Image.new("RGB", (224, 224), (255, 255, 255))
+                    processed_images.append(process_image(placeholder_image, self.max_pixels, self.min_pixels))
 
-            # Process videos if they exist
-            if "videos" in row_dict and row_dict["videos"]:
-                logger.debug(f"Worker {self.worker_id}: Processing videos for item {index}")
-                for i, video_item in enumerate(row_dict["videos"]):
-                    try:
-                        if isinstance(video_item, str):
-                            # Load the video if it's a path
-                            full_path = os.path.join(self.data_dir, video_item)
-                            logger.debug(f"Worker {self.worker_id}: Loading video {i} from {full_path}")
+        # Process videos if they exist
+        if "videos" in row_dict and row_dict["videos"]:
+            logger.debug(f"Worker {self.worker_id}: Processing videos for item {index}")
+            for i, video_item in enumerate(row_dict["videos"]):
+                try:
+                    if isinstance(video_item, str):
+                        # Load the video if it's a path
+                        full_path = os.path.join(self.data_dir, video_item)
+                        logger.debug(f"Worker {self.worker_id}: Loading video {i} from {full_path}")
 
-                            if not os.path.exists(full_path):
-                                logger.warning(f"Worker {self.worker_id}: Video file not found: {full_path}")
-                                # Add placeholder frames
-                                for _ in range(self.video_frames):
-                                    processed_images.append(Image.new("RGB", (224, 224), (255, 255, 255)))
-                            else:
-                                # Extract frames from video
-                                video_frames = extract_video_frames(full_path, self.video_frames)
-                                for frame in video_frames:
-                                    processed_images.append(process_image(frame, self.max_pixels, self.min_pixels))
-                        else:
-                            logger.warning(
-                                f"Worker {self.worker_id}: Video item type not supported: {type(video_item)}")
+                        if not os.path.exists(full_path):
+                            logger.warning(f"Worker {self.worker_id}: Video file not found: {full_path}")
                             # Add placeholder frames
                             for _ in range(self.video_frames):
                                 processed_images.append(Image.new("RGB", (224, 224), (255, 255, 255)))
-
-                    except Exception as e:
-                        logger.error(f"Worker {self.worker_id}: Error processing video {i} for item {index}: {str(e)}")
-                        logger.error(traceback.format_exc())
+                        else:
+                            # Extract frames from video
+                            video_frames = extract_video_frames(full_path, self.video_frames)
+                            for frame in video_frames:
+                                processed_images.append(process_image(frame, self.max_pixels, self.min_pixels))
+                    else:
+                        logger.warning(
+                            f"Worker {self.worker_id}: Video item type not supported: {type(video_item)}")
                         # Add placeholder frames
                         for _ in range(self.video_frames):
                             processed_images.append(Image.new("RGB", (224, 224), (255, 255, 255)))
 
-            if "images" in row_dict and len(row_dict["images"]) > 0:
-                data_source = row_dict["images"][0].split("/")[0]
-                dataset = row_dict["images"][0].split("/")[1]
-            elif "videos" in row_dict and len(row_dict["videos"]) > 0:
-                data_source = row_dict["videos"][0].split("/")[0]
-                dataset = row_dict["videos"][0].split("/")[1]
-            else:
-                data_source = "text"
-                dataset = "text"
-            row_dict["data_source"] = data_source
-            row_dict["dataset"] = dataset
+                except Exception as e:
+                    logger.error(f"Worker {self.worker_id}: Error processing video {i} for item {index}: {str(e)}")
+                    logger.error(traceback.format_exc())
+                    # Add placeholder frames
+                    for _ in range(self.video_frames):
+                        processed_images.append(Image.new("RGB", (224, 224), (255, 255, 255)))
 
-            # Ensure we have at least one image/frame
-            if not processed_images:
-                logger.debug(f"Worker {self.worker_id}: No images or videos found for item {index}, using placeholder")
-                processed_images = [Image.new("RGB", (224, 224), (255, 255, 255))]
+        if "images" in row_dict and len(row_dict["images"]) > 0:
+            data_source = row_dict["images"][0].split("/")[0]
+            dataset = row_dict["images"][0].split("/")[1]
+        elif "videos" in row_dict and len(row_dict["videos"]) > 0:
+            data_source = row_dict["videos"][0].split("/")[0]
+            dataset = row_dict["videos"][0].split("/")[1]
+        else:
+            data_source = "text"
+            dataset = "text"
+        row_dict["data_source"] = data_source
+        row_dict["dataset"] = dataset
 
-            row_dict["images"] = processed_images
+        # Ensure we have at least one image/frame
+        if not processed_images:
+            logger.debug(f"Worker {self.worker_id}: No images or videos found for item {index}, using placeholder")
+            processed_images = [Image.new("RGB", (224, 224), (255, 255, 255))]
 
-            # Replace all image tokens in prompt with placeholders
-            prompt = prompt.replace("<video>", "<image>")
-            if "<image>" not in prompt:
-                prompt = "<image> " + prompt
-            raw_prompt = prompt.replace("<image>", "<|vision_start|><|image_pad|><|vision_end|>")
+        row_dict["images"] = processed_images
+        row_dict["multi_modal_data"] = {
+            "image": processed_images
+        }
 
-            logger.debug(f"Worker {self.worker_id}: Running image processor for item {index}")
-            image_inputs = self.processor.image_processor(row_dict["images"], return_tensors="pt")
-            image_grid_thw = image_inputs["image_grid_thw"]
-            row_dict.update(image_inputs)
 
-            if image_grid_thw is not None:
-                logger.debug(f"Worker {self.worker_id}: Processing image grid for item {index}")
-                merge_length = self.processor.image_processor.merge_size ** 2
-                index = 0
-                while "<image>" in prompt:
-                    prompt = prompt.replace(
-                        "<image>",
-                        "<|vision_start|>"
-                        + "<|placeholder|>" * (image_grid_thw[index].prod() // merge_length)
-                        + "<|vision_end|>",
-                        1,
-                    )
-                    index += 1
 
-                prompt = prompt.replace("<|placeholder|>", self.processor.image_token)
+        # Replace all image tokens in prompt with placeholders
+        prompt = prompt.replace("<video>", "<image>")
+        if "<image>" not in prompt:
+            prompt = "<image> " + prompt
+        raw_prompt = prompt.replace("<image>", "<|vision_start|><|image_pad|><|vision_end|>")
 
-            logger.debug(f"Worker {self.worker_id}: Tokenizing prompt for item {index}")
-            input_ids, attention_mask = verl_F.tokenize_and_postprocess_data(
-                prompt=prompt,
-                tokenizer=self.tokenizer,
-                max_length=self.max_prompt_length,
-                pad_token_id=self.tokenizer.pad_token_id,
-                left_pad=True,
-                truncation=self.truncation,
-            )
-
-            if image_grid_thw is not None:
-                logger.debug(f"Worker {self.worker_id}: Getting rope indices for item {index}")
-                position_ids = get_rope_index(
-                    self.processor,
-                    input_ids=input_ids,
-                    image_grid_thw=image_grid_thw,
-                    attention_mask=attention_mask,
-                )  # (3, seq_len)
-            else:
-                position_ids = torch.clip(attention_mask.cumsum(dim=0) - 1, min=0, max=None)  # (seqlen,)
-
-            row_dict["input_ids"] = input_ids
-            row_dict["attention_mask"] = attention_mask
-            row_dict["position_ids"] = position_ids
-            row_dict["ground_truth"] = row_dict[self.answer_key]
-
-            logger.debug(f"Worker {self.worker_id}: Encoding raw prompt for item {index}")
-            row_dict["raw_prompt_ids"] = self.tokenizer.encode(raw_prompt, add_special_tokens=False)
-
-            logger.debug(f"Worker {self.worker_id}: Successfully processed item {index}")
-            return row_dict
-
-        except Exception as e:
-            logger.error(f"Worker {self.worker_id}: Error in __getitem__ for index {index}: {str(e)}")
-            logger.error(traceback.format_exc())
-
-            # Instead of crashing, return a minimal valid item
-            fallback_dict = {
-                "input_ids": torch.ones(1, dtype=torch.long),
-                "attention_mask": torch.ones(1, dtype=torch.long),
-                "position_ids": torch.zeros(1, dtype=torch.long),
-                "raw_prompt_ids": torch.ones(1, dtype=torch.long),
-                "data_source": "fallback",
-                "dataset": "fallback"
-            }
-            return fallback_dict
+        model_inputs = self.processor(row_dict["multi_modal_data"]["image"], prompt, return_tensors="pt")
+        input_ids = model_inputs.pop("input_ids")[0]
+        attention_mask = model_inputs.pop("attention_mask")[0]
+        row_dict["multi_modal_inputs"] = dict(model_inputs)
+        position_ids = get_rope_index(
+            self.processor,
+            input_ids=input_ids,
+            image_grid_thw=model_inputs["image_grid_thw"],
+            attention_mask=attention_mask,
+        )  # (3, seq_length)
+        input_ids, attention_mask, position_ids = VF.postprocess_data(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            max_length=self.max_prompt_length,
+            pad_token_id=self.tokenizer.pad_token_id,
+            left_pad=True,
+            truncation=self.truncation,
+        )
+        row_dict["input_ids"] = input_ids
+        row_dict["attention_mask"] = attention_mask
+        row_dict["position_ids"] = position_ids
+        row_dict["ground_truth"] = row_dict[self.answer_key]
+        row_dict["raw_prompt_ids"] = self.tokenizer.encode(raw_prompt, add_special_tokens=False)
+        return row_dict
