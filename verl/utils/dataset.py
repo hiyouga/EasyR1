@@ -177,9 +177,9 @@ class RLHFDataset(Dataset):
             data_split = "train"
 
         if os.path.isdir(data_path):
-            self.dataset = load_dataset("parquet", data_dir=data_path, split="train")
+            self.dataset = load_dataset("json", data_dir=data_path, split="train")
         elif os.path.isfile(data_path):
-            self.dataset = load_dataset("parquet", data_files=data_path, split="train")
+            self.dataset = load_dataset("json", data_files=data_path, split="train")
         else:  # remote dataset
             self.dataset = load_dataset(data_path, split=data_split)
         self.data_dir = os.path.dirname(data_path)
@@ -280,14 +280,16 @@ class RLHFDataset(Dataset):
         }
 
 
-
         # Replace all image tokens in prompt with placeholders
         prompt = prompt.replace("<video>", "<image>")
+        if len(processed_images) > 1:
+            prompt = prompt.replace("<image>", "<image> " * len(processed_images))
         if "<image>" not in prompt:
             prompt = "<image> " + prompt
-        raw_prompt = prompt.replace("<image>", "<|vision_start|><|image_pad|><|vision_end|>")
-
+        prompt = prompt.replace("<image>", "<|vision_start|><|image_pad|><|vision_end|>")
         model_inputs = self.processor(row_dict["multi_modal_data"]["image"], prompt, return_tensors="pt")
+        # print(prompt)
+        # print(model_inputs)
         input_ids = model_inputs.pop("input_ids")[0]
         attention_mask = model_inputs.pop("attention_mask")[0]
         row_dict["multi_modal_inputs"] = dict(model_inputs)
@@ -310,5 +312,5 @@ class RLHFDataset(Dataset):
         row_dict["attention_mask"] = attention_mask
         row_dict["position_ids"] = position_ids
         row_dict["ground_truth"] = row_dict[self.answer_key]
-        row_dict["raw_prompt_ids"] = self.tokenizer.encode(raw_prompt, add_special_tokens=False)
+        row_dict["raw_prompt_ids"] = self.tokenizer.encode(prompt, add_special_tokens=False)
         return row_dict

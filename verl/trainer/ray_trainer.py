@@ -348,8 +348,9 @@ class RayPPOTrainer:
         )
 
         assert len(self.train_dataloader) >= 1
-        assert len(self.val_dataloader) == 1
+        # assert len(self.val_dataloader) == 1
         print(f"Size of train dataloader: {len(self.train_dataloader)}")
+        print(f"Size of val dataloader: {len(self.val_dataloader)}")
 
         if self.config.trainer.max_steps is not None:
             training_steps = self.config.trainer.max_steps
