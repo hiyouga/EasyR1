@@ -20,11 +20,11 @@ from typing import Any, Dict, List
 
 def union_two_dict(dict1: Dict[str, Any], dict2: Dict[str, Any]) -> Dict[str, Any]:
     """Union two dict. Will throw an error if there is an item not the same object with the same key."""
-    for key, value in dict2.items():
+    for key in dict2.keys():
         if key in dict1:
-            assert dict1[key] != value, f"{key} in meta_dict1 and meta_dict2 are not the same object"
+            assert dict1[key] == dict2[key], f"{key} in meta_dict1 and meta_dict2 are not the same object"
 
-        dict1[key] = value
+        dict1[key] = dict2[key]
 
     return dict1
 

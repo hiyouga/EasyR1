@@ -21,23 +21,25 @@ When working with FSDP:
 from contextlib import contextmanager
 from typing import Any, List, Union
 
+import numpy as np
 import torch
 import torch.distributed
 from tensordict import TensorDict
 from transformers import PreTrainedTokenizer
 from vllm import LLM, RequestOutput, SamplingParams
 
-from verl import DataProto
-from verl.utils.torch_functional import get_eos_mask, pad_2d_list_to_length
-from verl.workers.rollout.base import BaseRollout
-from verl.workers.rollout.config import RolloutConfig
+from ....protocol import DataProto
+from ....utils import torch_functional as VF
+from ....utils.torch_dtypes import PrecisionType
+from ..base import BaseRollout
+from ..config import RolloutConfig
 
 
-def _repeat_interleave(features: Union[torch.Tensor, List[Any]], repeats: int) -> Union[torch.Tensor, List[Any]]:
-    if isinstance(features, torch.Tensor):
-        return features.repeat_interleave(repeats, dim=0)
+def _repeat_interleave(value: Union[torch.Tensor, np.ndarray], repeats: int) -> Union[torch.Tensor, List[Any]]:
+    if isinstance(value, torch.Tensor):
+        return value.repeat_interleave(repeats, dim=0)
     else:
-        return [feature for feature in features for _ in range(repeats)]
+        return np.repeat(value, repeats, axis=0)
 
 
 class vLLMRollout(BaseRollout):
@@ -69,7 +71,7 @@ class vLLMRollout(BaseRollout):
             model=model_path,
             skip_tokenizer_init=False,
             tensor_parallel_size=config.tensor_parallel_size,
-            dtype=config.dtype,
+            dtype=PrecisionType.to_str(PrecisionType.to_dtype(config.dtype)),
             gpu_memory_utilization=config.gpu_memory_utilization,
             enforce_eager=config.enforce_eager,
             max_model_len=config.prompt_length + config.response_length,
@@ -133,10 +135,12 @@ class vLLMRollout(BaseRollout):
         if batch_size != len(non_tensor_batch["raw_prompt_ids"]):
             raise RuntimeError("vllm sharding manager is not work properly.")
 
-        if "images" in non_tensor_batch:
+        if "multi_modal_data" in non_tensor_batch:
             vllm_inputs = []
-            for raw_prompt_ids, images in zip(non_tensor_batch.pop("raw_prompt_ids"), non_tensor_batch.pop("images")):
-                vllm_inputs.append({"prompt_token_ids": raw_prompt_ids, "multi_modal_data": {"image": images}})
+            for raw_prompt_ids, multi_modal_data in zip(
+                non_tensor_batch.pop("raw_prompt_ids"), non_tensor_batch.pop("multi_modal_data")
+            ):
+                vllm_inputs.append({"prompt_token_ids": raw_prompt_ids, "multi_modal_data": multi_modal_data})
         else:
             vllm_inputs = [
                 {"prompt_token_ids": raw_prompt_ids} for raw_prompt_ids in non_tensor_batch.pop("raw_prompt_ids")
@@ -153,7 +157,7 @@ class vLLMRollout(BaseRollout):
             for output in completion.outputs:
                 response_ids.append(output.token_ids)
 
-        response_ids = pad_2d_list_to_length(
+        response_ids = VF.pad_2d_list_to_length(
             response_ids, self.pad_token_id, max_length=self.config.response_length
         ).to(input_ids.device)
 
@@ -162,10 +166,9 @@ class vLLMRollout(BaseRollout):
             input_ids = _repeat_interleave(input_ids, self.config.n)
             attention_mask = _repeat_interleave(attention_mask, self.config.n)
             position_ids = _repeat_interleave(position_ids, self.config.n)
-            if "pixel_values" in non_tensor_batch.keys():
-                non_tensor_batch["pixel_values"] = _repeat_interleave(non_tensor_batch["pixel_values"], self.config.n)
-                non_tensor_batch["image_grid_thw"] = _repeat_interleave(
-                    non_tensor_batch["image_grid_thw"], self.config.n
+            if "multi_modal_inputs" in non_tensor_batch.keys():
+                non_tensor_batch["multi_modal_inputs"] = _repeat_interleave(
+                    non_tensor_batch["multi_modal_inputs"], self.config.n
                 )
 
         sequence_ids = torch.cat([input_ids, response_ids], dim=-1)
@@ -180,7 +183,7 @@ class vLLMRollout(BaseRollout):
         # position_ids:   [0,0,0,0,0,1,2,3 | 4,5,6,7,8,9,10,11]
         response_position_ids = position_ids[..., -1:] + delta_position_id
         position_ids = torch.cat([position_ids, response_position_ids], dim=-1)
-        response_attention_mask = get_eos_mask(
+        response_attention_mask = VF.get_eos_mask(
             response_ids=response_ids, eos_token=eos_token_id, dtype=attention_mask.dtype
         )
         attention_mask = torch.cat((attention_mask, response_attention_mask), dim=-1)

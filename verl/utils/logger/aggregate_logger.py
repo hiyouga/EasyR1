@@ -16,10 +16,10 @@ A Ray logger will receive logging info from different processes.
 """
 
 import numbers
-from typing import Dict
+from typing import Any, Dict
 
 
-def concat_dict_to_str(dict: Dict, step):
+def concat_dict_to_str(dict: Dict[str, Any], step: int) -> str:
     output = [f"step {step}:"]
     for k, v in dict.items():
         if isinstance(v, numbers.Number):
@@ -30,14 +30,11 @@ def concat_dict_to_str(dict: Dict, step):
 
 
 class LocalLogger:
-    def __init__(self, remote_logger=None, enable_wandb=False, print_to_console=False):
-        self.print_to_console = print_to_console
-        if print_to_console:
-            print("Using LocalLogger is deprecated. The constructor API will change.")
+    def __init__(self):
+        pass
 
     def flush(self):
         pass
 
-    def log(self, data, step):
-        if self.print_to_console:
-            print(concat_dict_to_str(data, step=step), flush=True)
+    def log(self, data: Dict[str, Any], step: int) -> None:
+        print(concat_dict_to_str(data, step=step), flush=True)

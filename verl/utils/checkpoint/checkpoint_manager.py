@@ -11,20 +11,23 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 import os
 import random
 import shutil
 import tempfile
+from abc import ABC, abstractmethod
+from typing import Union
 
 import numpy as np
 import torch
-import torch.distributed
+import torch.distributed as dist
 from filelock import FileLock
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from transformers import PreTrainedTokenizer, ProcessorMixin
 
 
-class BaseCheckpointManager:
+class BaseCheckpointManager(ABC):
     """
     A checkpoint manager that saves and loads
     - model
@@ -44,8 +47,7 @@ class BaseCheckpointManager:
         model: FSDP,
         optimizer: torch.optim.Optimizer,
         lr_scheduler: torch.optim.lr_scheduler.LRScheduler,
-        tokenizer: PreTrainedTokenizer,
-        processor: ProcessorMixin
+        processing_class: Union[PreTrainedTokenizer, ProcessorMixin],
     ):
         self.previous_global_step = None
         self.previous_save_local_path = None
@@ -53,16 +55,17 @@ class BaseCheckpointManager:
         self.model = model
         self.optimizer = optimizer
         self.lr_scheduler = lr_scheduler
-        self.tokenizer = tokenizer
-        self.processor = processor
+        self.processing_class = processing_class
 
         assert isinstance(self.model, FSDP)
-        self.rank = torch.distributed.get_rank()
-        self.world_size = torch.distributed.get_world_size()
+        self.rank = dist.get_rank()
+        self.world_size = dist.get_world_size()
 
+    @abstractmethod
     def load_checkpoint(self, *args, **kwargs):
         raise NotImplementedError
 
+    @abstractmethod
     def save_checkpoint(self, *args, **kwargs):
         raise NotImplementedError
 

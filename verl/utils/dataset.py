@@ -3,8 +3,10 @@ import os
 import logging
 import traceback
 from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from io import BytesIO
+from typing import Any, Dict, List, Optional, Union
 
+import numpy as np
 import torch
 from datasets import load_dataset
 from PIL import Image
@@ -12,8 +14,8 @@ from PIL.Image import Image as ImageObject
 from torch.utils.data import Dataset
 from transformers import PreTrainedTokenizer, ProcessorMixin
 
-import verl.utils.torch_functional as verl_F
-from verl.models.transformers.qwen2_5_vl import get_rope_index
+from ..models.transformers.qwen2_vl import get_rope_index
+from . import torch_functional as VF
 
 # For video processing
 import cv2
@@ -82,122 +84,50 @@ def process_image(image: ImageObject, max_pixels: int, min_pixels: int) -> Image
         return fallback
 
 
-def extract_video_frames(video_path: str, num_frames: int = 4) -> List[ImageObject]:
-    """
-    Extract a specified number of frames uniformly from a video.
-
-    Args:
-        video_path: Path to the video file
-        num_frames: Number of frames to extract
-
-    Returns:
-        List of PIL Image objects
-    """
-    try:
-        cap = cv2.VideoCapture(video_path)
-        if not cap.isOpened():
-            logger.error(f"Could not open video file: {video_path}")
-            return [Image.new("RGB", (224, 224), (128, 128, 128)) for _ in range(num_frames)]
-
-        # Get video properties
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-        if total_frames <= 0:
-            logger.error(f"Invalid frame count for video: {video_path}")
-            return [Image.new("RGB", (224, 224), (128, 128, 128)) for _ in range(num_frames)]
-
-        # Calculate frame indices to extract
-        frames_to_extract = []
-        if num_frames == 1:
-            # Just get the middle frame
-            frames_to_extract = [total_frames // 2]
-        else:
-            # Get frames uniformly distributed across the video
-            for i in range(num_frames):
-                frame_idx = int(i * (total_frames - 1) / (num_frames - 1)) if num_frames > 1 else 0
-                frames_to_extract.append(frame_idx)
-
-        # Extract the frames
-        frames = []
-        for frame_idx in frames_to_extract:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-            ret, frame = cap.read()
-
-            if not ret:
-                logger.warning(f"Failed to read frame {frame_idx} from video: {video_path}")
-                frames.append(Image.new("RGB", (224, 224), (128, 128, 128)))
-                continue
-
-            # Convert from BGR to RGB
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            # Convert to PIL Image
-            pil_image = Image.fromarray(frame_rgb)
-            frames.append(pil_image)
-
-        cap.release()
-        return frames
-
-    except Exception as e:
-        logger.error(f"Error extracting frames from video {video_path}: {str(e)}")
-        logger.error(traceback.format_exc())
-        # Return placeholder images
-        return [Image.new("RGB", (224, 224), (128, 128, 128)) for _ in range(num_frames)]
-
-
 class RLHFDataset(Dataset):
     """
     We assume the dataset contains a column that contains prompts and other information
     """
 
     def __init__(
-            self,
-            data_path: str,
-            tokenizer: PreTrainedTokenizer,
-            processor: Optional[ProcessorMixin],
-            prompt_key="prompt",
-            max_prompt_length=1024,
-            truncation="error",
-            system_prompt=None,
-            max_pixels=None,
-            min_pixels=None,
-            video_frames=4,
-            worker_id=None
+        self,
+        data_path: str,
+        tokenizer: PreTrainedTokenizer,
+        processor: Optional[ProcessorMixin],
+        prompt_key: str = "prompt",
+        answer_key: str = "answer",
+        image_key: str = "images",
+        max_prompt_length: int = 1024,
+        truncation: str = "error",
+        system_prompt: str = None,
+        max_pixels: int = None,
+        min_pixels: int = None,
+        video_frames=4
     ):
-        try:
-            self.tokenizer = tokenizer
-            self.processor = processor
-            self.prompt_key = prompt_key
-            self.max_prompt_length = max_prompt_length
-            self.truncation = truncation
-            self.system_prompt = system_prompt
-            self.max_pixels = max_pixels
-            self.min_pixels = min_pixels
-            self.video_frames = video_frames
-            self.worker_id = worker_id or os.getpid()
+        self.tokenizer = tokenizer
+        self.processor = processor
+        self.prompt_key = prompt_key
+        self.answer_key = answer_key
+        self.image_key = image_key
+        self.max_prompt_length = max_prompt_length
+        self.truncation = truncation
+        self.system_prompt = system_prompt
+        self.max_pixels = max_pixels
+        self.min_pixels = min_pixels
+        self.video_frames = video_frames
 
-            logger.info(f"Worker {self.worker_id}: Initializing RLHFDataset with data_path={data_path}")
+        if "@" in data_path:
+            data_path, data_split = data_path.split("@")
+        else:
+            data_split = "train"
 
-            if "@" in data_path:
-                data_path, data_split = data_path.split("@")
-            else:
-                data_split = "train"
-
-            logger.info(f"Worker {self.worker_id}: Loading dataset from {data_path}, split={data_split}")
-
-            if '.json' in data_path:
-                self.dataset = load_dataset('json', data_files=data_path, split='train')
-            else:
-                self.dataset = load_dataset(data_path, split=data_split)
-
-            logger.info(f"Worker {self.worker_id}: Dataset loaded with {len(self.dataset)} samples")
-
-            self.data_dir = os.path.dirname(data_path)
-            logger.info(f"Worker {self.worker_id}: Data directory: {self.data_dir}")
-
-        except Exception as e:
-            logger.error(f"Worker {worker_id or os.getpid()}: Error initializing dataset: {str(e)}")
-            logger.error(traceback.format_exc())
-            raise
+        if os.path.isdir(data_path):
+            self.dataset = load_dataset("parquet", data_dir=data_path, split="train")
+        elif os.path.isfile(data_path):
+            self.dataset = load_dataset("parquet", data_files=data_path, split="train")
+        else:  # remote dataset
+            self.dataset = load_dataset(data_path, split=data_split)
+        self.data_dir = os.path.dirname(data_path)
 
     def __len__(self):
         return len(self.dataset)
@@ -359,6 +289,7 @@ class RLHFDataset(Dataset):
             row_dict["input_ids"] = input_ids
             row_dict["attention_mask"] = attention_mask
             row_dict["position_ids"] = position_ids
+            row_dict["ground_truth"] = row_dict[self.answer_key]
 
             logger.debug(f"Worker {self.worker_id}: Encoding raw prompt for item {index}")
             row_dict["raw_prompt_ids"] = self.tokenizer.encode(raw_prompt, add_special_tokens=False)

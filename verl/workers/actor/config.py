@@ -26,6 +26,7 @@ class ModelConfig:
     override_config: Dict[str, Any] = field(default_factory=dict)
     enable_gradient_checkpointing: bool = True
     trust_remote_code: bool = True
+    freeze_vision_tower: bool = False
 
     def post_init(self):
         if self.tokenizer_path is None:
@@ -37,7 +38,7 @@ class OptimConfig:
     lr: float = 1e-6
     betas: Tuple[float, float] = (0.9, 0.999)
     weight_decay: float = 1e-2
-    lr_warmup_steps_ratio: float = 0.0
+    lr_warmup_ratio: float = 0.0
     min_lr_ratio: Optional[float] = None
     warmup_style: str = "constant"
     """auto keys"""
@@ -47,9 +48,11 @@ class OptimConfig:
 @dataclass
 class FSDPConfig:
     enable_full_shard: bool = True
-    param_offload: bool = False
-    optimizer_offload: bool = False
+    enable_cpu_offload: bool = False
+    enable_rank0_init: bool = False
+    use_orig_params: bool = False
     torch_dtype: Optional[str] = None
+    fsdp_size: int = -1
     mp_param_dtype: str = "bf16"
     mp_reduce_dtype: str = "fp32"
     mp_buffer_dtype: str = "fp32"
@@ -57,16 +60,16 @@ class FSDPConfig:
 
 @dataclass
 class OffloadConfig:
-    param_offload: bool = False
-    optimizer_offload: bool = False
+    offload_params: bool = False
+    offload_optimizer: bool = False
 
 
 @dataclass
 class ActorConfig:
     strategy: str = "fsdp"
     global_batch_size: int = 256
-    micro_batch_size_per_device_for_update: int = field(default=-1, init=False)
-    micro_batch_size_per_device_for_experience: int = field(default=-1, init=False)
+    micro_batch_size_per_device_for_update: int = 4
+    micro_batch_size_per_device_for_experience: int = 16
     max_grad_norm: float = 1.0
     clip_ratio: float = 0.2
     entropy_coeff: float = 1e-4
@@ -83,15 +86,13 @@ class ActorConfig:
     """auto keys"""
     global_batch_size_per_device: int = field(default=-1, init=False)
 
-    def post_init(self):
-        if self.ppo_epochs != 1:
-            raise NotImplementedError
-
 
 @dataclass
 class RefConfig:
     strategy: str = "fsdp"
+    fsdp: FSDPConfig = field(default_factory=FSDPConfig)
     offload: OffloadConfig = field(default_factory=OffloadConfig)
     """auto keys"""
     micro_batch_size_per_device_for_experience: int = field(default=-1, init=False)
     padding_free: bool = field(default=False, init=False)
+    ulysses_sequence_parallel_size: int = field(default=1, init=False)

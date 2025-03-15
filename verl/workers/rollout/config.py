@@ -24,7 +24,7 @@ class RolloutConfig:
     temperature: float = 1.0
     top_k: int = -1
     top_p: float = 1.0
-    dtype: str = "bfloat16"
+    dtype: str = "bf16"
     gpu_memory_utilization: float = 0.5
     ignore_eos: bool = False
     enforce_eager: bool = False
