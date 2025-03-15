@@ -36,7 +36,6 @@ worker:
     optim:
       lr: 1.0e-6
       weight_decay: 1.0e-2
-      lr_warmup_ratio: 0.0
     fsdp:
       enable_full_shard: true
       enable_cpu_offload: false
