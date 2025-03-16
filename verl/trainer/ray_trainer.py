@@ -45,6 +45,7 @@ from ..workers.fsdp_workers import FSDPWorker
 from . import core_algos
 from .config import PPOConfig
 from .metrics import compute_data_metrics, compute_throughout_metrics, compute_timing_metrics, reduce_metrics
+from ..utils.reward_score.evaluation import compute_metrics_by_data_source
 
 
 WorkerType = Type[Worker]
@@ -391,6 +392,7 @@ class RayPPOTrainer:
         all_ground_truths = []
         all_data_sources = []
         all_datasets = []
+        data_source_lst = []
 
         for test_data in self.val_dataloader:
             test_batch = DataProto.from_single_dict(test_data)
@@ -445,8 +447,6 @@ class RayPPOTrainer:
                 test_batch.non_tensor_batch.get("data_source", ["unknown"] * reward_tensor.shape[0])
             )
 
-        self._maybe_log_val_generations_to_wandb(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores)
-
         reward_tensor = torch.cat(reward_tensor_lst, dim=0).sum(-1).cpu()  # (batch_size,)
         data_sources = np.concatenate(data_source_lst, axis=0)
 
@@ -466,7 +466,7 @@ class RayPPOTrainer:
         metrics = compute_metrics_by_data_source(all_predictions, all_ground_truths,
                                                  all_data_sources, all_datasets)
         metric_dict.update(**metrics)
-        wandb.log(metric_dict, step=self.global_steps)
+        wandb.log(metric_dict, step=self.global_step)
 
         self._maybe_log_val_generations(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores)
         reward_score = torch.cat(reward_tensor_lst, dim=0).sum(-1).mean().item()

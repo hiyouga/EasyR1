@@ -1,6 +1,6 @@
 data:
   train_files: /scratch/high_modality/geom_train.jsonl
-  val_files: /scratch/high_modality/geom_valid.jsonl
+  val_files: /scratch/high_modality/geom_valid_mini.jsonl
   prompt_key: problem
   answer_key: answer
   image_key: images
@@ -72,11 +72,11 @@ trainer:
   experiment_name: qwen2_5_7b_math
   n_gpus_per_node: 8
   nnodes: 1
-  val_freq: 50
+  val_freq: 150
   val_before_train: true
   val_only: false
   val_generations_to_log: 1
-  save_freq: 50
+  save_freq: 150
   remove_previous_ckpt: false
   remove_ckpt_after_load: false
   save_checkpoint_path: null

@@ -211,7 +211,6 @@ class RLHFDataset(Dataset):
                         else:
                             image = Image.open(full_path)
                     else:
-                        # Use the image directly if it's already a PIL Image
                         image = image_item
 
                     # Process the image
@@ -220,8 +219,6 @@ class RLHFDataset(Dataset):
                 except Exception as e:
                     logger.error(f"Worker {self.worker_id}: Error processing image {i} for item {index}: {str(e)}")
                     logger.error(traceback.format_exc())
-                    placeholder_image = Image.new("RGB", (224, 224), (255, 255, 255))
-                    processed_images.append(process_image(placeholder_image, self.max_pixels, self.min_pixels))
 
         # Process videos if they exist
         if "videos" in row_dict and row_dict["videos"]:
@@ -246,16 +243,10 @@ class RLHFDataset(Dataset):
                     else:
                         logger.warning(
                             f"Worker {self.worker_id}: Video item type not supported: {type(video_item)}")
-                        # Add placeholder frames
-                        for _ in range(self.video_frames):
-                            processed_images.append(Image.new("RGB", (224, 224), (255, 255, 255)))
 
                 except Exception as e:
                     logger.error(f"Worker {self.worker_id}: Error processing video {i} for item {index}: {str(e)}")
                     logger.error(traceback.format_exc())
-                    # Add placeholder frames
-                    for _ in range(self.video_frames):
-                        processed_images.append(Image.new("RGB", (224, 224), (255, 255, 255)))
 
         if "images" in row_dict and len(row_dict["images"]) > 0:
             data_source = row_dict["images"][0].split("/")[0]
@@ -282,17 +273,21 @@ class RLHFDataset(Dataset):
 
         # Replace all image tokens in prompt with placeholders
         prompt = prompt.replace("<video>", "<image>")
-        if len(processed_images) > 1:
-            prompt = prompt.replace("<image>", "<image> " * len(processed_images))
         if "<image>" not in prompt:
             prompt = "<image> " + prompt
+        image_count_in_prompt = prompt.count("<image>")
+        image_count = len(processed_images)
+        if len(processed_images) > 1 and image_count_in_prompt < len(processed_images):
+            # add more image tokens to prompt
+            missing_count = len(processed_images) - image_count_in_prompt
+            prompt = prompt.replace("<image>", "<image> " * (missing_count + 1), 1)
         prompt = prompt.replace("<image>", "<|vision_start|><|image_pad|><|vision_end|>")
+        image_count_in_prompt = prompt.count("<|vision_start|>")
+        assert image_count == image_count_in_prompt, f"Image count mismatch: {image_count} != {image_count_in_prompt}"
         model_inputs = self.processor(row_dict["multi_modal_data"]["image"], prompt, return_tensors="pt")
-        # print(prompt)
-        # print(model_inputs)
         input_ids = model_inputs.pop("input_ids")[0]
         attention_mask = model_inputs.pop("attention_mask")[0]
-        row_dict["multi_modal_inputs"] = dict(model_inputs)
+        row_dict["multi_modal_data"] = dict(model_inputs)
         position_ids = get_rope_index(
             self.processor,
             input_ids=input_ids,
