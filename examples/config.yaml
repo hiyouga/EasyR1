@@ -22,7 +22,6 @@ worker:
     micro_batch_size_per_device_for_update: 4
     micro_batch_size_per_device_for_experience: 16
     max_grad_norm: 1.0
-    entropy_coeff: 1.0e-3
     use_kl_loss: true
     kl_loss_coef: 1.0e-2
     kl_loss_type: low_var_kl

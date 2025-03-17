@@ -72,7 +72,6 @@ class ActorConfig:
     micro_batch_size_per_device_for_experience: int = 16
     max_grad_norm: float = 1.0
     clip_ratio: float = 0.2
-    entropy_coeff: float = 1e-3
     use_kl_loss: bool = True
     kl_loss_coef: float = 1e-3
     kl_loss_type: str = "low_var_kl"

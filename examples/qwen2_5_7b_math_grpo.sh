@@ -12,4 +12,4 @@ python3 -m verl.trainer.main \
     config=examples/config.yaml \
     data.system_prompt="${SYSTEM_PROMPT}" \
     worker.actor.model.model_path=${MODEL_PATH} \
-    trainer.n_gpus_per_node=4
+    trainer.n_gpus_per_node=8
