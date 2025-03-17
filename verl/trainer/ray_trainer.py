@@ -149,7 +149,7 @@ def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.KLController, kl_penal
     kl_ctrl.update(current_kl=current_kl, n_steps=batch_size)
     data.batch["token_level_rewards"] = token_level_rewards
 
-    metrics = {"critic/kl": current_kl, "critic/kl_coeff": beta}
+    metrics = {"critic/kl": current_kl, "critic/kl_coef": beta}
     return data, metrics
 
 
@@ -398,7 +398,7 @@ class RayPPOTrainer:
                     non_tensor_batch_keys=["raw_prompt_ids"],
                 )
 
-            test_gen_batch.meta_info = {"do_sample": False}
+            test_gen_batch.meta_info = self.config.worker.rollout.val_override_config
             test_gen_batch, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_wg.world_size)
             test_output_gen_batch = self.actor_rollout_wg.generate_sequences(test_gen_batch)
             test_output_gen_batch = unpad_dataproto(test_output_gen_batch, pad_size=pad_size)
@@ -620,7 +620,7 @@ class RayPPOTrainer:
                     if self.config.algorithm.adv_estimator == "remax":
                         with _timer("gen_max", timing_raw):
                             gen_baseline_batch = deepcopy(gen_batch)
-                            gen_baseline_batch.meta_info["do_sample"] = False
+                            gen_baseline_batch.meta_info["temperature"] = 0.0
                             gen_baseline_output = self.actor_rollout_wg.generate_sequences(gen_baseline_batch)
 
                             batch = batch.union(gen_baseline_output)

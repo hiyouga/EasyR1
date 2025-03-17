@@ -16,14 +16,17 @@ Rollout config
 """
 
 from dataclasses import asdict, dataclass, field
+from typing import Any, Dict
 
 
 @dataclass
 class RolloutConfig:
     name: str = "vllm"
+    n: int = 1
     temperature: float = 1.0
-    top_k: int = -1
     top_p: float = 1.0
+    top_k: int = -1
+    limit_images: int = 0
     dtype: str = "bf16"
     gpu_memory_utilization: float = 0.5
     ignore_eos: bool = False
@@ -34,9 +37,7 @@ class RolloutConfig:
     max_num_batched_tokens: int = 8192
     max_num_seqs: int = 1024
     disable_log_stats: bool = True
-    do_sample: bool = True
-    n: int = 1
-    limit_images: int = 0
+    val_override_config: Dict[str, Any] = field(default_factory=dict)
     """auto keys"""
     prompt_length: int = field(default=-1, init=False)
     response_length: int = field(default=-1, init=False)

@@ -113,23 +113,13 @@ class vLLMRollout(BaseRollout):
             setattr(self.sampling_params, key, value)
 
     @torch.no_grad()
-    def generate_sequences(self, prompts: DataProto, **kwargs) -> DataProto:
+    def generate_sequences(self, prompts: DataProto) -> DataProto:
         # left-padded attention_mask
         input_ids: torch.Tensor = prompts.batch["input_ids"]  # (bs, prompt_length)
         attention_mask: torch.Tensor = prompts.batch["attention_mask"]
         position_ids: torch.Tensor = prompts.batch["position_ids"]
         eos_token_id: int = prompts.meta_info["eos_token_id"]
         batch_size = input_ids.size(0)
-
-        do_sample = prompts.meta_info.get("do_sample", True)
-        if not do_sample:
-            kwargs = {
-                "n": 1,
-                "temperature": 0.0,
-                "top_p": 1.0,
-                "top_k": -1,
-                "min_p": 0.0,
-            }
 
         non_tensor_batch = prompts.non_tensor_batch
         if batch_size != len(non_tensor_batch["raw_prompt_ids"]):
@@ -147,29 +137,24 @@ class vLLMRollout(BaseRollout):
             ]
 
         # users can customize different sampling_params at different run
-        with self.update_sampling_params(**kwargs):
+        with self.update_sampling_params(**prompts.meta_info):
             completions: List[RequestOutput] = self.inference_engine.generate(
                 prompts=vllm_inputs, sampling_params=self.sampling_params
             )
+            response_ids = [output.token_ids for completion in completions for output in completion.outputs]
+            response_ids = VF.pad_2d_list_to_length(
+                response_ids, self.pad_token_id, max_length=self.config.response_length
+            ).to(input_ids.device)
 
-        response_ids = []
-        for completion in completions:
-            for output in completion.outputs:
-                response_ids.append(output.token_ids)
-
-        response_ids = VF.pad_2d_list_to_length(
-            response_ids, self.pad_token_id, max_length=self.config.response_length
-        ).to(input_ids.device)
-
-        if self.config.n > 1 and do_sample:
-            batch_size = batch_size * self.config.n
-            input_ids = _repeat_interleave(input_ids, self.config.n)
-            attention_mask = _repeat_interleave(attention_mask, self.config.n)
-            position_ids = _repeat_interleave(position_ids, self.config.n)
-            if "multi_modal_inputs" in non_tensor_batch.keys():
-                non_tensor_batch["multi_modal_inputs"] = _repeat_interleave(
-                    non_tensor_batch["multi_modal_inputs"], self.config.n
-                )
+            if self.sampling_params.n > 1:
+                batch_size = batch_size * self.sampling_params.n
+                input_ids = _repeat_interleave(input_ids, self.sampling_params.n)
+                attention_mask = _repeat_interleave(attention_mask, self.sampling_params.n)
+                position_ids = _repeat_interleave(position_ids, self.sampling_params.n)
+                if "multi_modal_inputs" in non_tensor_batch.keys():
+                    non_tensor_batch["multi_modal_inputs"] = _repeat_interleave(
+                        non_tensor_batch["multi_modal_inputs"], self.sampling_params.n
+                    )
 
         sequence_ids = torch.cat([input_ids, response_ids], dim=-1)
         response_length = response_ids.size(1)

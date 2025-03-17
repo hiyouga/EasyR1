@@ -103,9 +103,7 @@ class DataParallelPPOCritic(BasePPOCritic):
 
             # gather output if sp > 1
             if self.config.ulysses_sequence_parallel_size > 1:
-                values_rmpad = gather_outputs_and_unpad(
-                    values_rmpad, gather_dim=0, unpad_dim=0, padding_size=pad_size
-                )
+                values_rmpad = gather_outputs_and_unpad(values_rmpad, gather_dim=0, unpad_dim=0, padding_size=pad_size)
 
             # pad it back
             values = pad_input(values_rmpad, indices=indices, batch=batch_size, seqlen=seqlen).squeeze(-1)

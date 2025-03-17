@@ -52,6 +52,9 @@ worker:
     enable_chunked_prefill: false
     tensor_parallel_size: 2
     limit_images: 0
+    val_override_config:
+      temperature: 0.5
+      n: 1
 
   ref:
     fsdp:
