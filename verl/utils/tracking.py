@@ -59,10 +59,11 @@ class Tracking:
             swanlab.init(
                 project=project_name,
                 experiment_name=experiment_name,
-                config=config,
+                config={"UPPERFRAMEWORK": "EasyR1", "FRAMEWORK": "veRL"},
                 logdir=SWANLAB_LOG_DIR,
                 mode=SWANLAB_MODE,
             )
+            swanlab.config.update(config)
             self.logger["swanlab"] = swanlab
 
         if "console" in default_backend:
