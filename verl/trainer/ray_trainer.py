@@ -733,9 +733,9 @@ class RayPPOTrainer:
         if self.val_reward_fn is not None:
             if val_metrics is None or self.global_step % self.config.trainer.val_freq != 0:
                 val_metrics = self._validate()
-                logger.log(data=val_metrics, step=self.global_step)              
+                logger.log(data=val_metrics, step=self.global_step)
+
             print(f"Final validation metrics: {val_metrics}.")
         
         if self.config.trainer.save_freq > 0 and self.global_step % self.config.trainer.save_freq != 0:
-            with _timer("save_checkpoint", timing_raw):
-                self._save_checkpoint()
+            self._save_checkpoint()
