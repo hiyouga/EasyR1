@@ -35,7 +35,7 @@ EasyR1 is efficient and scalable due to the design of **[HybirdEngine](https://a
 - Python 3.9+
 - transformers>=4.49.0
 - flash-attn>=2.4.3
-- vllm>=0.7.3
+- vllm>=0.7.3 (0.8.0 is recommended)
 
 We provide a [Dockerfile](./Dockerfile) to easily build environments.
 

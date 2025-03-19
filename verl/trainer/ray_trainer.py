@@ -736,6 +736,6 @@ class RayPPOTrainer:
                 logger.log(data=val_metrics, step=self.global_step)
 
             print(f"Final validation metrics: {val_metrics}.")
-        
+
         if self.config.trainer.save_freq > 0 and self.global_step % self.config.trainer.save_freq != 0:
             self._save_checkpoint()
