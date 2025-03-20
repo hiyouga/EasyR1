@@ -19,8 +19,8 @@ algorithm:
 worker:
   actor:
     global_batch_size: 256
-    micro_batch_size_per_device_for_update: 4
-    micro_batch_size_per_device_for_experience: 16
+    micro_batch_size_per_device_for_update: 2
+    micro_batch_size_per_device_for_experience: 4
     max_grad_norm: 1.0
     entropy_coeff: 1.0e-3
     use_kl_loss: true
@@ -70,13 +70,13 @@ trainer:
   logger: ["console", "wandb"]
   project_name: easy_r1
   experiment_name: qwen2_5_7b_math
-  n_gpus_per_node: 8
+  n_gpus_per_node: 4
   nnodes: 1
-  val_freq: 150
+  val_freq: 200
   val_before_train: true
   val_only: false
   val_generations_to_log: 1
-  save_freq: 150
+  save_freq: 200
   remove_previous_ckpt: false
   remove_ckpt_after_load: false
   save_checkpoint_path: null
