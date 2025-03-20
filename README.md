@@ -35,14 +35,14 @@ EasyR1 is efficient and scalable due to the design of **[HybirdEngine](https://a
 - Python 3.9+
 - transformers>=4.49.0
 - flash-attn>=2.4.3
-- vllm>=0.7.3
+- vllm>=0.7.3 (0.8.0 is recommended)
 
 We provide a [Dockerfile](./Dockerfile) to easily build environments.
 
 We recommend using the [pre-built docker image](https://hub.docker.com/r/hiyouga/verl) in EasyR1.
 
 ```bash
-docker pull hiyouga/verl:ngc-th2.5.1-cu120-vllm0.7.4-hotfix
+docker pull hiyouga/verl:ngc-th2.6.0-cu120-vllm0.8.0
 ```
 
 ### Hardware Requirements
@@ -117,6 +117,7 @@ We also reproduced the following two baselines of the [R1-V](https://github.com/
 - **MMR1**: Advancing the Frontiers of Multimodal Reasoning. [![[code]](https://img.shields.io/github/stars/LengSicong/MMR1)](https://github.com/LengSicong/MMR1)
 - **Vision-R1**: Incentivizing Reasoning Capability in Multimodal Large Language Models. [![[code]](https://img.shields.io/github/stars/Osilly/Vision-R1)](https://github.com/Osilly/Vision-R1) [![[arxiv]](https://img.shields.io/badge/arxiv-2503.06749-blue)](https://arxiv.org/abs/2503.06749)
 - **Seg-Zero**: Reasoning-Chain Guided Segmentation via Cognitive Reinforcement. [![[code]](https://img.shields.io/github/stars/dvlab-research/Seg-Zero)](https://github.com/dvlab-research/Seg-Zero) [![[arxiv]](https://img.shields.io/badge/arxiv-2503.06520-blue)](https://arxiv.org/abs/2503.06520)
+- **MetaSpatial**: Reinforcing 3D Spatial Reasoning in VLMs for the Metaverse. [![[code]](https://img.shields.io/github/stars/PzySeere/MetaSpatial)](https://github.com/PzySeere/MetaSpatial)
 
 ## TODO
 

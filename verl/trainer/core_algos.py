@@ -333,27 +333,6 @@ def compute_policy_loss(
     return pg_loss, pg_clipfrac, ppo_kl
 
 
-def compute_entropy_loss(logits: torch.Tensor, eos_mask: torch.Tensor) -> torch.Tensor:
-    """Compute categorical entropy loss.
-
-    Adapted from https://github.com/huggingface/trl/blob/v0.15.0/trl/trainer/ppo_trainer.py#L582
-
-    Args:
-        logits: `(torch.Tensor)`
-            shape: (bs, response_length, vocab_size)
-        eos_mask: `(torch.Tensor)`
-            shape: (bs, response_length)
-
-    Returns:
-        entropy: a scalar torch.Tensor
-
-    """
-    # compute entropy
-    entropy = VF.entropy_from_logits(logits)  # (bs, response_len)
-    entropy_loss = VF.masked_mean(entropy, mask=eos_mask)
-    return entropy_loss
-
-
 def compute_value_loss(
     vpreds: torch.Tensor,
     returns: torch.Tensor,

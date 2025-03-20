@@ -34,50 +34,31 @@ except ImportError:
     FLAH_ATTN_CROSS_ENTROPY_LOSS_AVAILABLE = False
 
 
-def logprobs_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-    """
-    See: https://github.com/pytorch/pytorch/issues/563#issuecomment-330103591
-    """
-    if FLAH_ATTN_CROSS_ENTROPY_LOSS_AVAILABLE:
-        batch_dim = logits.shape[:-1]
-        last_dim = logits.shape[-1]
-        logits = logits.contiguous().view(-1, last_dim)
-        labels = labels.contiguous().view(-1)
-        output = logprobs_from_logits_flash_attn(logits, labels)
-        output = output.view(*batch_dim)
-    else:
-        output = logprobs_from_logits_v2(logits, labels)
-    return output
-
-
+@torch.compiler.disable()
 def logprobs_from_logits_flash_attn(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-    output = cross_entropy_loss(logits, labels)
-    assert isinstance(output, tuple), (
-        "please make sure flash-attn>=2.4.3 where cross_entropy_loss returns Tuple[losses, z_losses]."
-    )
+    output = cross_entropy_loss(logits, labels, inplace_backward=True)
+    if not isinstance(output, tuple):
+        raise ValueError(
+            "please make sure flash-attn>=2.4.3 where cross_entropy_loss returns Tuple[losses, z_losses]."
+        )
+
     return -output[0]
 
 
-def logprobs_from_logits_v2(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+def logprobs_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
     """
-    A memory efficient implementation of logprobs_from_logits
+    We may use torch compile to speed up computing.
     """
-    if logits.dtype in [torch.float32, torch.float64]:
-        logits_labels = torch.gather(logits, dim=-1, index=labels.unsqueeze(-1)).squeeze(-1)
-        # loop to reduce peak mem consumption
-        logsumexp_values = torch.stack([torch.logsumexp(l, dim=-1) for l in logits])
-        logprobs_labels = logits_labels - logsumexp_values  # log_softmax(x_i) = x_i - logsumexp(x)
-    else:
-        # logsumexp approach is unstable with bfloat16, fall back to slightly less efficent approach
-        logprobs_labels = []
-        for row_logits, row_labels in zip(logits, labels):  # loop to reduce peak mem consumption
-            row_logprobs = F.log_softmax(row_logits.float(), dim=-1)
-            row_logprobs_labels = row_logprobs.gather(dim=-1, index=row_labels.unsqueeze(-1)).squeeze(-1)
-            logprobs_labels.append(row_logprobs_labels)
+    batch_dim = logits.shape[:-1]
+    vocab_dim = logits.shape[-1]
+    logits = logits.contiguous().view(-1, vocab_dim)
+    labels = labels.contiguous().view(-1)
+    if FLAH_ATTN_CROSS_ENTROPY_LOSS_AVAILABLE:
+        output = logprobs_from_logits_flash_attn(logits, labels)
+    else:  # fall back to torch kernel, upcast logits to fp32
+        output = F.cross_entropy(logits.float(), labels, reduction="none")
 
-        logprobs_labels = torch.stack(logprobs_labels)
-
-    return logprobs_labels
+    return output.view(*batch_dim)
 
 
 def clip_by_value(tensor: torch.Tensor, tensor_min: torch.Tensor, tensor_max: torch.Tensor) -> torch.Tensor:
@@ -85,47 +66,34 @@ def clip_by_value(tensor: torch.Tensor, tensor_min: torch.Tensor, tensor_max: to
     Tensor extenstion to torch.clamp
     https://github.com/pytorch/pytorch/issues/2793#issuecomment-428784713
     """
-    clipped = torch.max(torch.min(tensor, tensor_max), tensor_min)
-    return clipped
+    return torch.max(torch.min(tensor, tensor_max), tensor_min)
 
 
-def entropy_from_logits(logits: torch.Tensor) -> torch.Tensor:
-    """Calculate entropy from logits."""
-    prob_dist = torch.nn.functional.softmax(logits, dim=-1)
-    entropy = torch.logsumexp(logits, dim=-1) - torch.sum(prob_dist * logits, dim=-1)
-    return entropy
-
-
-def masked_mean(values: torch.Tensor, mask: torch.Tensor, axis: int = None) -> torch.Tensor:
+def masked_mean(values: torch.Tensor, mask: torch.Tensor, dim: int = None) -> torch.Tensor:
     """Compute mean of tensor with a masked values."""
-    return (values * mask).sum(axis=axis) / mask.sum(axis=axis)
+    return (values * mask).sum(dim=dim) / mask.sum(dim=dim)
 
 
-def masked_var(values: torch.Tensor, mask: torch.Tensor, unbiased: bool = True):
+def masked_var(values: torch.Tensor, mask: torch.Tensor, unbiased: bool = True) -> torch.Tensor:
     """Compute variance of tensor with masked values."""
     mean = masked_mean(values, mask)
     centered_values = values - mean
     variance = masked_mean(centered_values**2, mask)
     if unbiased:
         mask_sum = mask.sum()
-        if mask_sum == 0:
-            raise ValueError("At least one element in the mask has to be 1.")
-        # note that if mask_sum == 1, then there is a division by zero issue
-        # to avoid it you just need to use a larger minibatch_size
-        if mask_sum == 1:
-            raise ValueError("The sum of the mask is one, which can cause a division by zero.")
+        if mask_sum <= 1:
+            raise ValueError("The sum of the mask is less than one, which can cause a division by zero.")
+
         bessel_correction = mask_sum / (mask_sum - 1)
         variance = variance * bessel_correction
+
     return variance
 
 
-def masked_whiten(values: torch.Tensor, mask: torch.Tensor, shift_mean: bool = True):
+def masked_whiten(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     """Whiten values with masked values."""
     mean, var = masked_mean(values, mask), masked_var(values, mask)
-    whitened = (values - mean) * torch.rsqrt(var + 1e-8)
-    if not shift_mean:
-        whitened += mean
-    return whitened
+    return (values - mean) * torch.rsqrt(var + 1e-8)
 
 
 def get_eos_mask(response_ids: torch.Tensor, eos_token: Union[int, List[int]] = 2, dtype: torch.dtype = torch.int64):

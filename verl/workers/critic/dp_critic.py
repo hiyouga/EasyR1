@@ -28,7 +28,7 @@ from ...protocol import DataProto
 from ...trainer import core_algos
 from ...utils import torch_functional as VF
 from ...utils.py_functional import append_to_dict
-from ...utils.ulysses import gather_outpus_and_unpad, ulysses_pad_and_slice_inputs
+from ...utils.ulysses import gather_outputs_and_unpad, ulysses_pad_and_slice_inputs
 from .base import BasePPOCritic
 from .config import CriticConfig
 
@@ -66,61 +66,58 @@ class DataParallelPPOCritic(BasePPOCritic):
                     [inputs[key] for inputs in micro_batch["multi_modal_inputs"]], dim=0
                 )
 
-        with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
-            if self.config.padding_free:
-                input_ids_rmpad, indices, *_ = unpad_input(
-                    input_ids.unsqueeze(-1), attention_mask
-                )  # input_ids_rmpad (total_nnz, ...)
-                input_ids_rmpad = input_ids_rmpad.transpose(0, 1)  # (1, total_nnz)
+        if self.config.padding_free:
+            input_ids_rmpad, indices, *_ = unpad_input(
+                input_ids.unsqueeze(-1), attention_mask
+            )  # input_ids_rmpad (total_nnz, ...)
+            input_ids_rmpad = input_ids_rmpad.transpose(0, 1)  # (1, total_nnz)
 
-                # unpad the position_ids to align the rotary
-                if position_ids.dim() == 3:
-                    position_ids_rmpad = (
-                        index_first_axis(rearrange(position_ids, "c b s ... -> (b s) c ..."), indices)
-                        .transpose(0, 1)
-                        .unsqueeze(1)
-                    )  # (3, bsz, seqlen) -> (3, 1, bsz * seqlen)
-                else:
-                    position_ids_rmpad = index_first_axis(
-                        rearrange(position_ids.unsqueeze(-1), "b s ... -> (b s) ..."), indices
-                    ).transpose(0, 1)
-
-                # pad and slice the inputs if sp > 1
-                if self.config.ulysses_sequence_parallel_size > 1:
-                    input_ids_rmpad, position_ids_rmpad, pad_size = ulysses_pad_and_slice_inputs(
-                        input_ids_rmpad, position_ids_rmpad, sp_size=self.config.ulysses_sequence_parallel_size
-                    )
-
-                # only pass input_ids and position_ids to enable flash_attn_varlen
-                output = self.critic_module(
-                    input_ids=input_ids_rmpad,
-                    attention_mask=None,
-                    position_ids=position_ids_rmpad,
-                    **multi_modal_inputs,
-                    use_cache=False,
-                )  # prevent model thinks we are generating
-                values_rmpad = output.logits
-                values_rmpad = values_rmpad.squeeze(0)  # (total_nnz)
-
-                # gather output if sp > 1
-                if self.config.ulysses_sequence_parallel_size > 1:
-                    values_rmpad = gather_outpus_and_unpad(
-                        values_rmpad, gather_dim=0, unpad_dim=0, padding_size=pad_size
-                    )
-
-                # pad it back
-                values = pad_input(values_rmpad, indices=indices, batch=batch_size, seqlen=seqlen).squeeze(-1)
-                values = values[:, -response_length - 1 : -1]
+            # unpad the position_ids to align the rotary
+            if position_ids.dim() == 3:
+                position_ids_rmpad = (
+                    index_first_axis(rearrange(position_ids, "c b s ... -> (b s) c ..."), indices)
+                    .transpose(0, 1)
+                    .unsqueeze(1)
+                )  # (3, bsz, seqlen) -> (3, 1, bsz * seqlen)
             else:
-                output = self.critic_module(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    position_ids=position_ids,
-                    **multi_modal_inputs,
-                    use_cache=False,
+                position_ids_rmpad = index_first_axis(
+                    rearrange(position_ids.unsqueeze(-1), "b s ... -> (b s) ..."), indices
+                ).transpose(0, 1)
+
+            # pad and slice the inputs if sp > 1
+            if self.config.ulysses_sequence_parallel_size > 1:
+                input_ids_rmpad, position_ids_rmpad, pad_size = ulysses_pad_and_slice_inputs(
+                    input_ids_rmpad, position_ids_rmpad, sp_size=self.config.ulysses_sequence_parallel_size
                 )
-                values: torch.Tensor = output.logits
-                values = values[:, -response_length - 1 : -1].squeeze(-1)  # (bsz, response_length, vocab_size)
+
+            # only pass input_ids and position_ids to enable flash_attn_varlen
+            output = self.critic_module(
+                input_ids=input_ids_rmpad,
+                attention_mask=None,
+                position_ids=position_ids_rmpad,
+                **multi_modal_inputs,
+                use_cache=False,
+            )  # prevent model thinks we are generating
+            values_rmpad = output.logits
+            values_rmpad = values_rmpad.squeeze(0)  # (total_nnz)
+
+            # gather output if sp > 1
+            if self.config.ulysses_sequence_parallel_size > 1:
+                values_rmpad = gather_outputs_and_unpad(values_rmpad, gather_dim=0, unpad_dim=0, padding_size=pad_size)
+
+            # pad it back
+            values = pad_input(values_rmpad, indices=indices, batch=batch_size, seqlen=seqlen).squeeze(-1)
+            values = values[:, -response_length - 1 : -1]
+        else:
+            output = self.critic_module(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                position_ids=position_ids,
+                **multi_modal_inputs,
+                use_cache=False,
+            )
+            values: torch.Tensor = output.logits
+            values = values[:, -response_length - 1 : -1].squeeze(-1)  # (bsz, response_length, vocab_size)
 
         return values
 
