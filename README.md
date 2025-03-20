@@ -42,7 +42,7 @@ We provide a [Dockerfile](./Dockerfile) to easily build environments.
 We recommend using the [pre-built docker image](https://hub.docker.com/r/hiyouga/verl) in EasyR1.
 
 ```bash
-docker pull hiyouga/verl:ngc-th2.5.1-cu120-vllm0.7.4-hotfix
+docker pull hiyouga/verl:ngc-th2.6.0-cu120-vllm0.8.0
 ```
 
 ### Hardware Requirements

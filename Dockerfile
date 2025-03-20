@@ -50,4 +50,5 @@ RUN pip uninstall -y transformer-engine flash-attn && \
 
 # Fix cv2
 RUN pip uninstall -y pynvml nvidia-ml-py && \
-    pip install --no-cache-dir nvidia-ml-py>=12.560.30 opencv-python-headless==4.8.0.74 fastapi==0.115.6
+    pip install --no-cache-dir nvidia-ml-py>=12.560.30 opencv-python-headless==4.8.0.74 fastapi==0.115.6 && \
+    pip install -U optree>=0.13.0
