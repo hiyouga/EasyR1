@@ -37,18 +37,22 @@ RUN pip config set global.index-url "${PIP_INDEX}" && \
     pip config set global.extra-index-url "${PIP_INDEX}" && \
     python -m pip install --upgrade pip
 
-# Install torch-2.6.0 + vllm-0.8.0
-RUN pip install --no-cache-dir vllm==0.8.0 torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 tensordict torchdata \
+# Uninstall nv-pytorch fork
+RUN pip uninstall -y torch torchvision torchaudio \
+    pytorch-quantization pytorch-triton torch-tensorrt \
+    xgboost transformer_engine flash_attn apex megatron-core
+
+# Install torch-2.6.0 + vllm-0.8.1
+RUN pip install --no-cache-dir vllm==0.8.1 torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 tensordict torchdata \
     transformers>=4.49.0 accelerate datasets peft hf-transfer \
     ray codetiming hydra-core pandas pyarrow>=15.0.0 pylatexenc qwen-vl-utils wandb liger-kernel mathruler \
     pytest yapf py-spy pyext pre-commit ruff
 
 # Install flash_attn-2.7.4.post1
-RUN pip uninstall -y transformer-engine flash-attn && \
-    wget -nv https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp310-cp310-linux_x86_64.whl && \
+RUN wget -nv https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp310-cp310-linux_x86_64.whl && \
     pip install --no-cache-dir flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
 
 # Fix cv2
 RUN pip uninstall -y pynvml nvidia-ml-py && \
     pip install --no-cache-dir nvidia-ml-py>=12.560.30 opencv-python-headless==4.8.0.74 fastapi==0.115.6 && \
-    pip install -U optree>=0.13.0
+    pip install --no-cache-dir --upgrade optree>=0.13.0
