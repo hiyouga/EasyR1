@@ -20,9 +20,9 @@ from collections import defaultdict
 from typing import Any, Dict, Optional
 
 import torch
+from ray.experimental.tqdm_ray import tqdm
 from torch import nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from tqdm import tqdm
 
 from ...protocol import DataProto
 from ...trainer import core_algos
@@ -56,7 +56,10 @@ class DataParallelPPOActor(BasePPOActor):
         self.rank = int(os.getenv("RANK", "0"))
         self.actor_module = actor_module
         self.actor_optimizer = actor_optimizer
-        self.logprobs_from_logits = torch.compile(VF.logprobs_from_logits, dynamic=True)
+        if config.use_torch_compile:
+            self.log_probs_from_logits = torch.compile(VF.log_probs_from_logits, dynamic=True)
+        else:
+            self.log_probs_from_logits = VF.log_probs_from_logits
 
     def _forward_micro_batch(self, micro_batch: Dict[str, torch.Tensor], temperature: float) -> torch.Tensor:
         """
@@ -122,7 +125,7 @@ class DataParallelPPOActor(BasePPOActor):
             logits_rmpad = output.logits.squeeze(0)  # (total_nnz, vocab_size)
             logits_rmpad.div_(temperature)
             # ((total_nnz / sp) + pad)
-            log_probs = self.logprobs_from_logits(logits=logits_rmpad, labels=input_ids_rmpad_rolled)
+            log_probs = self.log_probs_from_logits(logits=logits_rmpad, labels=input_ids_rmpad_rolled)
 
             # gather log_prob if sp > 1
             if self.config.ulysses_sequence_parallel_size > 1:
@@ -145,7 +148,7 @@ class DataParallelPPOActor(BasePPOActor):
             logits: torch.Tensor = output.logits
             logits.div_(temperature)
             logits = logits[:, -response_length - 1 : -1, :]  # (bsz, response_length, vocab_size)
-            log_probs = self.logprobs_from_logits(logits, responses)  # (bsz, response_length)
+            log_probs = self.log_probs_from_logits(logits, responses)  # (bsz, response_length)
 
         return log_probs
 
@@ -156,6 +159,7 @@ class DataParallelPPOActor(BasePPOActor):
             grad_norm = nn.utils.clip_grad_norm_(self.actor_module.parameters(), max_norm=self.config.max_grad_norm)
 
         self.actor_optimizer.step()
+        self.actor_optimizer.zero_grad()
         return grad_norm
 
     @torch.no_grad()
@@ -190,7 +194,10 @@ class DataParallelPPOActor(BasePPOActor):
             self.config.micro_batch_size_per_device_for_experience
         )
         log_probs_lst = []
-        for micro_batch in tqdm(micro_batches, desc="Compute log probs", disable=(self.rank != 0)):
+        if self.rank == 0:
+            micro_batches = tqdm(micro_batches, desc="Compute log probs", position=2)
+
+        for micro_batch in micro_batches:
             model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
             log_probs = self._forward_micro_batch(model_inputs, temperature=temperature)
             log_probs_lst.append(log_probs)
@@ -203,8 +210,8 @@ class DataParallelPPOActor(BasePPOActor):
 
         temperature = data.meta_info["temperature"]  # temperature must be in the data.meta_info to avoid slient error
         select_keys = ["responses", "input_ids", "attention_mask", "position_ids", "old_log_probs", "advantages"]
-        if self.config.use_kl_loss:
-            select_keys.append("ref_log_prob")
+        if self.config.use_kl_loss and self.config.kl_coef > 1e-6:
+            select_keys.append("ref_log_probs")
 
         if "multi_modal_inputs" in data.non_tensor_batch.keys():
             non_tensor_select_keys = ["multi_modal_inputs"]
@@ -216,48 +223,51 @@ class DataParallelPPOActor(BasePPOActor):
         mini_batches = data.select(select_keys, non_tensor_select_keys).split(self.config.global_batch_size_per_device)
 
         metrics = defaultdict(list)
-        n = len(mini_batches)
         for _ in range(self.config.ppo_epochs):
-            for i, mini_batch in enumerate(mini_batches):
+            if self.rank == 0:
+                mini_batches = tqdm(mini_batches, desc="Train mini-batches", position=2)
+
+            for mini_batch in mini_batches:
                 gradient_accumulation = (
                     self.config.global_batch_size_per_device // self.config.micro_batch_size_per_device_for_update
                 )
                 micro_batches = mini_batch.split(self.config.micro_batch_size_per_device_for_update)
+                if self.rank == 0:
+                    micro_batches = tqdm(micro_batches, desc="Update policy", position=3)
 
-                self.actor_optimizer.zero_grad()
-                for micro_batch in tqdm(micro_batches, desc=f"Update policy [{i + 1}/{n}]", disable=(self.rank != 0)):
+                for micro_batch in micro_batches:
                     model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
                     responses = model_inputs["responses"]
                     response_length = responses.size(1)
                     attention_mask = model_inputs["attention_mask"]
                     response_mask = attention_mask[:, -response_length:]
-                    old_log_prob = model_inputs["old_log_probs"]
+                    old_log_probs = model_inputs["old_log_probs"]
                     advantages = model_inputs["advantages"]
 
                     clip_ratio = self.config.clip_ratio
 
                     # all return: (bsz, response_length)
-                    log_prob = self._forward_micro_batch(model_inputs, temperature=temperature)
+                    log_probs = self._forward_micro_batch(model_inputs, temperature=temperature)
 
                     pg_loss, pg_clipfrac, ppo_kl = core_algos.compute_policy_loss(
-                        old_log_prob=old_log_prob,
-                        log_prob=log_prob,
+                        old_log_probs=old_log_probs,
+                        log_probs=log_probs,
                         advantages=advantages,
                         eos_mask=response_mask,
                         cliprange=clip_ratio,
                     )
-                    if self.config.use_kl_loss:
-                        ref_log_prob = model_inputs["ref_log_prob"]
+                    if self.config.use_kl_loss and self.config.kl_coef > 1e-6:
+                        ref_log_probs = model_inputs["ref_log_probs"]
                         # compute kl loss
                         kld = core_algos.kl_penalty(
-                            logprob=log_prob,
-                            ref_logprob=ref_log_prob,
-                            kl_penalty=self.config.kl_loss_type,
+                            log_probs=log_probs,
+                            ref_log_probs=ref_log_probs,
+                            kl_penalty=self.config.kl_penalty,
                         )
                         kl_loss = VF.masked_mean(kld, response_mask)
-                        pg_loss = pg_loss + kl_loss * self.config.kl_loss_coef
+                        pg_loss = pg_loss + kl_loss * self.config.kl_coef
                         metrics["actor/kl_loss"] = kl_loss.detach().item()
-                        metrics["actor/kl_coef"] = self.config.kl_loss_coef
+                        metrics["actor/kl_coef"] = self.config.kl_coef
 
                     loss = pg_loss / gradient_accumulation
                     loss.backward()
@@ -272,5 +282,4 @@ class DataParallelPPOActor(BasePPOActor):
                 grad_norm = self._optimizer_step()
                 append_to_dict(metrics, {"actor/grad_norm": grad_norm.detach().item()})
 
-        self.actor_optimizer.zero_grad()
         return metrics

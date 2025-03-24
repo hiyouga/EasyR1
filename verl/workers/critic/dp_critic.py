@@ -192,8 +192,8 @@ class DataParallelPPOCritic(BasePPOCritic):
                     vpreds = self._forward_micro_batch(data)
                     vf_loss, vf_clipfrac = core_algos.compute_value_loss(
                         vpreds=vpreds,
-                        values=values,
                         returns=returns,
+                        values=values,
                         eos_mask=eos_mask,
                         cliprange_value=self.config.cliprange_value,
                     )

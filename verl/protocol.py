@@ -191,7 +191,8 @@ class DataProto:
     def __getitem__(self, item):
         tensor_data = self.batch[item]
         non_tensor_data = {key: val[item] for key, val in self.non_tensor_batch.items()}
-        return DataProtoItem(batch=tensor_data, non_tensor_batch=non_tensor_data, meta_info=self.meta_info)
+        return_type = DataProto if isinstance(item, slice) else DataProtoItem
+        return return_type(batch=tensor_data, non_tensor_batch=non_tensor_data, meta_info=self.meta_info)
 
     def __getstate__(self):
         buffer = io.BytesIO()

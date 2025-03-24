@@ -17,7 +17,7 @@ import random
 import shutil
 import tempfile
 from abc import ABC, abstractmethod
-from typing import Union
+from typing import Any, Dict, Union
 
 import numpy as np
 import torch
@@ -25,6 +25,9 @@ import torch.distributed as dist
 from filelock import FileLock
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from transformers import PreTrainedTokenizer, ProcessorMixin
+
+
+CHECKPOINT_TRACKER = "latest_checkpointed_iteration.txt"
 
 
 class BaseCheckpointManager(ABC):
@@ -82,7 +85,7 @@ class BaseCheckpointManager(ABC):
         shutil.rmtree(abs_path, ignore_errors=True)
 
     @staticmethod
-    def local_mkdir(path):
+    def local_mkdir(path) -> str:
         if not os.path.isabs(path):
             working_dir = os.getcwd()
             path = os.path.join(working_dir, path)
@@ -92,18 +95,16 @@ class BaseCheckpointManager(ABC):
         lock_path = os.path.join(tempfile.gettempdir(), lock_filename)
 
         try:
-            with FileLock(lock_path, timeout=60):  # Add timeout
-                # make a new dir
+            with FileLock(lock_path, timeout=60):
                 os.makedirs(path, exist_ok=True)
         except Exception as e:
             print(f"Warning: Failed to acquire lock for {path}: {e}")
-            # Even if the lock is not acquired, try to create the directory
-            os.makedirs(path, exist_ok=True)
+            os.makedirs(path, exist_ok=True)  # even if the lock is not acquired, try to create the directory
 
         return path
 
     @staticmethod
-    def get_rng_state():
+    def get_rng_state() -> Dict[str, Any]:
         rng_state = {
             "cpu": torch.get_rng_state(),
             "cuda": torch.cuda.get_rng_state(),
@@ -113,7 +114,7 @@ class BaseCheckpointManager(ABC):
         return rng_state
 
     @staticmethod
-    def load_rng_state(rng_state):
+    def load_rng_state(rng_state: Dict[str, Any]) -> None:
         torch.set_rng_state(rng_state["cpu"])
         torch.cuda.set_rng_state(rng_state["cuda"])
         np.random.set_state(rng_state["numpy"])
@@ -144,4 +145,4 @@ def get_checkpoint_tracker_filename(root_path: str):
     """
     Tracker file rescords the latest chckpoint during training to restart from.
     """
-    return os.path.join(root_path, "latest_checkpointed_iteration.txt")
+    return os.path.join(root_path, CHECKPOINT_TRACKER)

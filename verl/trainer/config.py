@@ -53,9 +53,10 @@ class AlgorithmConfig:
     gamma: float = 1.0
     lam: float = 1.0
     adv_estimator: str = "grpo"
+    use_kl_loss: bool = False
     kl_penalty: str = "kl"
-    kl_type: str = "fixed"
     kl_coef: float = 1e-3
+    kl_type: str = "fixed"
     kl_horizon: float = 0.0
     kl_target: float = 0.0
 
@@ -95,6 +96,9 @@ class PPOConfig:
     def post_init(self):
         self.worker.rollout.prompt_length = self.data.max_prompt_length
         self.worker.rollout.response_length = self.data.max_response_length
+        self.worker.actor.use_kl_loss = self.algorithm.use_kl_loss
+        self.worker.actor.kl_penalty = self.algorithm.kl_penalty
+        self.worker.actor.kl_coef = self.algorithm.kl_coef
 
     def deep_post_init(self):
         recursive_post_init(self)

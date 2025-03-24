@@ -14,7 +14,9 @@ data:
 
 algorithm:
   adv_estimator: grpo
-  kl_coef: 0.0
+  use_kl_loss: true
+  kl_penalty: low_var_kl
+  kl_coef: 1.0e-2
 
 worker:
   actor:
@@ -22,9 +24,6 @@ worker:
     micro_batch_size_per_device_for_update: 4
     micro_batch_size_per_device_for_experience: 16
     max_grad_norm: 1.0
-    use_kl_loss: true
-    kl_loss_coef: 1.0e-2
-    kl_loss_type: low_var_kl
     padding_free: true
     ulysses_sequence_parallel_size: 1
     model:
@@ -72,7 +71,7 @@ trainer:
   total_episodes: 15
   logger: ["console", "wandb"]
   project_name: easy_r1
-  experiment_name: qwen2_5_7b_math
+  experiment_name: qwen2_5_7b_math_grpo
   n_gpus_per_node: 8
   nnodes: 1
   val_freq: 5

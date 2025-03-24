@@ -28,78 +28,85 @@ from .config import PPOConfig
 from .ray_trainer import RayPPOTrainer, ResourcePoolManager, Role
 
 
+# please make sure main_task is not scheduled on head
 @ray.remote(num_cpus=1)
-def main_task(config: PPOConfig):
-    # please make sure main_task is not scheduled on head
-    # print config
-    config.deep_post_init()
-    print(json.dumps(config.to_dict(), indent=2))
+class Runner:
+    """A runner for RL training."""
 
-    # instantiate tokenizer
-    tokenizer = get_tokenizer(
-        config.worker.actor.model.model_path,
-        trust_remote_code=config.worker.actor.model.trust_remote_code,
-        use_fast=True,
-    )
-    processor = get_processor(
-        config.worker.actor.model.model_path,
-        trust_remote_code=config.worker.actor.model.trust_remote_code,
-        use_fast=True,
-    )
+    def run(self, config: PPOConfig):
+        # print config
+        config.deep_post_init()
+        print(json.dumps(config.to_dict(), indent=2))
 
-    # define worker classes
-    ray_worker_group_cls = RayWorkerGroup
-    role_worker_mapping = {
-        Role.ActorRollout: ray.remote(FSDPWorker),
-        Role.Critic: ray.remote(FSDPWorker),
-        Role.RefPolicy: ray.remote(FSDPWorker),
-    }
-    global_pool_id = "global_pool"
-    resource_pool_spec = {
-        global_pool_id: [config.trainer.n_gpus_per_node] * config.trainer.nnodes,
-    }
-    mapping = {
-        Role.ActorRollout: global_pool_id,
-        Role.Critic: global_pool_id,
-        Role.RefPolicy: global_pool_id,
-    }
-    resource_pool_manager = ResourcePoolManager(resource_pool_spec=resource_pool_spec, mapping=mapping)
+        # instantiate tokenizer
+        tokenizer = get_tokenizer(
+            config.worker.actor.model.model_path,
+            trust_remote_code=config.worker.actor.model.trust_remote_code,
+            use_fast=True,
+        )
+        processor = get_processor(
+            config.worker.actor.model.model_path,
+            trust_remote_code=config.worker.actor.model.trust_remote_code,
+            use_fast=True,
+        )
 
-    reward_fn = CustomRewardManager(
-        tokenizer=tokenizer, num_examine=1, compute_score=config.worker.reward.compute_score
-    )
-    val_reward_fn = CustomRewardManager(
-        tokenizer=tokenizer, num_examine=1, compute_score=config.worker.reward.compute_score
-    )
+        # define worker classes
+        ray_worker_group_cls = RayWorkerGroup
+        role_worker_mapping = {
+            Role.ActorRollout: ray.remote(FSDPWorker),
+            Role.Critic: ray.remote(FSDPWorker),
+            Role.RefPolicy: ray.remote(FSDPWorker),
+        }
+        global_pool_id = "global_pool"
+        resource_pool_spec = {
+            global_pool_id: [config.trainer.n_gpus_per_node] * config.trainer.nnodes,
+        }
+        mapping = {
+            Role.ActorRollout: global_pool_id,
+            Role.Critic: global_pool_id,
+            Role.RefPolicy: global_pool_id,
+        }
+        resource_pool_manager = ResourcePoolManager(resource_pool_spec=resource_pool_spec, mapping=mapping)
 
-    trainer = RayPPOTrainer(
-        config=config,
-        tokenizer=tokenizer,
-        processor=processor,
-        role_worker_mapping=role_worker_mapping,
-        resource_pool_manager=resource_pool_manager,
-        ray_worker_group_cls=ray_worker_group_cls,
-        reward_fn=reward_fn,
-        val_reward_fn=val_reward_fn,
-    )
-    trainer.init_workers()
-    trainer.fit()
+        reward_fn = CustomRewardManager(
+            tokenizer=tokenizer, num_examine=1, compute_score=config.worker.reward.compute_score
+        )
+        val_reward_fn = CustomRewardManager(
+            tokenizer=tokenizer, num_examine=1, compute_score=config.worker.reward.compute_score
+        )
+
+        trainer = RayPPOTrainer(
+            config=config,
+            tokenizer=tokenizer,
+            processor=processor,
+            role_worker_mapping=role_worker_mapping,
+            resource_pool_manager=resource_pool_manager,
+            ray_worker_group_cls=ray_worker_group_cls,
+            reward_fn=reward_fn,
+            val_reward_fn=val_reward_fn,
+        )
+        trainer.init_workers()
+        trainer.fit()
 
 
 def main():
     cli_args = OmegaConf.from_cli()
-    file_config = OmegaConf.load(getattr(cli_args, "config"))
-    cli_args.pop("config", None)
-
     default_config = OmegaConf.structured(PPOConfig())
-    ppo_config = OmegaConf.merge(default_config, file_config, cli_args)
+
+    if hasattr(cli_args, "config"):
+        config_path = cli_args.pop("config", None)
+        file_config = OmegaConf.load(config_path)
+        default_config = OmegaConf.merge(default_config, file_config)
+
+    ppo_config = OmegaConf.merge(default_config, cli_args)
     ppo_config = OmegaConf.to_object(ppo_config)
 
     if not ray.is_initialized():
         # this is for local ray cluster
         ray.init(runtime_env={"env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN"}})
 
-    ray.get(main_task.remote(ppo_config))
+    runner = Runner.remote()
+    ray.get(runner.run.remote(ppo_config))
 
 
 if __name__ == "__main__":

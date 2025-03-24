@@ -443,7 +443,7 @@ class FSDPWorker(Worker):
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def update_actor(self, data: DataProto):
         assert self._is_actor
-        data = data.to("cuda")
+        data = data.to(torch.cuda.current_device())
 
         if self._use_param_offload:
             load_fsdp_model(self.fsdp_module)
@@ -518,9 +518,9 @@ class FSDPWorker(Worker):
         return output
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
-    def compute_log_prob(self, data: DataProto):
+    def compute_log_probs(self, data: DataProto):
         assert self._is_actor
-        data = data.to("cuda")
+        data = data.to(torch.cuda.current_device())
         if self._use_param_offload:
             load_fsdp_model(self.fsdp_module)
 
@@ -547,9 +547,9 @@ class FSDPWorker(Worker):
         return output
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
-    def compute_ref_log_prob(self, data: DataProto):
+    def compute_ref_log_probs(self, data: DataProto):
         assert self._is_ref
-        data = data.to("cuda")
+        data = data.to(torch.cuda.current_device())
         if self._use_param_offload:
             load_fsdp_model(self.fsdp_module)
 
@@ -557,7 +557,7 @@ class FSDPWorker(Worker):
         with self.ulysses_sharding_manager:
             data = self.ulysses_sharding_manager.preprocess_data(data)
             output = self.ref_policy.compute_log_prob(data=data)
-            output = DataProto.from_dict(tensors={"ref_log_prob": output})
+            output = DataProto.from_dict(tensors={"ref_log_probs": output})
             output = self.ulysses_sharding_manager.postprocess_data(output)
 
         # https://pytorch.org/docs/stable/notes/fsdp.html#fsdp-notes
@@ -576,7 +576,7 @@ class FSDPWorker(Worker):
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def compute_values(self, data: DataProto):
         assert self._is_critic
-        data = data.to("cuda")
+        data = data.to(torch.cuda.current_device())
         if self._use_param_offload:
             load_fsdp_model(self.fsdp_module)
 
@@ -594,7 +594,7 @@ class FSDPWorker(Worker):
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def update_critic(self, data: DataProto):
-        data = data.to("cuda")
+        data = data.to(torch.cuda.current_device())
         if self._use_param_offload:
             load_fsdp_model(self.fsdp_module)
 

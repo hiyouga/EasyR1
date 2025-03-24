@@ -35,7 +35,7 @@ except ImportError:
 
 
 @torch.compiler.disable()
-def logprobs_from_logits_flash_attn(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+def log_probs_from_logits_flash_attn(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
     output = cross_entropy_loss(logits, labels, inplace_backward=True)
     if not isinstance(output, tuple):
         raise ValueError(
@@ -45,7 +45,7 @@ def logprobs_from_logits_flash_attn(logits: torch.Tensor, labels: torch.Tensor) 
     return -output[0]
 
 
-def logprobs_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+def log_probs_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
     """
     We may use torch compile to speed up computing.
     """
@@ -54,7 +54,7 @@ def logprobs_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> torch.Te
     logits = logits.contiguous().view(-1, vocab_dim)
     labels = labels.contiguous().view(-1)
     if FLAH_ATTN_CROSS_ENTROPY_LOSS_AVAILABLE:
-        output = logprobs_from_logits_flash_attn(logits, labels)
+        output = log_probs_from_logits_flash_attn(logits, labels)
     else:  # fall back to torch kernel, upcast logits to fp32
         output = F.cross_entropy(logits.float(), labels, reduction="none")
 
@@ -120,7 +120,7 @@ def pad_2d_list_to_length(
     response: List[List[int]], pad_token_id: int, max_length: Optional[int] = None
 ) -> torch.Tensor:
     """
-    pad a 2D list (e.g. responses, logprobs) to a 2D tensor.
+    pad a 2D list (e.g. responses, log_probs) to a 2D tensor.
     """
     response_length = max(len(sub_list) for sub_list in response)
     if max_length is not None and max_length > response_length:

@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import re
+from typing import Dict
 
 from mathruler.grader import extract_boxed_content, grade_answer
 
@@ -28,5 +29,11 @@ def math_acc_reward(predict_str: str, ground_truth: str) -> float:
     return 1.0 if grade_answer(answer, ground_truth) else 0.0
 
 
-def math_compute_score(predict_str: str, ground_truth: str) -> float:
-    return 0.9 * math_acc_reward(predict_str, ground_truth) + 0.1 * math_format_reward(predict_str)
+def math_compute_score(predict_str: str, ground_truth: str) -> Dict[str, float]:
+    format = math_format_reward(predict_str)
+    accuracy = math_acc_reward(predict_str, ground_truth)
+    return {
+        "overall": 0.9 * accuracy + 0.1 * format,
+        "format": format,
+        "accuracy": accuracy,
+    }

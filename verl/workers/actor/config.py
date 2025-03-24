@@ -72,18 +72,19 @@ class ActorConfig:
     micro_batch_size_per_device_for_experience: int = 16
     max_grad_norm: float = 1.0
     clip_ratio: float = 0.2
-    use_kl_loss: bool = True
-    kl_loss_coef: float = 1e-3
-    kl_loss_type: str = "low_var_kl"
     ppo_epochs: int = 1
     padding_free: bool = False
     ulysses_sequence_parallel_size: int = 1
+    use_torch_compile: bool = True
     model: ModelConfig = field(default_factory=ModelConfig)
     optim: OptimConfig = field(default_factory=OptimConfig)
     fsdp: FSDPConfig = field(default_factory=FSDPConfig)
     offload: OffloadConfig = field(default_factory=OffloadConfig)
     """auto keys"""
     global_batch_size_per_device: int = field(default=-1, init=False)
+    use_kl_loss: bool = field(default=False, init=False)
+    kl_penalty: str = field(default="kl", init=False)
+    kl_coef: float = field(default=0.0, init=False)
 
 
 @dataclass
@@ -95,3 +96,4 @@ class RefConfig:
     micro_batch_size_per_device_for_experience: int = field(default=-1, init=False)
     padding_free: bool = field(default=False, init=False)
     ulysses_sequence_parallel_size: int = field(default=1, init=False)
+    use_torch_compile: bool = field(default=True, init=False)
