@@ -144,19 +144,19 @@ class RLHFDataset(Dataset):
     """
 
     def __init__(
-        self,
-        data_path: str,
-        tokenizer: PreTrainedTokenizer,
-        processor: Optional[ProcessorMixin],
-        prompt_key: str = "prompt",
-        answer_key: str = "answer",
-        image_key: str = "images",
-        max_prompt_length: int = 1024,
-        truncation: str = "error",
-        system_prompt: str = None,
-        max_pixels: int = None,
-        min_pixels: int = None,
-        video_frames=4
+            self,
+            data_path: str,
+            tokenizer: PreTrainedTokenizer,
+            processor: Optional[ProcessorMixin],
+            prompt_key: str = "prompt",
+            answer_key: str = "answer",
+            image_key: str = "images",
+            max_prompt_length: int = 1024,
+            truncation: str = "error",
+            system_prompt: str = None,
+            max_pixels: int = None,
+            min_pixels: int = None,
+            video_frames=4
     ):
         self.tokenizer = tokenizer
         self.processor = processor
@@ -248,6 +248,33 @@ class RLHFDataset(Dataset):
                     logger.error(f"Worker {self.worker_id}: Error processing video {i} for item {index}: {str(e)}")
                     logger.error(traceback.format_exc())
 
+        # Load segmentation mask if available
+        if "segmentation_path" in row_dict and row_dict["segmentation_path"]:
+            try:
+                seg_path = os.path.join(self.data_dir, row_dict["segmentation_path"])
+                if os.path.exists(seg_path):
+                    logger.debug(f"Worker {self.worker_id}: Loading segmentation mask from {seg_path}")
+                    segmentation_mask = Image.open(seg_path)
+                    # Process the segmentation mask if needed
+                    row_dict["segmentation_mask"] = segmentation_mask
+                else:
+                    logger.warning(f"Worker {self.worker_id}: Segmentation mask not found: {seg_path}")
+                    row_dict["segmentation_mask"] = None
+            except Exception as e:
+                logger.error(f"Worker {self.worker_id}: Error loading segmentation mask: {str(e)}")
+                logger.error(traceback.format_exc())
+                row_dict["segmentation_mask"] = None
+        else:
+            row_dict["segmentation_mask"] = None
+
+        # Handle bounding box information
+        if "bbox" in row_dict and row_dict["bbox"]:
+            # Keep the bbox as is
+            pass
+        else:
+            # Use empty list as placeholder if not available
+            row_dict["bbox"] = []
+
         if "images" in row_dict and len(row_dict["images"]) > 0:
             data_source = row_dict["images"][0].split("/")[0]
             dataset = row_dict["images"][0].split("/")[1]
@@ -270,7 +297,6 @@ class RLHFDataset(Dataset):
             "image": processed_images
         }
 
-
         # Replace all image tokens in prompt with placeholders
         prompt = prompt.replace("<video>", "<image>")
         if "<image>" not in prompt:
@@ -287,6 +313,41 @@ class RLHFDataset(Dataset):
         model_inputs = self.processor(row_dict["multi_modal_data"]["image"], prompt, return_tensors="pt")
         input_ids = model_inputs.pop("input_ids")[0]
         attention_mask = model_inputs.pop("attention_mask")[0]
+
+        # Resize segmentation mask to match the image dimensions in model_inputs
+        if row_dict["segmentation_mask"] is not None:
+            try:
+                # Extract dimensions from image_grid_thw (time, height, width)
+                # We need the height and width for resizing
+                _, target_height, target_width = model_inputs["image_grid_thw"][0]
+
+                logger.debug(f"Worker {self.worker_id}: Resizing segmentation mask to {target_width}x{target_height}")
+
+                # Resize the segmentation mask to match the processed image dimensions
+                resized_mask = row_dict["segmentation_mask"].resize(
+                    (target_width, target_height),
+                    resample=Image.Resampling.NEAREST
+                )
+
+                # Convert the mask to a tensor
+                mask_array = np.array(resized_mask)
+
+                # If mask is grayscale, add channel dimension
+                if len(mask_array.shape) == 2:
+                    mask_array = mask_array[np.newaxis, :, :]
+                # If mask is RGB but we only need one channel for segmentation
+                elif len(mask_array.shape) == 3 and mask_array.shape[2] == 3:
+                    mask_array = np.mean(mask_array, axis=2)[np.newaxis, :, :]
+
+                # Convert to torch tensor
+                mask_tensor = torch.from_numpy(mask_array).float()
+                row_dict["segmentation_mask"] = mask_tensor
+
+                logger.debug(f"Worker {self.worker_id}: Successfully resized segmentation mask")
+            except Exception as e:
+                logger.error(f"Worker {self.worker_id}: Error resizing segmentation mask: {str(e)}")
+                logger.error(traceback.format_exc())
+
         row_dict["multi_modal_data"] = dict(model_inputs)
         position_ids = get_rope_index(
             self.processor,

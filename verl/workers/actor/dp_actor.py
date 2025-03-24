@@ -219,6 +219,7 @@ class DataParallelPPOActor(BasePPOActor):
         n = len(mini_batches)
         for _ in range(self.config.ppo_epochs):
             for i, mini_batch in enumerate(mini_batches):
+                actor_num_parameters = sum(p.numel() for p in self.actor_module.parameters())
                 gradient_accumulation = (
                     self.config.global_batch_size_per_device // self.config.micro_batch_size_per_device_for_update
                 )
@@ -270,7 +271,12 @@ class DataParallelPPOActor(BasePPOActor):
                     append_to_dict(metrics, batch_metrics)
 
                 grad_norm = self._optimizer_step()
-                append_to_dict(metrics, {"actor/grad_norm": grad_norm.detach().item()})
+                mean_grad_norm = grad_norm / actor_num_parameters
+                append_to_dict(metrics, {
+                    "actor/grad_norm": grad_norm.detach().item(),
+                    "actor/mean_grad_norm": mean_grad_norm.detach().item(),
+                    "actor/num_parameters": actor_num_parameters
+                })
 
         self.actor_optimizer.zero_grad()
         return metrics

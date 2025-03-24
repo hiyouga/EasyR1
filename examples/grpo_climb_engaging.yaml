@@ -13,18 +13,17 @@ data:
   min_pixels: 32768
 
 algorithm:
-  adv_estimator: grpo
+  adv_estimator: reinforce_plus_plus
   kl_coef: 0.0
 
 worker:
   actor:
-    global_batch_size: 256
-    micro_batch_size_per_device_for_update: 2
-    micro_batch_size_per_device_for_experience: 4
+    global_batch_size: 128
+    micro_batch_size_per_device_for_update: 4
+    micro_batch_size_per_device_for_experience: 16
     max_grad_norm: 1.0
-    entropy_coeff: 1.0e-3
     use_kl_loss: true
-    kl_loss_coef: 1.0e-3
+    kl_loss_coef: 1.0e-2
     kl_loss_type: low_var_kl
     padding_free: true
     ulysses_sequence_parallel_size: 1
@@ -34,7 +33,7 @@ worker:
       trust_remote_code: false
       freeze_vision_tower: false
     optim:
-      lr: 1.0e-6
+      lr: 1.0e-8
       weight_decay: 1.0e-2
     fsdp:
       enable_full_shard: true
@@ -50,8 +49,11 @@ worker:
     gpu_memory_utilization: 0.5
     enforce_eager: false
     enable_chunked_prefill: false
-    tensor_parallel_size: 2
+    tensor_parallel_size: 4
     limit_images: 0
+    val_override_config:
+      temperature: 0.5
+      n: 1
 
   ref:
     fsdp:
@@ -73,7 +75,7 @@ trainer:
   n_gpus_per_node: 4
   nnodes: 1
   val_freq: 200
-  val_before_train: true
+  val_before_train: false
   val_only: false
   val_generations_to_log: 1
   save_freq: 200
