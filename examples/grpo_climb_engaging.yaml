@@ -23,7 +23,7 @@ worker:
     micro_batch_size_per_device_for_experience: 16
     max_grad_norm: 1.0
     use_kl_loss: true
-    kl_loss_coef: 1.0e-2
+    kl_loss_coef: 1.0e-3
     kl_loss_type: low_var_kl
     padding_free: true
     ulysses_sequence_parallel_size: 1
@@ -33,8 +33,8 @@ worker:
       trust_remote_code: false
       freeze_vision_tower: false
     optim:
-      lr: 1.0e-8
-      weight_decay: 1.0e-2
+      lr: 1.0e-7
+      weight_decay: 1.0e-3
     fsdp:
       enable_full_shard: true
       enable_cpu_offload: false

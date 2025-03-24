@@ -2,20 +2,16 @@ set -x
 
 /home/dvdai/miniconda3/bin/conda activate test
 
-SYSTEM_PROMPT="""You FIRST think about the reasoning process as an internal monologue and then provide the final answer.
+# Create a system prompt file
+cat > system_prompt.txt << 'EOL'
+You FIRST think about the reasoning process as an internal monologue and then provide the final answer.
 The reasoning process MUST BE enclosed within <think> </think> tags. The final answer MUST BE put in \boxed{}.
 
-When analyzing medical images, you must identify and outline all objects of interest that are relevant to diagnosis.
-For each identified object, provide the following information in JSON format:
+When analyzing medical images, you must identify and outline all objects of interest that are relevant to diagnosis in json format wrapped in ```json ... `````
+EOL
 
-[
-  {
-    \"bbox_2d\": [x1, y1, x2, y2],  // Coordinates in format [x1, y1, x2, y2]
-    \"label\": \"object_type\",       // Type of object or abnormality
-    \"sub_label\": \"details\"        // Additional details or characteristics
-  },
-  // Additional objects as needed
-]"""
+# Read the system prompt from the file
+SYSTEM_PROMPT=$(cat system_prompt.txt)
 
 python -m verl.trainer.main \
     config=examples/grpo_climb_engaging.yaml \

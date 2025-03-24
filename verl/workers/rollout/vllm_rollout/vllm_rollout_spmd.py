@@ -125,10 +125,19 @@ class vLLMRollout(BaseRollout):
         if batch_size != len(non_tensor_batch["raw_prompt_ids"]):
             raise RuntimeError("vllm sharding manager is not work properly.")
 
+        # Extract segmentation masks and bounding boxes if they exist
+        segmentation_masks = None
+        if "segmentation_mask" in non_tensor_batch:
+            segmentation_masks = non_tensor_batch.pop("segmentation_mask")
+
+        bboxes = None
+        if "bbox" in non_tensor_batch:
+            bboxes = non_tensor_batch.pop("bbox")
+
         if "multi_modal_data" in non_tensor_batch:
             vllm_inputs = []
             for raw_prompt_ids, multi_modal_data in zip(
-                non_tensor_batch.pop("raw_prompt_ids"), non_tensor_batch.pop("multi_modal_data")
+                    non_tensor_batch.pop("raw_prompt_ids"), non_tensor_batch.pop("multi_modal_data")
             ):
                 vllm_inputs.append({"prompt_token_ids": raw_prompt_ids, "multi_modal_data": multi_modal_data})
         else:
@@ -151,6 +160,13 @@ class vLLMRollout(BaseRollout):
                 input_ids = _repeat_interleave(input_ids, self.sampling_params.n)
                 attention_mask = _repeat_interleave(attention_mask, self.sampling_params.n)
                 position_ids = _repeat_interleave(position_ids, self.sampling_params.n)
+
+                # Also repeat segmentation masks and bounding boxes if they exist
+                if segmentation_masks is not None:
+                    segmentation_masks = _repeat_interleave(segmentation_masks, self.sampling_params.n)
+                if bboxes is not None:
+                    bboxes = _repeat_interleave(bboxes, self.sampling_params.n)
+
                 if "multi_modal_inputs" in non_tensor_batch.keys():
                     non_tensor_batch["multi_modal_inputs"] = _repeat_interleave(
                         non_tensor_batch["multi_modal_inputs"], self.sampling_params.n
@@ -173,15 +189,21 @@ class vLLMRollout(BaseRollout):
         )
         attention_mask = torch.cat((attention_mask, response_attention_mask), dim=-1)
 
+        # Create the TensorDict with our additional data
+        batch_dict = {
+            "prompts": input_ids,
+            "responses": response_ids,
+            "input_ids": sequence_ids,  # here input_ids become the whole sentences
+            "attention_mask": attention_mask,
+            "position_ids": position_ids,
+        }
+
+        # Add segmentation masks and bounding boxes if they exist
+        if segmentation_masks is not None:
+            batch_dict["segmentation_mask"] = segmentation_masks
+        if bboxes is not None:
+            batch_dict["bbox"] = bboxes
+
         # all the tp ranks should contain the same data here. data in all ranks are valid
-        batch = TensorDict(
-            {
-                "prompts": input_ids,
-                "responses": response_ids,
-                "input_ids": sequence_ids,  # here input_ids become the whole sentences
-                "attention_mask": attention_mask,
-                "position_ids": position_ids,
-            },
-            batch_size=batch_size,
-        )
+        batch = TensorDict(batch_dict, batch_size=batch_size)
         return DataProto(batch=batch, non_tensor_batch=non_tensor_batch)
