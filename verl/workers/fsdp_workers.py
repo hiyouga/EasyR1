@@ -61,6 +61,7 @@ from .critic import DataParallelPPOCritic
 from .rollout.vllm_rollout import vLLMRollout
 from .sharding_manager import FSDPVLLMShardingManager
 from .sharding_manager.fsdp_ulysses import FSDPUlyssesShardingManager
+from heavyball import PrecondScheduleForeachSOAP
 
 
 class FSDPWorker(Worker):
@@ -310,10 +311,15 @@ class FSDPWorker(Worker):
         print_gpu_memory_usage("After FSDP module init")
 
         if self._is_actor or self._is_critic:
-            self.optimizer = torch.optim.AdamW(
+            # self.optimizer = torch.optim.AdamW(
+            #     self.fsdp_module.parameters(),
+            #     lr=optim_config.lr,
+            #     betas=optim_config.betas,
+            #     weight_decay=optim_config.weight_decay,
+            # )
+            self.optimizer = PrecondScheduleForeachSOAP(
                 self.fsdp_module.parameters(),
                 lr=optim_config.lr,
-                betas=optim_config.betas,
                 weight_decay=optim_config.weight_decay,
             )
             num_warmup_steps = int(optim_config.lr_warmup_ratio * optim_config.training_steps)
