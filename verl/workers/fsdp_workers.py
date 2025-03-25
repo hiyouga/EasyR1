@@ -315,6 +315,7 @@ class FSDPWorker(Worker):
                 lr=optim_config.lr,
                 betas=optim_config.betas,
                 weight_decay=optim_config.weight_decay,
+                fused=True,
             )
             num_warmup_steps = int(optim_config.lr_warmup_ratio * optim_config.training_steps)
             self.lr_scheduler = get_constant_schedule_with_warmup(
@@ -411,26 +412,22 @@ class FSDPWorker(Worker):
             )
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
-    def save_checkpoint(self, path: str, global_step: int = 0, remove_previous_ckpt: bool = False):
+    def save_checkpoint(self, path: str):
         assert self._is_actor or self._is_critic
         if self._use_param_offload:
             load_fsdp_model(self.fsdp_module)
 
-        self.checkpoint_manager.save_checkpoint(
-            local_path=path,
-            global_step=global_step,
-            remove_previous_ckpt=remove_previous_ckpt,
-        )
+        self.checkpoint_manager.save_checkpoint(path)
         dist.barrier()
         if self._use_param_offload:
             offload_fsdp_model(self.fsdp_module)
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
-    def load_checkpoint(self, path: str, remove_ckpt_after_load: bool = False):
+    def load_checkpoint(self, path: str):
         if self._use_param_offload:
             load_fsdp_model(self.fsdp_module)
 
-        self.checkpoint_manager.load_checkpoint(path=path, remove_ckpt_after_load=remove_ckpt_after_load)
+        self.checkpoint_manager.load_checkpoint(path)
         dist.barrier()
         if self._use_param_offload:
             offload_fsdp_model(self.fsdp_module)

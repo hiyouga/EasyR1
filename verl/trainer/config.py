@@ -74,10 +74,9 @@ class TrainerConfig:
     val_freq: int = -1
     val_before_train: bool = True
     val_only: bool = False
-    val_generations_to_log: int = 1
+    val_generations_to_log: int = 0
     save_freq: int = -1
-    remove_previous_ckpt: bool = False
-    remove_ckpt_after_load: bool = False
+    save_limit: int = -1
     save_checkpoint_path: Optional[str] = None
     load_checkpoint_path: Optional[str] = None
 

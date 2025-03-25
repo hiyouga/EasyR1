@@ -1,8 +1,5 @@
 set -x
 
-export VLLM_ATTENTION_BACKEND=XFORMERS
-export VLLM_USE_V1=0
-
 MODEL_PATH=Qwen/Qwen2.5-VL-3B-Instruct  # replace it with your local file path
 
 SYSTEM_PROMPT="""A conversation between User and Assistant. The user asks a question, and the Assistant solves it. The assistant

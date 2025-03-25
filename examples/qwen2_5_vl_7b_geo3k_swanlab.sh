@@ -6,7 +6,7 @@ SYSTEM_PROMPT="""You FIRST think about the reasoning process as an internal mono
  The reasoning process MUST BE enclosed within <think> </think> tags. The final answer MUST BE put in \boxed{}."""
 
 python3 -m verl.trainer.main \
-    config=examples/grpo_example.yaml \
+    config=examples/config.yaml \
     data.train_files=hiyouga/geometry3k@train \
     data.val_files=hiyouga/geometry3k@test \
     data.system_prompt="${SYSTEM_PROMPT}" \

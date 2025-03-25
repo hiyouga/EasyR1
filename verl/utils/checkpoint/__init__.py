@@ -11,3 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
+from .checkpoint_manager import CHECKPOINT_TRACKER, remove_obsolete_ckpt
+
+
+__all__ = ["CHECKPOINT_TRACKER", "remove_obsolete_ckpt"]

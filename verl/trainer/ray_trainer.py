@@ -40,6 +40,7 @@ from ..single_controller.base import Worker
 from ..single_controller.ray import RayClassWithInitArgs, RayResourcePool, RayWorkerGroup
 from ..single_controller.ray.base import create_colocated_worker_cls
 from ..utils import torch_functional as VF
+from ..utils.checkpoint import CHECKPOINT_TRACKER, remove_obsolete_ckpt
 from ..utils.dataset import RLHFDataset, collate_fn
 from ..utils.seqlen_balancing import get_seqlen_balanced_partitions, log_seqlen_unbalance
 from ..utils.tracking import Tracking, ValGenerationsLogger
@@ -365,7 +366,7 @@ class RayPPOTrainer:
 
     def _maybe_log_val_generations(self, inputs: List[str], outputs: List[str], scores: List[float]) -> None:
         """Log a table of validation samples"""
-        if self.config.trainer.val_generations_to_log == 0:
+        if self.config.trainer.val_generations_to_log <= 0:
             return
 
         # Create tuples of (input, output, score) and sort by input text
@@ -475,7 +476,7 @@ class RayPPOTrainer:
         # NOTE: if you want to use a different resource pool for each role, which can support different parallel size,
         # you should not use `create_colocated_worker_cls`. Instead, directly pass different resource pool to different worker groups.
         # See https://github.com/volcengine/verl/blob/master/examples/ray/tutorial.ipynb for more information.
-        all_wg = {}
+        all_wg: Dict[str, FSDPWorker] = {}
         self.wg_dicts = []
         for resource_pool, class_dict in self.resource_pool_to_cls.items():
             worker_dict_cls = create_colocated_worker_cls(class_dict=class_dict)
@@ -486,45 +487,39 @@ class RayPPOTrainer:
             self.wg_dicts.append(wg_dict)
 
         if self.use_critic:
-            self.critic_wg: FSDPWorker = all_wg["critic"]
+            self.critic_wg = all_wg["critic"]
             self.critic_wg.init_model()
 
         if self.use_reference_policy:
-            self.ref_policy_wg: FSDPWorker = all_wg["ref"]
+            self.ref_policy_wg = all_wg["ref"]
             self.ref_policy_wg.init_model()
 
         if self.use_reward_model:
-            self.rm_wg: FSDPWorker = all_wg["rm"]
+            self.rm_wg = all_wg["rm"]
             self.rm_wg.init_model()
 
         # we should create rollout at the end so that vllm can have a better estimation of kv cache memory
-        self.actor_rollout_wg: FSDPWorker = all_wg["actor_rollout"]
+        self.actor_rollout_wg = all_wg["actor_rollout"]
         self.actor_rollout_wg.init_model()
 
     def _save_checkpoint(self) -> None:
-        # path: {save_checkpoint_path}/global_step_{global_step}/actor
+        # path: {save_checkpoint_path}/global_step_{global_step}/{actor,critic}
+        remove_obsolete_ckpt(
+            self.config.trainer.save_checkpoint_path, self.global_step, self.config.trainer.save_limit
+        )
         folder_path = os.path.join(self.config.trainer.save_checkpoint_path, f"global_step_{self.global_step}")
         actor_path = os.path.join(folder_path, "actor")
-
-        self.actor_rollout_wg.save_checkpoint(
-            actor_path,
-            self.global_step,
-            remove_previous_ckpt=self.config.trainer.remove_previous_ckpt,
-        )
+        self.actor_rollout_wg.save_checkpoint(actor_path)
 
         if self.use_critic:
             critic_path = os.path.join(folder_path, "critic")
-            self.critic_wg.save_checkpoint(
-                critic_path,
-                self.global_step,
-                remove_previous_ckpt=self.config.trainer.remove_previous_ckpt,
-            )
+            self.critic_wg.save_checkpoint(critic_path)
 
         dataloader_path = os.path.join(folder_path, "dataloader.pt")
         dataloader_state_dict = self.train_dataloader.state_dict()
         torch.save(dataloader_state_dict, dataloader_path)
 
-        last_global_step_path = os.path.join(self.config.trainer.save_checkpoint_path, "latest_global_step.txt")
+        last_global_step_path = os.path.join(self.config.trainer.save_checkpoint_path, CHECKPOINT_TRACKER)
         with open(last_global_step_path, "w") as f:
             f.write(str(self.global_step))
 
@@ -538,14 +533,10 @@ class RayPPOTrainer:
         print(f"Load from checkpoint: {self.config.trainer.load_checkpoint_path}.")
         self.global_step = int(self.config.trainer.load_checkpoint_path.strip(os.path.sep).split("global_step_")[-1])
         actor_path = os.path.join(self.config.trainer.load_checkpoint_path, "actor")
-        self.actor_rollout_wg.load_checkpoint(
-            actor_path, remove_ckpt_after_load=self.config.trainer.remove_ckpt_after_load
-        )
+        self.actor_rollout_wg.load_checkpoint(actor_path)
         if self.use_critic:
             critic_path = os.path.join(self.config.trainer.load_checkpoint_path, "critic")
-            self.critic_wg.load_checkpoint(
-                critic_path, remove_ckpt_after_load=self.config.trainer.remove_ckpt_after_load
-            )
+            self.critic_wg.load_checkpoint(critic_path)
 
         dataloader_path = os.path.join(self.config.trainer.load_checkpoint_path, "dataloader.pt")
         if os.path.exists(dataloader_path):

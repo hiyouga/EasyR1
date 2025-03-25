@@ -81,6 +81,7 @@ class vLLMRollout(BaseRollout):
             enable_sleep_mode=True,
             distributed_executor_backend="external_launcher",
             disable_custom_all_reduce=True,
+            disable_mm_preprocessor_cache=True,
             disable_log_stats=config.disable_log_stats,
             enable_chunked_prefill=config.enable_chunked_prefill,
             **vllm_init_kwargs,
