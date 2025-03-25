@@ -18,7 +18,8 @@ import wandb
 from transformers import PreTrainedTokenizer
 
 from ...protocol import DataProto
-from ...utils.reward_score import math_compute_score, r1v_compute_score, medical_compute_score
+from ...utils.reward_score import math_compute_score, r1v_compute_score, medical_compute_score, evaluate_bbox_format, \
+    extract_json_from_response, calculate_bbox_iou
 
 
 class CustomRewardManager:
@@ -125,14 +126,55 @@ class CustomRewardManager:
             avg_combined_score = (self.standard_weight * avg_standard_score +
                                   self.bbox_weight * avg_bbox_score)
 
+            # Extract and track format scores
+            # We can derive this from individual examples
+            format_scores = []
+            iou_scores = []
+
+            # Recalculate to extract the individual components
+            for i, (response_str, gt, seg_mask, box) in enumerate(zip(
+                    [self.tokenizer.decode(
+                        data_item.batch["responses"][:data_item.batch["attention_mask"][prompt_length:].sum()],
+                        skip_special_tokens=True) for data_item in data],
+                    [data_item.non_tensor_batch["ground_truth"] for data_item in data],
+                    [data_item.batch.get("segmentation_mask", None) for data_item in data],
+                    [data_item.batch.get("bbox", None) for data_item in data]
+            )):
+                # Calculate format score
+                format_score = evaluate_bbox_format(response_str)
+                format_scores.append(format_score)
+
+                # Extract JSON and calculate IoU score only
+                json_data = extract_json_from_response(response_str)
+                if json_data:
+                    pred_bboxes = []
+                    for item in json_data:
+                        if isinstance(item, dict) and "bbox_2d" in item:
+                            pred_bboxes.append(item["bbox_2d"])
+
+                    if pred_bboxes:
+                        iou_score = calculate_bbox_iou(pred_bboxes, seg_mask, box)
+                        iou_scores.append(iou_score)
+                    else:
+                        iou_scores.append(0.0)
+                else:
+                    iou_scores.append(0.0)
+
+            # Calculate averages
+            avg_format_score = sum(format_scores) / len(format_scores) if format_scores else 0
+            avg_iou_score = sum(iou_scores) / len(iou_scores) if iou_scores else 0
+
             # Log to wandb
             wandb.log({
                 "avg_standard_score": avg_standard_score,
                 "avg_bbox_score": avg_bbox_score,
+                "avg_format_score": avg_format_score,
+                "avg_iou_score": avg_iou_score,
                 "avg_combined_score": avg_combined_score
             })
 
             print(f"Average scores - Standard: {avg_standard_score:.4f}, "
-                  f"Bbox: {avg_bbox_score:.4f}, Combined: {avg_combined_score:.4f}")
+                  f"Bbox: {avg_bbox_score:.4f} (Format: {avg_format_score:.4f}, IoU: {avg_iou_score:.4f}), "
+                  f"Combined: {avg_combined_score:.4f}")
 
         return reward_tensor

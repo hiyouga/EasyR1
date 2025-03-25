@@ -144,7 +144,7 @@ def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.KLController, kl_penal
 
     token_level_rewards = token_level_scores - beta * kld
 
-    current_kl = VF.masked_mean(kld, mask=response_mask, axis=-1)  # average over sequence
+    current_kl = VF.masked_mean(kld, mask=response_mask, dim=-1)  # average over sequence
     current_kl = torch.mean(current_kl, dim=0).item()
 
     # According to https://github.com/huggingface/trl/blob/v0.11.0/trl/trainer/ppo_trainer.py#L880
@@ -645,6 +645,9 @@ class RayPPOTrainer:
                     break
 
                 metrics, timing_raw = {}, {}
+                # print key, value type
+                for key, value in batch_dict.items():
+                    print(f"{key}: {type(value)}")
                 batch: DataProto = DataProto.from_single_dict(batch_dict)
 
                 # pop those keys for generation

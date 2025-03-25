@@ -15,7 +15,8 @@
 
 from .math import math_compute_score
 from .r1v import r1v_compute_score
-from .medical import medical_compute_score
+from .medical import medical_compute_score, evaluate_bbox_format, extract_json_from_response, calculate_bbox_iou
 
 
-__all__ = ["math_compute_score", "r1v_compute_score", "medical_compute_score"]
+__all__ = ["math_compute_score", "r1v_compute_score", "medical_compute_score", "evaluate_bbox_format",
+           "extract_json_from_response", "calculate_bbox_iou"]

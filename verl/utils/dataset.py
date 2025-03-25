@@ -33,19 +33,64 @@ logger = logging.getLogger('RLHFDataset')
 def collate_fn(features: List[Dict[str, Any]]) -> Dict[str, Any]:
     tensors = defaultdict(list)
     non_tensors = defaultdict(list)
+
+    # Handle segmentation masks separately
+    seg_masks = []
+    has_seg_mask = False
+    max_height, max_width = 0, 0
+
+    # First pass: collect all tensors and find max dimensions for segmentation masks
     for feature in features:
         for key, value in feature.items():
-            if isinstance(value, torch.Tensor):
+            if key == "segmentation_mask" and value is not None:
+                has_seg_mask = True
+                if isinstance(value, torch.Tensor):
+                    # Update max dimensions
+                    if len(value.shape) == 3:  # [C, H, W]
+                        _, h, w = value.shape
+                        max_height = max(max_height, h)
+                        max_width = max(max_width, w)
+                    seg_masks.append(value)
+                else:
+                    seg_masks.append(None)
+            elif isinstance(value, torch.Tensor):
                 tensors[key].append(value)
             else:
                 non_tensors[key].append(value)
 
+    # Second pass: pad segmentation masks to max dimensions
+    if has_seg_mask:
+        padded_masks = []
+        for i, mask in enumerate(seg_masks):
+            if mask is None:
+                # Create zero tensor for missing segmentation masks
+                padded_masks.append(torch.zeros(1, max_height, max_width, dtype=torch.float32))
+            else:
+                # Get current dimensions
+                if len(mask.shape) == 3:  # [C, H, W]
+                    c, h, w = mask.shape
+                    # Calculate padding (bottom, right)
+                    pad_bottom = max_height - h
+                    pad_right = max_width - w
+                    # Pad the mask (pad order is [left, right, top, bottom])
+                    padded_mask = torch.nn.functional.pad(mask, (0, pad_right, 0, pad_bottom), mode='constant', value=0)
+                    padded_masks.append(padded_mask)
+                else:
+                    # Handle unexpected shapes
+                    padded_masks.append(torch.zeros(1, max_height, max_width, dtype=torch.float32))
+
+        # Stack the padded masks
+        tensors["segmentation_mask"] = torch.stack(padded_masks, dim=0)
+
+    # Stack other tensors
     for key, value in tensors.items():
-        tensors[key] = torch.stack(value, dim=0)
+        if key != "segmentation_mask":  # We've already handled segmentation masks
+            tensors[key] = torch.stack(value, dim=0)
 
     for key, value in non_tensors.items():
         non_tensors[key] = np.array(value, dtype=object)
 
+    # Combine tensors and non-tensors
     return {**tensors, **non_tensors}
 
 
@@ -138,6 +183,36 @@ def process_image(image: ImageObject, max_pixels: int, min_pixels: int) -> Image
         return fallback
 
 
+def resize_bbox(bbox, original_width, original_height, new_width, new_height):
+    """
+    Resize bounding box coordinates based on image resizing ratio.
+
+    Args:
+        bbox (list): Original bounding box in format [x_min, y_min, x_max, y_max]
+        original_width (int): Width of the original image
+        original_height (int): Height of the original image
+        new_width (int): Width of the resized image
+        new_height (int): Height of the resized image
+
+    Returns:
+        list: Resized bounding box coordinates
+    """
+    # Calculate scaling factors
+    width_ratio = new_width / original_width
+    height_ratio = new_height / original_height
+
+    # Apply scaling to bounding box coordinates
+    x_min, y_min, x_max, y_max = bbox
+
+    # Scale coordinates
+    new_x_min = x_min * width_ratio
+    new_y_min = y_min * height_ratio
+    new_x_max = x_max * width_ratio
+    new_y_max = y_max * height_ratio
+
+    return [new_x_min, new_y_min, new_x_max, new_y_max]
+
+
 class RLHFDataset(Dataset):
     """
     We assume the dataset contains a column that contains prompts and other information
@@ -195,6 +270,8 @@ class RLHFDataset(Dataset):
         prompt = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
 
         processed_images = []
+        original_dimensions = []  # Store original image dimensions
+
         if self.image_key in row_dict and row_dict["images"]:
             for i, image_item in enumerate(row_dict["images"]):
                 try:
@@ -213,12 +290,14 @@ class RLHFDataset(Dataset):
                     else:
                         image = image_item
 
+                    original_dimensions.append((image.width, image.height))
                     # Process the image
                     processed_images.append(process_image(image, self.max_pixels, self.min_pixels))
 
                 except Exception as e:
                     logger.error(f"Worker {self.worker_id}: Error processing image {i} for item {index}: {str(e)}")
                     logger.error(traceback.format_exc())
+                    original_dimensions.append((224, 224))
 
         # Process videos if they exist
         if "videos" in row_dict and row_dict["videos"]:
@@ -235,10 +314,13 @@ class RLHFDataset(Dataset):
                             # Add placeholder frames
                             for _ in range(self.video_frames):
                                 processed_images.append(Image.new("RGB", (224, 224), (255, 255, 255)))
+                                original_dimensions.append((224, 224))  # Add placeholder dimensions
                         else:
                             # Extract frames from video
                             video_frames = extract_video_frames(full_path, self.video_frames)
                             for frame in video_frames:
+                                # Store original dimensions
+                                original_dimensions.append((frame.width, frame.height))
                                 processed_images.append(process_image(frame, self.max_pixels, self.min_pixels))
                     else:
                         logger.warning(
@@ -267,30 +349,11 @@ class RLHFDataset(Dataset):
         else:
             row_dict["segmentation_mask"] = None
 
-        # Handle bounding box information
-        if "bbox" in row_dict and row_dict["bbox"]:
-            # Keep the bbox as is
-            pass
-        else:
-            # Use empty list as placeholder if not available
-            row_dict["bbox"] = []
-
-        if "images" in row_dict and len(row_dict["images"]) > 0:
-            data_source = row_dict["images"][0].split("/")[0]
-            dataset = row_dict["images"][0].split("/")[1]
-        elif "videos" in row_dict and len(row_dict["videos"]) > 0:
-            data_source = row_dict["videos"][0].split("/")[0]
-            dataset = row_dict["videos"][0].split("/")[1]
-        else:
-            data_source = "text"
-            dataset = "text"
-        row_dict["data_source"] = data_source
-        row_dict["dataset"] = dataset
-
         # Ensure we have at least one image/frame
         if not processed_images:
             logger.debug(f"Worker {self.worker_id}: No images or videos found for item {index}, using placeholder")
             processed_images = [Image.new("RGB", (224, 224), (255, 255, 255))]
+            original_dimensions = [(224, 224)]  # Add placeholder dimensions
 
         row_dict["images"] = processed_images
         row_dict["multi_modal_data"] = {
@@ -348,6 +411,43 @@ class RLHFDataset(Dataset):
                 logger.error(f"Worker {self.worker_id}: Error resizing segmentation mask: {str(e)}")
                 logger.error(traceback.format_exc())
 
+        if "segmentation_mask" not in row_dict or row_dict["segmentation_mask"] is None:
+            _, target_height, target_width = model_inputs["image_grid_thw"][0]
+            row_dict["segmentation_mask"] = torch.zeros(1, target_height, target_width, dtype=torch.float32)
+
+        # Handle bounding box information
+        if "bbox" in row_dict and row_dict["bbox"]:
+            try:
+                # Get the target dimensions from the model inputs
+                _, target_height, target_width = model_inputs["image_grid_thw"][0]
+
+                # Get original dimensions of the corresponding image
+                # We assume the bbox corresponds to the first image
+                if original_dimensions:
+                    original_width, original_height = original_dimensions[0]
+                    # Resize the bounding box
+                    resized_bbox = resize_bbox(
+                        row_dict["bbox"],
+                        original_width,
+                        original_height,
+                        target_width,
+                        target_height
+                    )
+
+                    logger.debug(f"Worker {self.worker_id}: Resized bbox from {row_dict['bbox']} to {resized_bbox}")
+                    row_dict["bbox"] = resized_bbox
+                else:
+                    logger.warning(f"Worker {self.worker_id}: No original dimensions available for bbox resizing")
+            except Exception as e:
+                logger.error(f"Worker {self.worker_id}: Error resizing bounding box: {str(e)}")
+                logger.error(traceback.format_exc())
+        else:
+            # Use empty list as placeholder if not available
+            row_dict["bbox"] = [0, 0, 0, 0]
+
+        # Make bbox tensor
+        row_dict["bbox"] = torch.tensor(row_dict["bbox"], dtype=torch.float32)
+
         row_dict["multi_modal_data"] = dict(model_inputs)
         position_ids = get_rope_index(
             self.processor,
@@ -369,4 +469,5 @@ class RLHFDataset(Dataset):
         row_dict["position_ids"] = position_ids
         row_dict["ground_truth"] = row_dict[self.answer_key]
         row_dict["raw_prompt_ids"] = self.tokenizer.encode(prompt, add_special_tokens=False)
+        row_dict.pop("segmentation_path", None)
         return row_dict
