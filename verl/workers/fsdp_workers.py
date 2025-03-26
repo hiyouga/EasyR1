@@ -94,7 +94,9 @@ class FSDPWorker(Worker):
             self._use_param_offload = self.config.ref.offload.offload_params
             self._init_config(self.config.ref, "ref")
 
-    def _init_config(self, config: Union[ActorConfig, CriticConfig, RefConfig], role: Literal["actor", "critic", "ref"]):
+    def _init_config(
+        self, config: Union[ActorConfig, CriticConfig, RefConfig], role: Literal["actor", "critic", "ref"]
+    ):
         world_size = dist.get_world_size()
         fsdp_size = config.fsdp.fsdp_size
         if fsdp_size <= 0 or fsdp_size >= world_size:
