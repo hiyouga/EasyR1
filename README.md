@@ -52,9 +52,9 @@ docker pull hiyouga/verl:ngc-th2.6.0-cu120-vllm0.8.2
 
 \* *estimated*
 
-| Method                   | Bits |  1.5B  |   3B   |   7B   |
-| ------------------------ | ---- | ------ | ------ | ------ |
-| GRPO Full Fine-Tuning    |  AMP | 2*24GB | 4*40GB | 8*40GB |
+| Method                   | Bits |  1.5B  |   3B   |   7B   |   32B  |
+| ------------------------ | ---- | ------ | ------ | ------ | ------ |
+| GRPO Full Fine-Tuning    |  AMP | 2*24GB | 4*40GB | 8*40GB | 8*80GB |
 
 > [!NOTE]
 > We are working hard to reduce the VRAM in RL training, LoRA support will be integrated in next updates.

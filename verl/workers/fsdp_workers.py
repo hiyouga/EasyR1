@@ -15,8 +15,7 @@
 The main entry point to run the PPO algorithm
 """
 
-import os
-from typing import Literal, Optional
+from typing import Literal, Optional, Union
 
 import numpy as np
 import psutil
@@ -56,7 +55,7 @@ from ..utils.tokenizer import get_processor, get_tokenizer
 from ..utils.torch_dtypes import PrecisionType
 from ..utils.torch_functional import get_constant_schedule_with_warmup
 from .actor import DataParallelPPOActor
-from .config import FSDPConfig, ModelConfig, OptimConfig, WorkerConfig
+from .config import ActorConfig, CriticConfig, FSDPConfig, ModelConfig, OptimConfig, RefConfig, WorkerConfig
 from .critic import DataParallelPPOCritic
 from .rollout.vllm_rollout import vLLMRollout
 from .sharding_manager import FSDPVLLMShardingManager
@@ -72,38 +71,46 @@ class FSDPWorker(Worker):
         super().__init__()
         self.config = config
         self.role = role
+
+        if not dist.is_initialized():
+            dist.init_process_group(backend="nccl")
+
         self._is_actor = self.role in ["actor", "actor_rollout", "actor_rollout_ref"]
         self._is_critic = self.role == "critic"
         self._is_rollout = self.role in ["rollout", "actor_rollout", "actor_rollout_ref"]
         self._is_ref = self.role in ["ref", "actor_rollout_ref"]
 
-        if not dist.is_initialized():
-            dist.init_process_group(backend="nccl")
-
-        # build device mesh for FSDP
+        self._use_param_offload = False
+        self._use_optimizer_offload = False
         if self._is_actor:
-            fsdp_size = self.config.actor.fsdp.fsdp_size
+            self._use_param_offload = self.config.actor.offload.offload_params
+            self._use_optimizer_offload = self.config.actor.offload.offload_optimizer
+            self._init_config(self.config.actor, "actor")
         elif self._is_critic:
-            fsdp_size = self.config.critic.fsdp.fsdp_size
-        elif self._is_ref:
-            fsdp_size = self.config.ref.fsdp.fsdp_size
+            self._use_param_offload = self.config.critic.offload.offload_params
+            self._use_optimizer_offload = self.config.critic.offload.offload_optimizer
+            self._init_config(self.config.critic, "critic")
+        elif self._is_ref:  # NOTE: it seems that manual offload is slower than FSDP offload
+            self._use_param_offload = self.config.ref.offload.offload_params
+            self._init_config(self.config.ref, "ref")
 
-        local_rank = os.getenv("LOCAL_RANK")
+    def _init_config(self, config: Union[ActorConfig, CriticConfig, RefConfig], role: Literal["actor", "critic", "ref"]):
         world_size = dist.get_world_size()
-        torch.cuda.set_device(f"cuda:{local_rank}")
-        if fsdp_size < 0 or fsdp_size > world_size:
+        fsdp_size = config.fsdp.fsdp_size
+        if fsdp_size <= 0 or fsdp_size >= world_size:
             self.device_mesh = init_device_mesh("cuda", mesh_shape=(world_size,), mesh_dim_names=("fsdp",))
         else:  # hsdp
             self.device_mesh = init_device_mesh(
                 "cuda", mesh_shape=(world_size // fsdp_size, fsdp_size), mesh_dim_names=("ddp", "fsdp")
             )
 
-        # build device mesh for Ulysses Sequence Parallel
-        self.ulysses_sequence_parallel_size = self.config.actor.ulysses_sequence_parallel_size
-        if self.ulysses_sequence_parallel_size > 1:
+        if config.ulysses_sequence_parallel_size > 1:
             self.ulysses_device_mesh = init_device_mesh(
                 "cuda",
-                mesh_shape=(world_size // self.ulysses_sequence_parallel_size, self.ulysses_sequence_parallel_size),
+                mesh_shape=(
+                    world_size // config.ulysses_sequence_parallel_size,
+                    config.ulysses_sequence_parallel_size,
+                ),
                 mesh_dim_names=("dp", "sp"),
             )
         else:
@@ -111,67 +118,27 @@ class FSDPWorker(Worker):
 
         self.ulysses_sharding_manager = FSDPUlyssesShardingManager(self.ulysses_device_mesh)
 
-        self._use_param_offload = False
-        self._use_optimizer_offload = False
-        if self._is_actor:
-            self._use_param_offload = self.config.actor.offload.offload_params
-            self._use_optimizer_offload = self.config.actor.offload.offload_optimizer
-        elif self._is_critic:
-            self._use_param_offload = self.config.critic.offload.offload_params
-            self._use_optimizer_offload = self.config.critic.offload.offload_optimizer
-        elif self._is_ref:  # NOTE: it seems that manual offload is slowly than FSDP offload
-            self._use_param_offload = self.config.ref.offload.offload_params
+        if not hasattr(config, "global_batch_size"):  # ref model
+            return
 
-        # normalize config
-        if self._is_actor:
-            if self.config.rollout.n > 1:
-                self.config.actor.global_batch_size *= self.config.rollout.n
-                self.print_rank0(f"Use global batch size {self.config.actor.global_batch_size}.")
+        if self.config.rollout.n > 1:
+            config.global_batch_size *= self.config.rollout.n
+            self.print_rank0(f"{role} will use global batch size {config.global_batch_size}.")
 
-            self.config.actor.global_batch_size_per_device = (
-                self.config.actor.global_batch_size // self.device_mesh.size() * self.ulysses_sequence_parallel_size
-            )
-            if self.config.actor.global_batch_size_per_device == 0:
-                raise ValueError("Global batch size must be larger than num gpus.")
+        config.global_batch_size_per_device = (
+            config.global_batch_size // self.device_mesh.size() * config.ulysses_sequence_parallel_size
+        )
+        if config.global_batch_size_per_device == 0:
+            raise ValueError(f"{role} global batch size must be larger than num gpus.")
 
-            if (
-                self.config.actor.global_batch_size_per_device
-                % self.config.actor.micro_batch_size_per_device_for_update
-                != 0
-            ):
-                raise ValueError("Global batch size per device must be divisible by the micro batch size.")
+        if config.global_batch_size_per_device % config.micro_batch_size_per_device_for_update != 0:
+            raise ValueError(f"{role} global batch size per device must be divisible by the micro batch size.")
 
-            if (
-                self.config.actor.fsdp.enable_cpu_offload
-                and self.config.actor.global_batch_size_per_device
-                != self.config.actor.micro_batch_size_per_device_for_update
-            ):
-                raise ValueError("Cannot use FSDP's CPU offload when gradient accumulation is enabled.")
-
-        elif self._is_critic:
-            if self.config.rollout.n > 1:
-                self.config.critic.global_batch_size *= self.config.rollout.n
-                self.print_rank0(f"Use global batch size {self.config.critic.global_batch_size}.")
-
-            self.config.critic.global_batch_size_per_device = (
-                self.config.critic.global_batch_size // self.device_mesh.size() * self.ulysses_sequence_parallel_size
-            )
-            if self.config.critic.global_batch_size_per_device == 0:
-                raise ValueError("Global batch size must be larger than num gpus.")
-
-            if (
-                self.config.critic.global_batch_size_per_device
-                % self.config.critic.micro_batch_size_per_device_for_update
-                != 0
-            ):
-                raise ValueError("Global batch size per device must be divisible by the micro batch size.")
-
-            if (
-                self.config.critic.fsdp.enable_cpu_offload
-                and self.config.critic.global_batch_size_per_device
-                != self.config.critic.micro_batch_size_per_device_for_update
-            ):
-                raise ValueError("Cannot use FSDP's CPU offload when gradient accumulation is enabled.")
+        if (
+            config.fsdp.enable_cpu_offload
+            and config.global_batch_size_per_device != config.micro_batch_size_per_device_for_update
+        ):
+            raise ValueError(f"{role} cannot use FSDP's CPU offload when gradient accumulation is enabled.")
 
     def _build_model_optimizer(
         self,
@@ -259,9 +226,7 @@ class FSDPWorker(Worker):
                 self.print_rank0("No vision tower found.")
 
         dist.barrier()
-        if self.rank == 0:
-            print_model_size(model)
-
+        print_model_size(model)
         print_gpu_memory_usage("After huggingface model init")
         mixed_precision = MixedPrecision(
             param_dtype=PrecisionType.to_dtype(fsdp_config.mp_param_dtype),
@@ -321,13 +286,11 @@ class FSDPWorker(Worker):
             self.lr_scheduler = get_constant_schedule_with_warmup(
                 optimizer=self.optimizer, num_warmup_steps=num_warmup_steps
             )
+            print_gpu_memory_usage("After optimizer init")
         else:
             self.optimizer, self.lr_scheduler = None, None
 
-        print_gpu_memory_usage("After optimizer init")
-
     def _build_rollout(self) -> None:
-        # TODO(sgm): support FSDP hybrid shard for larger model
         tp_size = self.config.rollout.tensor_parallel_size
         dp_size = self.world_size // tp_size
         assert self.world_size % tp_size == 0, (
@@ -353,18 +316,21 @@ class FSDPWorker(Worker):
             fsdp_config = self.config.critic.fsdp
             optim_config = self.config.critic.optim
             padding_free = self.config.critic.padding_free
+            role = "critic"
         elif self._is_actor:
             model_config = self.config.actor.model
             fsdp_config = self.config.actor.fsdp
             optim_config = self.config.actor.optim
             padding_free = self.config.actor.padding_free
+            role = "actor"
         elif self._is_ref:
             model_config = self.config.actor.model
             fsdp_config = self.config.ref.fsdp
             optim_config = None
             padding_free = self.config.ref.padding_free
+            role = "ref"
         else:
-            raise ValueError("Unknown role.")
+            raise ValueError(f"Unknown role {role}.")
 
         if self._is_actor or self._is_critic or self._is_ref:
             self._build_model_optimizer(
@@ -373,11 +339,13 @@ class FSDPWorker(Worker):
                 optim_config=optim_config,
                 padding_free=padding_free,
             )
-            # get the original unwrapped module
-            self.unwrapped_model = self.fsdp_module._fsdp_wrapped_module
+            if self._use_param_offload:
+                offload_fsdp_model(self.fsdp_module)
+                print_gpu_memory_usage(f"After offload {role} model during init")
+
             if self._use_optimizer_offload:
                 offload_fsdp_optimizer(optimizer=self.optimizer)
-                print_gpu_memory_usage("After offload actor optimizer during init")
+                print_gpu_memory_usage(f"After offload {role} optimizer during init")
 
         if self._is_actor:
             self.actor = DataParallelPPOActor(
@@ -435,8 +403,6 @@ class FSDPWorker(Worker):
         if self._use_optimizer_offload:
             offload_fsdp_optimizer(self.optimizer)
 
-    """ActorRolloutRefWorker"""
-
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def update_actor(self, data: DataProto):
         assert self._is_actor
@@ -459,8 +425,12 @@ class FSDPWorker(Worker):
             metrics["perf/mfu/actor"] = (
                 estimated_flops * self.config.actor.ppo_epochs / (promised_flops * self.world_size)
             )
-            metrics["perf/max_memory_allocated_gb"] = torch.cuda.max_memory_allocated() / (1024**3)
-            metrics["perf/max_memory_reserved_gb"] = torch.cuda.max_memory_reserved() / (1024**3)
+            metrics["perf/max_memory_allocated_gb"] = (
+                torch.cuda.max_memory_allocated() - self.rollout_sharding_manager.freed_bytes
+            ) / (1024**3)
+            metrics["perf/max_memory_reserved_gb"] = (
+                torch.cuda.max_memory_reserved() - self.rollout_sharding_manager.freed_bytes
+            ) / (1024**3)
             metrics["perf/cpu_memory_used_gb"] = psutil.virtual_memory().used / (1024**3)
 
             self.lr_scheduler.step()
@@ -470,7 +440,7 @@ class FSDPWorker(Worker):
             # Metrics should be in non_tensor_batch instead of meta_info, as DataProto not concat meta_info.
             output = DataProto(
                 non_tensor_batch={
-                    metric: np.array([value] if np.isscalar(value) else value) for metric, value in metrics.items()
+                    key: np.array([value] if np.isscalar(value) else value) for key, value in metrics.items()
                 }
             )
 
@@ -567,8 +537,6 @@ class FSDPWorker(Worker):
 
         output = output.to("cpu")
         return output
-
-    """CriticWorker"""
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def compute_values(self, data: DataProto):

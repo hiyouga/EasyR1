@@ -70,6 +70,7 @@ class TrainerConfig:
     logger: Tuple[str] = ("console", "wandb")
     nnodes: int = 1
     n_gpus_per_node: int = 8
+    report_kl: bool = True
     critic_warmup: int = 0
     val_freq: int = -1
     val_before_train: bool = True
@@ -98,6 +99,7 @@ class PPOConfig:
         self.worker.actor.use_kl_loss = self.algorithm.use_kl_loss
         self.worker.actor.kl_penalty = self.algorithm.kl_penalty
         self.worker.actor.kl_coef = self.algorithm.kl_coef
+        self.worker.actor.report_kl = self.trainer.report_kl
 
     def deep_post_init(self):
         recursive_post_init(self)

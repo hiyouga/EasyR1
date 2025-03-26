@@ -15,14 +15,11 @@
 Contain small torch utilities
 """
 
-import math
-from typing import Dict, List, Literal, Optional, Union
+from typing import List, Literal, Optional, Union
 
 import torch
 import torch.distributed
 import torch.nn.functional as F
-from tensordict import TensorDict
-from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR
 
 
@@ -46,8 +43,16 @@ def log_probs_from_logits_flash_attn(logits: torch.Tensor, labels: torch.Tensor)
 
 
 def log_probs_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-    """
+    """Compute log probs on the label ids given logits.
+
     We may use torch compile to speed up computing.
+
+    Args:
+        logits (torch.Tensor): logits of the model, shape (batch_size, seqlen, vocab_size)
+        labels (torch.Tensor): labels of the model, shape (batch_size, seqlen)
+
+    Returns:
+        torch.Tensor: log probs of the labels, shape (batch_size, seqlen)
     """
     batch_dim = logits.shape[:-1]
     vocab_dim = logits.shape[-1]
@@ -59,14 +64,6 @@ def log_probs_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> torch.T
         output = F.cross_entropy(logits.float(), labels, reduction="none")
 
     return output.view(*batch_dim)
-
-
-def clip_by_value(tensor: torch.Tensor, tensor_min: torch.Tensor, tensor_max: torch.Tensor) -> torch.Tensor:
-    """
-    Tensor extenstion to torch.clamp
-    https://github.com/pytorch/pytorch/issues/2793#issuecomment-428784713
-    """
-    return torch.max(torch.min(tensor, tensor_max), tensor_min)
 
 
 def masked_mean(values: torch.Tensor, mask: torch.Tensor, dim: int = None) -> torch.Tensor:
@@ -96,19 +93,22 @@ def masked_whiten(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     return (values - mean) * torch.rsqrt(var + 1e-8)
 
 
-def get_eos_mask(response_ids: torch.Tensor, eos_token: Union[int, List[int]] = 2, dtype: torch.dtype = torch.int64):
+def get_eos_mask(response_ids: torch.Tensor, eos_token_id: Union[int, List[int]] = 2, dtype: torch.dtype = torch.long):
+    """Get the mask for the response ids, the mask will be 0 after the first eos token.
+
+    eos_token_id can be int or list: 1 or [1, 2].
+    ```
+    e.g. eos_token = 1
+    response_ids: [0, 0, 2, 4, 3, 5, 1, 0, 0]
+    eos_mask:     [1, 1, 1, 1, 1, 1, 1, 0, 0]
+    ```
     """
-    end of sentence token can be int or list: 1 or [1, 2]
-    e.g. eos_token=1
-    response_ids: [0, 0, 2, 42, 3, 5, 1, 0, 0]
-    eos_mask:     [1, 1, 1, 1,  1, 1, 1, 0, 0]
-    """
-    if isinstance(eos_token, int):
-        eos_token = [eos_token]
+    if isinstance(eos_token_id, int):
+        eos_token_id = [eos_token_id]
 
     eos_mask = torch.zeros_like(response_ids, dtype=torch.bool)
-    for token in eos_token:
-        eos_mask |= response_ids.eq(token)
+    for token_id in eos_token_id:
+        eos_mask |= response_ids.eq(token_id)
 
     eos_mask = eos_mask.long()
     eos_mask = (torch.cumsum(eos_mask, dim=1) - eos_mask).bool()
@@ -119,14 +119,13 @@ def get_eos_mask(response_ids: torch.Tensor, eos_token: Union[int, List[int]] = 
 def pad_2d_list_to_length(
     response: List[List[int]], pad_token_id: int, max_length: Optional[int] = None
 ) -> torch.Tensor:
-    """
-    pad a 2D list (e.g. responses, log_probs) to a 2D tensor.
-    """
-    response_length = max(len(sub_list) for sub_list in response)
-    if max_length is not None and max_length > response_length:
+    """Pad a 2D list (e.g. responses, log_probs) to a 2D tensor."""
+    max_response_length = max(len(sub_list) for sub_list in response)
+    if max_length is not None and max_length > max_response_length:
         target_length = max_length
     else:
-        target_length = response_length
+        target_length = max_response_length
+
     padded_response = [tuple(sub_list) + (pad_token_id,) * (target_length - len(sub_list)) for sub_list in response]
     tensor = torch.tensor(padded_response)
     return tensor
@@ -135,9 +134,7 @@ def pad_2d_list_to_length(
 def pad_sequence_to_length(
     tensor: torch.Tensor, max_seq_len: int, pad_token_id: int, left_pad: bool = False
 ) -> torch.Tensor:
-    """
-    Pad a nD tensors in the last dim to max_seq_len.
-    """
+    """Pad a nD tensors in the last dim to max_seq_len."""
     if tensor.size(-1) >= max_seq_len:
         return tensor
 
@@ -156,9 +153,7 @@ def postprocess_data(
     left_pad: bool = True,
     truncation: Literal["left", "right", "error"] = "error",
 ):
-    """
-    Pad or truncate data.
-    """
+    """Pad or truncate data."""
     assert truncation in ["left", "right", "error"]
     seq_length = len(input_ids)
     if seq_length < max_length:
@@ -186,89 +181,14 @@ def postprocess_data(
     return input_ids, attention_mask, position_ids
 
 
-def get_cosine_schedule_with_warmup(
-    optimizer: Optimizer,
-    num_warmup_steps: int,
-    num_training_steps: int,
-    min_lr_ratio: float = 0.0,
-    num_cycles: float = 0.5,
-    last_epoch: int = -1,
-):
-    """
-    Create a schedule with a learning rate that decreases following the values of the cosine function between the
-    initial lr set in the optimizer to 0, after a warmup period during which it increases linearly between 0 and the
-    initial lr set in the optimizer.
-    Args:
-        optimizer (:class:`~torch.optim.Optimizer`):
-            The optimizer for which to schedule the learning rate.
-        num_warmup_steps (:obj:`int`):
-            The number of steps for the warmup phase.
-        num_training_steps (:obj:`int`):
-            The total number of training steps.
-        min_lr_ratio (:obj:`float`, `optional`, defaults to 0.0):
-            The minimum lr ratio w.r.t the maximum.
-        num_cycles (:obj:`float`, `optional`, defaults to 0.5):
-            The number of waves in the cosine schedule (the defaults is to just decrease from the max value to 0
-            following a half-cosine).
-        last_epoch (:obj:`int`, `optional`, defaults to -1):
-            The index of the last epoch when resuming training.
-    Return:
-        :obj:`torch.optim.lr_scheduler.LambdaLR` with the appropriate schedule.
-    """
-    assert min_lr_ratio >= 0 and min_lr_ratio <= 1.0
-    coef = (1 - min_lr_ratio) * 0.5
-    intercept = (1 + min_lr_ratio) * 0.5
-
-    def lr_lambda(current_step):
-        if current_step < num_warmup_steps:
-            return float(current_step) / float(max(1, num_warmup_steps))
-        progress = float(current_step - num_warmup_steps) / float(max(1, num_training_steps - num_warmup_steps))
-        x = math.cos(math.pi * float(num_cycles) * 2.0 * progress)
-        return max(0.0, x * coef + intercept)
-
-    return LambdaLR(optimizer, lr_lambda, last_epoch)
-
-
 def get_constant_schedule_with_warmup(
-    optimizer: Optimizer,
+    optimizer: torch.optim.Optimizer,
     num_warmup_steps: int,
     last_epoch: int = -1,
-):
-    def lr_lambda(current_step):
-        return min(1, float(current_step) / float(max(1, num_warmup_steps)))
+) -> torch.optim.lr_scheduler.LRScheduler:
+    """Get the lr scheduler for constant lr."""
+
+    def lr_lambda(current_step: int) -> float:
+        return min(1.0, float(current_step) / float(max(1, num_warmup_steps)))
 
     return LambdaLR(optimizer, lr_lambda, last_epoch)
-
-
-def allgather_dict_tensors(tensors: Union[Dict[str, torch.Tensor], TensorDict], size, group, dim=0):
-    """
-    TODO: optimize this.
-    - We can use async ops
-    - We can use only one allgather
-    Args:
-        tensors:
-        size:
-        group:
-
-    Returns:
-
-    """
-    if isinstance(tensors, TensorDict):
-        is_tensor_dict = True
-        tensors_as_dict = tensors.to_dict()
-    else:
-        tensors_as_dict = tensors
-        is_tensor_dict = False
-
-    output = {}
-    sorted_keys = sorted(tensors_as_dict.keys())
-    for key in sorted_keys:
-        val = tensors_as_dict[key]
-        output[key] = [torch.empty_like(val) for _ in range(size)]
-        torch.distributed.all_gather(output[key], val, group=group, async_op=False)
-        output[key] = torch.cat(output[key], dim=dim)
-
-    if is_tensor_dict:
-        output = TensorDict(source=output, batch_size=tensors.batch_size[0] * size)
-
-    return output

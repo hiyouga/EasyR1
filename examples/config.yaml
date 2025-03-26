@@ -74,6 +74,7 @@ trainer:
   experiment_name: qwen2_5_7b_math_grpo
   n_gpus_per_node: 8
   nnodes: 1
+  report_kl: true
   val_freq: 5  # -1 to disable
   val_before_train: true
   val_only: false

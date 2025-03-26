@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Tuple
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 from ..utils import torch_functional as VF
 
@@ -38,10 +39,7 @@ class KLController(ABC):
 
 
 class AdaptiveKLController(KLController):
-    """
-    Adaptive KL controller described in the paper:
-    https://arxiv.org/pdf/1909.08593.pdf
-    """
+    """Adaptive KL controller described in: https://arxiv.org/pdf/1909.08593.pdf"""
 
     def __init__(self, init_kl_coef: float, target_kl: float, horizon: float):
         self.value = init_kl_coef
@@ -66,6 +64,7 @@ class FixedKLController(KLController):
 
 
 def get_kl_controller(algorithm_config: "AlgorithmConfig") -> KLController:
+    """Adapted from https://github.com/huggingface/trl/blob/v0.11.0/trl/trainer/ppo_trainer.py#L319"""
     if algorithm_config.kl_type == "fixed":
         kl_ctrl = FixedKLController(init_kl_coef=algorithm_config.kl_coef)
     elif algorithm_config.kl_type == "adaptive":
@@ -89,7 +88,7 @@ def compute_gae_advantage_return(
     gamma: torch.Tensor,
     lam: torch.Tensor,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Adapted from https://github.com/huggingface/trl/blob/main/trl/trainer/ppo_trainer.py
+    """Adapted from https://github.com/huggingface/trl/blob/v0.16.0/trl/trainer/ppo_trainer.py#L513
 
     Args:
         token_level_rewards: `(torch.Tensor)`
@@ -120,8 +119,8 @@ def compute_gae_advantage_return(
         advantages_reversed.append(lastgaelam)
 
     advantages = torch.stack(advantages_reversed[::-1], dim=1)
-    returns = advantages + values
-    advantages = VF.masked_whiten(advantages, eos_mask)
+    returns = (advantages + values) * eos_mask
+    advantages = VF.masked_whiten(advantages, eos_mask) * eos_mask
     return advantages, returns
 
 
@@ -245,7 +244,8 @@ def compute_reinforce_plus_plus_outcome_advantage(
         running_return = running_return * eos_mask[:, t]
 
     advantages = VF.masked_whiten(returns, eos_mask)
-    advantages = advantages * eos_mask
+    advantages *= eos_mask
+    returns *= eos_mask
     return advantages, returns
 
 
@@ -274,7 +274,7 @@ def compute_remax_outcome_advantage(
     """
     response_length = token_level_rewards.shape[-1]
     # scores = token_level_rewards.sum(dim=-1)
-    returns = (token_level_rewards * eos_mask).flip(dims=[-1]).cumsum(dim=-1).flip(dims=[-1])
+    returns = (token_level_rewards * eos_mask).flip(dims=[-1]).cumsum(dim=-1).flip(dims=[-1]) * eos_mask
     advantages = returns - reward_baselines.unsqueeze(-1).tile([1, response_length]) * eos_mask
     return advantages, returns
 
@@ -362,7 +362,7 @@ def compute_value_loss(
         vf_clipfrac: a float
             The ratio of vf being clipped
     """
-    vpredclipped = VF.clip_by_value(vpreds, values - cliprange_value, values + cliprange_value)
+    vpredclipped = torch.clamp(vpreds, values - cliprange_value, values + cliprange_value)
     vf_losses1 = torch.square(vpreds - returns)
     vf_losses2 = torch.square(vpredclipped - returns)
     vf_loss = 0.5 * VF.masked_mean(torch.max(vf_losses1, vf_losses2), eos_mask)
@@ -372,7 +372,7 @@ def compute_value_loss(
 
 def kl_penalty(log_probs: torch.FloatTensor, ref_log_probs: torch.FloatTensor, kl_penalty: str) -> torch.Tensor:
     """Compute KL divergence given log_probs and ref_log_probs.
-    Copied from https://github.com/huggingface/trl/blob/main/trl/trainer/ppo_trainer.py#L1104
+    Copied from https://github.com/huggingface/trl/blob/v0.11.0/trl/trainer/ppo_trainer.py#L1150
 
     Args:
         log_probs: torch.Tensor
@@ -399,7 +399,6 @@ def kl_penalty(log_probs: torch.FloatTensor, ref_log_probs: torch.FloatTensor, k
         return torch.clamp(kld, min=-10, max=10)
 
     if kl_penalty == "full":
-        # here log_probs and ref_log_probs should contain the logits for every token in vocabulary
-        raise NotImplementedError
+        return F.kl_div(ref_log_probs, log_probs, log_target=True, reduction="none").sum(-1)
 
-    raise NotImplementedError
+    raise NotImplementedError(f"Unknown KL penalty: {kl_penalty}.")

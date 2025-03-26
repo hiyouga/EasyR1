@@ -13,6 +13,7 @@ python3 -m verl.trainer.main \
     worker.actor.model.model_path=${MODEL_PATH} \
     worker.actor.micro_batch_size_per_device_for_update=1 \
     worker.actor.micro_batch_size_per_device_for_experience=8 \
+    worker.actor.fsdp.torch_dtype=bf16 \
     worker.rollout.tensor_parallel_size=8 \
     worker.rollout.enable_chunked_prefill=false \
     trainer.experiment_name=qwen2_5_vl_32b_geo_grpo \

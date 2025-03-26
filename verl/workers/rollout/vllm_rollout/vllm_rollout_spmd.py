@@ -172,7 +172,7 @@ class vLLMRollout(BaseRollout):
         response_position_ids = position_ids[..., -1:] + delta_position_id
         position_ids = torch.cat([position_ids, response_position_ids], dim=-1)
         response_attention_mask = VF.get_eos_mask(
-            response_ids=response_ids, eos_token=eos_token_id, dtype=attention_mask.dtype
+            response_ids=response_ids, eos_token_id=eos_token_id, dtype=attention_mask.dtype
         )
         attention_mask = torch.cat((attention_mask, response_attention_mask), dim=-1)
 

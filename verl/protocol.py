@@ -32,7 +32,6 @@ from torch.distributed import ProcessGroup
 from torch.utils.data import DataLoader
 
 from .utils.py_functional import union_two_dict
-from .utils.torch_functional import allgather_dict_tensors
 
 
 try:
@@ -616,13 +615,44 @@ class DataProtoFuture:
         return arg_future_lst
 
     def get(self):
-        output = ray.get(self.futures)  # dp_size.
-        for o in output:
-            assert isinstance(o, DataProto)
-        output = self.collect_fn(output)  # select dp, concat
+        outputs = ray.get(self.futures)  # dp_size.
+        for output in outputs:
+            assert isinstance(output, DataProto)
+
+        outputs = self.collect_fn(outputs)  # select dp, concat
         if self.dispatch_fn is not None:
-            output = self.dispatch_fn(output)  # split in batch dim, select using dp
-        return output
+            outputs = self.dispatch_fn(outputs)  # split in batch dim, select using dp
+
+        return outputs
+
+
+def allgather_dict_tensors(
+    tensors: Union[Dict[str, torch.Tensor], TensorDict], size: int, group: ProcessGroup, dim: int = 0
+) -> Union[Dict[str, torch.Tensor], TensorDict]:
+    """
+    TODO: optimize this.
+    - We can use async ops
+    - We can use only one allgather
+    """
+    if isinstance(tensors, TensorDict):
+        is_tensor_dict = True
+        tensors_as_dict = tensors.to_dict()
+    else:
+        tensors_as_dict = tensors
+        is_tensor_dict = False
+
+    output = {}
+    sorted_keys = sorted(tensors_as_dict.keys())
+    for key in sorted_keys:
+        val = tensors_as_dict[key]
+        output[key] = [torch.empty_like(val) for _ in range(size)]
+        torch.distributed.all_gather(output[key], val, group=group, async_op=False)
+        output[key] = torch.cat(output[key], dim=dim)
+
+    if is_tensor_dict:
+        output = TensorDict(source=output, batch_size=tensors.batch_size[0] * size)
+
+    return output
 
 
 def all_gather_data_proto(data: DataProto, size: int, group: ProcessGroup) -> None:

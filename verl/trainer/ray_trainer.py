@@ -157,72 +157,40 @@ def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.KLController, kl_penal
     return data, metrics
 
 
-def compute_advantage(data: DataProto, adv_estimator: AdvantageEstimator, gamma=1.0, lam=1.0):
-    # prepare response group
-    # TODO: add other ways to estimate advantages
+def compute_advantage(data: DataProto, adv_estimator: AdvantageEstimator, gamma: float = 1.0, lam: float = 1.0):
+    responses = data.batch["responses"]
+    response_length = responses.size(-1)
+    attention_mask = data.batch["attention_mask"]
+    response_mask = attention_mask[:, -response_length:]
+    token_level_rewards = data.batch["token_level_rewards"]
+    index = data.non_tensor_batch["uid"]
     if adv_estimator == AdvantageEstimator.GAE:
         values = data.batch["values"]
-        responses = data.batch["responses"]
-        response_length = responses.size(-1)
-        attention_mask = data.batch["attention_mask"]
-        response_mask = attention_mask[:, -response_length:]
-        token_level_rewards = data.batch["token_level_rewards"]
         advantages, returns = core_algos.compute_gae_advantage_return(
             token_level_rewards=token_level_rewards, values=values, eos_mask=response_mask, gamma=gamma, lam=lam
         )
-        data.batch["advantages"] = advantages
-        data.batch["returns"] = returns
     elif adv_estimator == AdvantageEstimator.GRPO:
-        token_level_rewards = data.batch["token_level_rewards"]
-        index = data.non_tensor_batch["uid"]
-        responses = data.batch["responses"]
-        response_length = responses.size(-1)
-        attention_mask = data.batch["attention_mask"]
-        response_mask = attention_mask[:, -response_length:]
         advantages, returns = core_algos.compute_grpo_outcome_advantage(
             token_level_rewards=token_level_rewards, eos_mask=response_mask, index=index
         )
-        data.batch["advantages"] = advantages
-        data.batch["returns"] = returns
     elif adv_estimator == AdvantageEstimator.REINFORCE_PLUS_PLUS:
-        token_level_rewards = data.batch["token_level_rewards"]
-        responses = data.batch["responses"]
-        response_length = responses.size(-1)
-        attention_mask = data.batch["attention_mask"]
-        response_mask = attention_mask[:, -response_length:]
         advantages, returns = core_algos.compute_reinforce_plus_plus_outcome_advantage(
             token_level_rewards=token_level_rewards, eos_mask=response_mask, gamma=gamma
         )
-        data.batch["advantages"] = advantages
-        data.batch["returns"] = returns
     elif adv_estimator == AdvantageEstimator.REMAX:
-        token_level_rewards = data.batch["token_level_rewards"]
-        index = data.non_tensor_batch["uid"]
-        responses = data.batch["responses"]
-        response_length = responses.size(-1)
-        attention_mask = data.batch["attention_mask"]
-        response_mask = attention_mask[:, -response_length:]
         reward_baselines = data.batch["reward_baselines"]
         advantages, returns = core_algos.compute_remax_outcome_advantage(
             token_level_rewards=token_level_rewards, reward_baselines=reward_baselines, eos_mask=response_mask
         )
-        data.batch["advantages"] = advantages
-        data.batch["returns"] = returns
     elif adv_estimator == AdvantageEstimator.RLOO:
-        token_level_rewards = data.batch["token_level_rewards"]
-        index = data.non_tensor_batch["uid"]
-        responses = data.batch["responses"]
-        response_length = responses.size(-1)
-        attention_mask = data.batch["attention_mask"]
-        response_mask = attention_mask[:, -response_length:]
         advantages, returns = core_algos.compute_rloo_outcome_advantage(
             token_level_rewards=token_level_rewards, eos_mask=response_mask, index=index
         )
-        data.batch["advantages"] = advantages
-        data.batch["returns"] = returns
     else:
         raise NotImplementedError
 
+    data.batch["advantages"] = advantages
+    data.batch["returns"] = returns
     return data
 
 
@@ -239,8 +207,6 @@ class RayPPOTrainer:
     Note that this trainer runs on the driver process on a single CPU/GPU node.
     """
 
-    # TODO: support each role have individual ray_worker_group_cls,
-    # i.e., support different backend of different role
     def __init__(
         self,
         config: PPOConfig,
@@ -268,30 +234,34 @@ class RayPPOTrainer:
 
         self.role_worker_mapping = role_worker_mapping
         self.resource_pool_manager = resource_pool_manager
-        self.use_reference_policy = Role.RefPolicy in role_worker_mapping and config.algorithm.kl_coef > 1e-6
         self.use_reward_model = Role.RewardModel in role_worker_mapping
         self.ray_worker_group_cls = ray_worker_group_cls
         self.val_generations_logger = ValGenerationsLogger()
 
         # define KL control
-        if self.use_reference_policy:
+        if Role.RefPolicy in role_worker_mapping and config.trainer.report_kl:
+            self.use_reference_policy = True
             self.kl_ctrl = core_algos.get_kl_controller(config.algorithm)
         else:
+            self.use_reference_policy = False
             self.kl_ctrl = core_algos.FixedKLController(init_kl_coef=0.0)
-
-        if config.algorithm.adv_estimator not in list(AdvantageEstimator):
-            raise NotImplementedError(f"Unknown advantage estimator: {config.algorithm.adv_estimator}.")
 
         if config.algorithm.adv_estimator == AdvantageEstimator.GAE:
             self.use_critic = True
         else:
             self.use_critic = False
 
-        if self.config.data.rollout_batch_size % self.config.worker.actor.global_batch_size != 0:
+        if config.algorithm.adv_estimator not in list(AdvantageEstimator):
+            raise NotImplementedError(f"Unknown advantage estimator: {config.algorithm.adv_estimator}.")
+
+        if config.data.rollout_batch_size % config.worker.actor.global_batch_size != 0:
             raise ValueError("Rollout batch size must be divisible by global batch size.")
 
-        if self.use_critic and self.config.data.rollout_batch_size % self.config.worker.critic.global_batch_size != 0:
+        if self.use_critic and config.data.rollout_batch_size % config.worker.critic.global_batch_size != 0:
             raise ValueError("Rollout batch size must be divisible by global batch size.")
+
+        if config.algorithm.kl_coef > 1e-8 and not config.trainer.report_kl:
+            raise ValueError("KL coefficient must be 0 if report_kl is False.")
 
         self._create_dataloader()
 
@@ -584,7 +554,7 @@ class RayPPOTrainer:
         # currently, we only support validation using the reward_function.
         if self.val_reward_fn is not None and self.config.trainer.val_before_train:
             val_metrics = self._validate()
-            print(f"Initial validation metrics: {json.dumps(val_metrics, indent=2)}.")
+            print(f"Initial validation metrics: {json.dumps(val_metrics, indent=2)}")
             logger.log(data=val_metrics, step=self.global_step)
             if self.config.trainer.val_only:
                 return
@@ -639,7 +609,7 @@ class RayPPOTrainer:
                     # compute reward
                     with _timer("reward", timing_raw):
                         if self.use_reward_model:
-                            raise NotImplementedError("RM is not supported for PPO yet.")
+                            raise NotImplementedError("Reward model is not supported yet.")
 
                         # we combine with rule-based rm
                         reward_tensor, reward_metrics = self.reward_fn(batch)
@@ -662,8 +632,8 @@ class RayPPOTrainer:
                         old_log_probs = self.actor_rollout_wg.compute_log_probs(batch)
                         batch = batch.union(old_log_probs)
 
+                    # compute ref_log_probs
                     if self.use_reference_policy:
-                        # compute reference log_prob
                         with _timer("ref", timing_raw):
                             ref_log_probs = self.ref_policy_wg.compute_ref_log_probs(batch)
                             batch = batch.union(ref_log_probs)
@@ -734,11 +704,15 @@ class RayPPOTrainer:
 
         # perform validation after training
         if self.val_reward_fn is not None:
-            if val_metrics is None or self.global_step % self.config.trainer.val_freq != 0:
+            if (
+                val_metrics is None
+                or self.config.trainer.val_freq <= 0
+                or self.global_step % self.config.trainer.val_freq != 0
+            ):
                 val_metrics = self._validate()
                 logger.log(data=val_metrics, step=self.global_step)
 
-            print(f"Final validation metrics: {json.dumps(val_metrics, indent=2)}.")
+            print(f"Final validation metrics: {json.dumps(val_metrics, indent=2)}")
 
-        if self.config.trainer.save_freq > 0 and self.global_step % self.config.trainer.save_freq != 0:
+        if self.config.trainer.save_freq <= 0 or self.global_step % self.config.trainer.save_freq != 0:
             self._save_checkpoint()
