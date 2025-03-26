@@ -45,7 +45,7 @@ We recommend using the [pre-built docker image](https://hub.docker.com/r/hiyouga
 # stable
 docker pull hiyouga/verl:ngc-th2.5.1-cu120-vllm0.7.4-hotfix
 # nightly
-docker pull hiyouga/verl:ngc-th2.6.0-cu120-vllm0.8.0
+docker pull hiyouga/verl:ngc-th2.6.0-cu120-vllm0.8.2
 ```
 
 ### Hardware Requirements

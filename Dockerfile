@@ -51,7 +51,7 @@ RUN pip install --no-cache-dir vllm --pre --extra-index-url "https://wheels.vllm
 # Install torch-2.5.1
 RUN pip install --no-cache-dir torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 tensordict torchdata \
     transformers>=4.49.0 accelerate datasets peft hf-transfer \
-    ray codetiming hydra-core pandas pyarrow>=15.0.0 pylatexenc qwen-vl-utils wandb liger-kernel mathruler \
+    ray[default] codetiming hydra-core pandas pyarrow>=15.0.0 pylatexenc qwen-vl-utils wandb liger-kernel mathruler \
     pytest yapf py-spy pyext pre-commit ruff
 
 # Install flash_attn-2.7.4.post1
@@ -62,3 +62,7 @@ RUN wget -nv https://github.com/Dao-AILab/flash-attention/releases/download/v2.7
 RUN pip uninstall -y pynvml nvidia-ml-py && \
     pip install --no-cache-dir nvidia-ml-py>=12.560.30 opencv-python-headless==4.8.0.74 fastapi==0.115.6 && \
     pip install --no-cache-dir --upgrade optree>=0.13.0
+
+# Reset pip config
+RUN pip config unset global.index-url && \
+    pip config unset global.extra-index-url
