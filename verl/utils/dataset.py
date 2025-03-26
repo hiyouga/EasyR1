@@ -139,7 +139,7 @@ class RLHFDataset(Dataset, ImageProcessMixin):
             messages = [{"role": "user", "content": content_list}]
             prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
             images = [self.process_image(image) for image in row_dict.pop(self.image_key)]
-            model_inputs = self.processor(images, prompt, return_tensors="pt")
+            model_inputs = self.processor(images, [prompt], add_special_tokens=False, return_tensors="pt")
             input_ids = model_inputs.pop("input_ids")[0]
             attention_mask = model_inputs.pop("attention_mask")[0]
             row_dict["multi_modal_data"] = {"image": images}
