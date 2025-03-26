@@ -74,7 +74,7 @@ pip install -e .
 ### GRPO Training
 
 ```bash
-bash examples/qwen2_5_vl_7b_geo3k.sh
+bash examples/qwen2_5_vl_7b_geo3k_grpo.sh
 ```
 
 ### Merge Checkpoint in Hugging Face Format
@@ -103,7 +103,6 @@ Please refer to the example datasets to prepare your own dataset.
 ![image](assets/easyr1_grpo.png)
 
 - To learn about the GRPO algorithm, you can refer to [Hugging Face's blog](https://huggingface.co/docs/trl/v0.15.2/en/grpo_trainer).
-- Different from TRL's GRPO trainer, our trainer supports mini-batch update as described in the [original PPO paper](https://arxiv.org/abs/1707.06347).
 
 ## How to Run 70B+ Model in Multi-node Environment
 
