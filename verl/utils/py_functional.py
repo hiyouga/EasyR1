@@ -30,12 +30,13 @@ def is_sci_notation(number: float) -> bool:
     return bool(pattern.match(str(number)))
 
 
-def float_representer(dumper: Dumper, value: Union[float, np.float32, np.float64]):
-    if is_sci_notation(value):
+def float_representer(dumper: Dumper, number: Union[float, np.float32, np.float64]):
+    if is_sci_notation(number):
+        value = str(number)
         if "." not in value and "e" in value:
-            value = str(value).replace("e", ".0e", 1)
+            value = value.replace("e", ".0e", 1)
     else:
-        value = str(round(value, 3))
+        value = str(round(number, 3))
 
     return dumper.represent_scalar("tag:yaml.org,2002:float", value)
 
