@@ -38,6 +38,7 @@ class OptimConfig:
     lr: float = 1e-6
     betas: Tuple[float, float] = (0.9, 0.999)
     weight_decay: float = 1e-2
+    strategy: str = "adamw"
     lr_warmup_ratio: float = 0.0
     min_lr_ratio: Optional[float] = None
     warmup_style: str = "constant"

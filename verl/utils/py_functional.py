@@ -16,6 +16,7 @@ Contain small python utility functions
 """
 
 import importlib.util
+import re
 from functools import lru_cache
 from typing import Any, Dict, List, Union
 
@@ -24,13 +25,24 @@ import yaml
 from yaml import Dumper
 
 
-def numpy_representer(dumper: Dumper, value: Union[np.float32, np.float64]):
-    value = str(round(value, 3))
+def is_sci_notation(number: float) -> bool:
+    pattern = re.compile(r"^[+-]?\d+(\.\d*)?[eE][+-]?\d+$")
+    return bool(pattern.match(str(number)))
+
+
+def float_representer(dumper: Dumper, value: Union[float, np.float32, np.float64]):
+    if is_sci_notation(value):
+        if "." not in value and "e" in value:
+            value = str(value).replace("e", ".0e", 1)
+    else:
+        value = str(round(value, 3))
+
     return dumper.represent_scalar("tag:yaml.org,2002:float", value)
 
 
-yaml.add_representer(np.float32, numpy_representer)
-yaml.add_representer(np.float64, numpy_representer)
+yaml.add_representer(float, float_representer)
+yaml.add_representer(np.float32, float_representer)
+yaml.add_representer(np.float64, float_representer)
 
 
 @lru_cache

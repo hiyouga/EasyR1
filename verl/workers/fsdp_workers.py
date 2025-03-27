@@ -53,7 +53,7 @@ from ..utils.fsdp_utils import (
 from ..utils.model_utils import print_gpu_memory_usage, print_model_size
 from ..utils.tokenizer import get_processor, get_tokenizer
 from ..utils.torch_dtypes import PrecisionType
-from ..utils.torch_functional import get_constant_schedule_with_warmup
+from ..utils.torch_functional import AnyPrecisionAdamW, get_constant_schedule_with_warmup
 from .actor import DataParallelPPOActor
 from .config import ActorConfig, CriticConfig, FSDPConfig, ModelConfig, OptimConfig, RefConfig, WorkerConfig
 from .critic import DataParallelPPOCritic
@@ -277,13 +277,24 @@ class FSDPWorker(Worker):
         print_gpu_memory_usage("After FSDP module init")
 
         if self._is_actor or self._is_critic:
-            self.optimizer = torch.optim.AdamW(
-                self.fsdp_module.parameters(),
-                lr=optim_config.lr,
-                betas=optim_config.betas,
-                weight_decay=optim_config.weight_decay,
-                fused=True,
-            )
+            if optim_config.strategy == "adamw":
+                self.optimizer = torch.optim.AdamW(
+                    self.fsdp_module.parameters(),
+                    lr=optim_config.lr,
+                    betas=optim_config.betas,
+                    weight_decay=optim_config.weight_decay,
+                    fused=True,
+                )
+            elif optim_config.strategy == "adamw_bf16":
+                self.optimizer = AnyPrecisionAdamW(
+                    self.fsdp_module.parameters(),
+                    lr=optim_config.lr,
+                    betas=optim_config.betas,
+                    weight_decay=optim_config.weight_decay,
+                )
+            else:
+                raise NotImplementedError(f"Optimizer {optim_config.strategy} not supported.")
+
             num_warmup_steps = int(optim_config.lr_warmup_ratio * optim_config.training_steps)
             self.lr_scheduler = get_constant_schedule_with_warmup(
                 optimizer=self.optimizer, num_warmup_steps=num_warmup_steps

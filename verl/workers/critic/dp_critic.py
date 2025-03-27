@@ -20,9 +20,9 @@ from collections import defaultdict
 from typing import Any, Dict
 
 import torch
+from ray.experimental.tqdm_ray import tqdm
 from torch import nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from tqdm import tqdm
 
 from ...protocol import DataProto
 from ...trainer import core_algos
@@ -129,7 +129,12 @@ class DataParallelPPOCritic(BasePPOCritic):
                 self.critic_module.parameters(), max_norm=self.config.max_grad_norm
             )
 
-        self.critic_optimizer.step()
+        if not torch.isfinite(grad_norm):
+            print("Gradient norm is not finite. Skip update.")
+        else:
+            self.critic_optimizer.step()
+
+        self.critic_optimizer.zero_grad()
         return grad_norm
 
     @torch.no_grad()
@@ -146,8 +151,12 @@ class DataParallelPPOCritic(BasePPOCritic):
             self.config.micro_batch_size_per_device_for_experience
         )
         values_lst = []
-        for micro_batch in tqdm(micro_batches, "Compute values", disable=(self.rank != 0)):
-            values = self._forward_micro_batch(micro_batch)
+        if self.rank == 0:
+            micro_batches = tqdm(micro_batches, desc="Compute values", position=2)
+
+        for micro_batch in micro_batches:
+            model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
+            values = self._forward_micro_batch(model_inputs)
             values_lst.append(values)
 
         values = torch.concat(values_lst, dim=0)
@@ -171,25 +180,28 @@ class DataParallelPPOCritic(BasePPOCritic):
         mini_batches = data.select(select_keys, non_tensor_select_keys).split(self.config.global_batch_size_per_device)
 
         metrics = defaultdict(list)
-        n = len(mini_batches)
         for _ in range(self.config.ppo_epochs):
-            for i, mini_batch in enumerate(mini_batches):
+            if self.rank == 0:
+                mini_batches = tqdm(mini_batches, desc="Train mini-batches", position=2)
+
+            for mini_batch in mini_batches:
                 gradient_accumulation = (
                     self.config.global_batch_size_per_device // self.config.micro_batch_size_per_device_for_update
                 )
                 micro_batches = mini_batch.split(self.config.micro_batch_size_per_device_for_update)
+                if self.rank == 0:
+                    micro_batches = tqdm(micro_batches, desc="Update critic", position=3)
 
-                self.critic_optimizer.zero_grad()
-                for micro_batch in tqdm(micro_batches, desc=f"Update critic [{i + 1}/{n}]", disable=(self.rank != 0)):
+                for micro_batch in micro_batches:
                     model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
                     responses = model_inputs["responses"]
                     attention_mask = model_inputs["attention_mask"]
                     values = model_inputs["values"]
                     returns = model_inputs["returns"]
                     response_length = responses.size(1)
-                    eos_mask = attention_mask[:, -response_length - 1 : -1]
+                    eos_mask = attention_mask[:, -response_length - 1 : -1]  # shift left for value computation
 
-                    vpreds = self._forward_micro_batch(data)
+                    vpreds = self._forward_micro_batch(model_inputs)
                     vf_loss, vf_clipfrac = core_algos.compute_value_loss(
                         vpreds=vpreds,
                         returns=returns,
@@ -210,5 +222,4 @@ class DataParallelPPOCritic(BasePPOCritic):
                 grad_norm = self._optimizer_step()
                 append_to_dict(metrics, {"critic/grad_norm": grad_norm.detach().item()})
 
-        self.critic_optimizer.zero_grad()
         return metrics

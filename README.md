@@ -17,7 +17,7 @@ EasyR1 is efficient and scalable due to the design of **[HybirdEngine](https://a
 - Supported algorithms
   - GRPO
   - Reinforce++
-  - Remax
+  - ReMax
   - RLOO
 
 - Supported datasets
@@ -26,7 +26,7 @@ EasyR1 is efficient and scalable due to the design of **[HybirdEngine](https://a
 - Supported tricks
   - Padding-free training
   - Resuming from checkpoint
-  - Wandb & SwanLab tracking
+  - Wandb & SwanLab & Mlflow & Tensorboard tracking
 
 ## Requirements
 
@@ -52,11 +52,14 @@ docker pull hiyouga/verl:ngc-th2.6.0-cu120-vllm0.8.2
 
 \* *estimated*
 
-| Method                   | Bits |  1.5B  |   3B   |   7B   |   32B  |
-| ------------------------ | ---- | ------ | ------ | ------ | ------ |
-| GRPO Full Fine-Tuning    |  AMP | 2*24GB | 4*40GB | 8*40GB | 8*80GB |
+| Method                   | Bits |  1.5B  |   3B   |   7B   |   32B   |
+| ------------------------ | ---- | ------ | ------ | ------ | ------- |
+| GRPO Full Fine-Tuning    |  AMP | 2*24GB | 4*40GB | 8*40GB | 16*80GB |
+| GRPO Full Fine-Tuning    | BF16 | 1*24GB | 1*40GB | 4*40GB |  8*80GB |
 
 > [!NOTE]
+> Use `worker.actor.fsdp.torch_dtype=bf16` and `worker.actor.optim.strategy=adamw_bf16` to enable bf16 training.
+>
 > We are working hard to reduce the VRAM in RL training, LoRA support will be integrated in next updates.
 
 ## Tutorial: Run Qwen2.5-VL GRPO on [Geometry3K](https://huggingface.co/datasets/hiyouga/geometry3k) Dataset in Just 3 Steps
@@ -80,7 +83,7 @@ bash examples/qwen2_5_vl_7b_geo3k_grpo.sh
 ### Merge Checkpoint in Hugging Face Format
 
 ```bash
-python3 scripts/model_merger.py --local_dir path_to_your_last_actor_checkpoint
+python3 scripts/model_merger.py --local_dir checkpoints/easy_r1/exp_name/global_step_1/actor
 ```
 
 > [!TIP]
