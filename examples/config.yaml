@@ -7,6 +7,7 @@ data:
   max_prompt_length: 2048
   max_response_length: 2048
   rollout_batch_size: 512
+  val_batch_size: -1
   shuffle: true
   seed: 1
   max_pixels: 4194304
@@ -14,6 +15,7 @@ data:
 
 algorithm:
   adv_estimator: grpo
+  disable_kl: false
   use_kl_loss: true
   kl_penalty: low_var_kl
   kl_coef: 1.0e-2
@@ -74,7 +76,6 @@ trainer:
   experiment_name: qwen2_5_7b_math_grpo
   n_gpus_per_node: 8
   nnodes: 1
-  report_kl: true
   val_freq: 5  # -1 to disable
   val_before_train: true
   val_only: false

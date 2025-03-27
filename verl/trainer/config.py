@@ -41,6 +41,7 @@ class DataConfig:
     max_prompt_length: int = 512
     max_response_length: int = 512
     rollout_batch_size: int = 512
+    val_batch_size: int = -1
     system_prompt: Optional[str] = None
     shuffle: bool = True
     seed: int = 1
@@ -53,6 +54,7 @@ class AlgorithmConfig:
     gamma: float = 1.0
     lam: float = 1.0
     adv_estimator: str = "grpo"
+    disable_kl: bool = False
     use_kl_loss: bool = False
     kl_penalty: str = "kl"
     kl_coef: float = 1e-3
@@ -70,7 +72,6 @@ class TrainerConfig:
     logger: Tuple[str] = ("console", "wandb")
     nnodes: int = 1
     n_gpus_per_node: int = 8
-    report_kl: bool = True
     critic_warmup: int = 0
     val_freq: int = -1
     val_before_train: bool = True
@@ -96,10 +97,10 @@ class PPOConfig:
     def post_init(self):
         self.worker.rollout.prompt_length = self.data.max_prompt_length
         self.worker.rollout.response_length = self.data.max_response_length
+        self.worker.actor.disable_kl = self.algorithm.disable_kl
         self.worker.actor.use_kl_loss = self.algorithm.use_kl_loss
         self.worker.actor.kl_penalty = self.algorithm.kl_penalty
         self.worker.actor.kl_coef = self.algorithm.kl_coef
-        self.worker.actor.report_kl = self.trainer.report_kl
 
     def deep_post_init(self):
         recursive_post_init(self)

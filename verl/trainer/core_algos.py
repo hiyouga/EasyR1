@@ -127,7 +127,7 @@ def compute_gae_advantage_return(
 # NOTE(sgm): this implementation only consider outcome supervision, where the reward is a scalar.
 @torch.no_grad()
 def compute_grpo_outcome_advantage(
-    token_level_rewards: torch.Tensor, eos_mask: torch.Tensor, index: torch.Tensor, epsilon: float = 1e-6
+    token_level_rewards: torch.Tensor, eos_mask: torch.Tensor, index: torch.Tensor, eps: float = 1e-6
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Compute advantage for GRPO, operating only on Outcome reward
@@ -164,7 +164,7 @@ def compute_grpo_outcome_advantage(
             raise ValueError(f"no score in prompt index: {idx}")
 
     for i in range(bsz):
-        scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + epsilon)
+        scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + eps)
 
     scores = scores.unsqueeze(-1).tile([1, response_length]) * eos_mask
     return scores, scores
@@ -172,7 +172,7 @@ def compute_grpo_outcome_advantage(
 
 @torch.no_grad()
 def compute_rloo_outcome_advantage(
-    token_level_rewards: torch.Tensor, eos_mask: torch.Tensor, index: torch.Tensor, epsilon: float = 1e-6
+    token_level_rewards: torch.Tensor, eos_mask: torch.Tensor, index: torch.Tensor
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Compute advantage for RLOO based on https://arxiv.org/abs/2402.14740

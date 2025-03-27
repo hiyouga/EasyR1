@@ -16,7 +16,6 @@ FSDP PPO Trainer with Ray-based single controller.
 This trainer supports model-agonistic model initialization with huggingface
 """
 
-import json
 import os
 import uuid
 from collections import defaultdict
@@ -42,8 +41,9 @@ from ..single_controller.ray.base import create_colocated_worker_cls
 from ..utils import torch_functional as VF
 from ..utils.checkpoint import CHECKPOINT_TRACKER, remove_obsolete_ckpt
 from ..utils.dataset import RLHFDataset, collate_fn
+from ..utils.logger import Tracker
+from ..utils.py_functional import convert_dict_to_str
 from ..utils.seqlen_balancing import get_seqlen_balanced_partitions, log_seqlen_unbalance
-from ..utils.tracking import Tracking, ValGenerationsLogger
 from ..workers.fsdp_workers import FSDPWorker
 from . import core_algos
 from .config import PPOConfig
@@ -236,15 +236,15 @@ class RayPPOTrainer:
         self.resource_pool_manager = resource_pool_manager
         self.use_reward_model = Role.RewardModel in role_worker_mapping
         self.ray_worker_group_cls = ray_worker_group_cls
-        self.val_generations_logger = ValGenerationsLogger()
 
         # define KL control
-        if Role.RefPolicy in role_worker_mapping and config.trainer.report_kl:
+        if Role.RefPolicy in role_worker_mapping and not config.algorithm.disable_kl:
             self.use_reference_policy = True
             self.kl_ctrl = core_algos.get_kl_controller(config.algorithm)
         else:
             self.use_reference_policy = False
             self.kl_ctrl = core_algos.FixedKLController(init_kl_coef=0.0)
+            print("KL is disabled, no KL metrics will be logged. Please set `kl_coef=0` to log KL metrics.")
 
         if config.algorithm.adv_estimator == AdvantageEstimator.GAE:
             self.use_critic = True
@@ -259,9 +259,6 @@ class RayPPOTrainer:
 
         if self.use_critic and config.data.rollout_batch_size % config.worker.critic.global_batch_size != 0:
             raise ValueError("Rollout batch size must be divisible by global batch size.")
-
-        if config.algorithm.kl_coef > 1e-8 and not config.trainer.report_kl:
-            raise ValueError("KL coefficient must be 0 if report_kl is False.")
 
         self._create_dataloader()
 
@@ -312,7 +309,9 @@ class RayPPOTrainer:
         )
         self.val_dataloader = StatefulDataLoader(
             dataset=self.val_dataset,
-            batch_size=len(self.val_dataset),
+            batch_size=len(self.val_dataset)
+            if self.config.data.val_batch_size == -1
+            else self.config.data.val_batch_size,
             shuffle=False,
             num_workers=8,
             collate_fn=collate_fn,
@@ -321,8 +320,9 @@ class RayPPOTrainer:
         )
 
         assert len(self.train_dataloader) >= 1
-        assert len(self.val_dataloader) == 1
+        assert len(self.val_dataloader) >= 1
         print(f"Size of train dataloader: {len(self.train_dataloader)}")
+        print(f"Size of val dataloader: {len(self.val_dataloader)}")
 
         if self.config.trainer.max_steps is not None:
             training_steps = self.config.trainer.max_steps
@@ -348,7 +348,7 @@ class RayPPOTrainer:
         rng.shuffle(samples)
 
         samples = samples[: self.config.trainer.val_generations_to_log]
-        self.val_generations_logger.log(self.config.trainer.logger, samples, self.global_step)
+        self.logger.log_generation(samples, self.global_step)
 
     def _validate(self) -> Dict[str, Any]:
         reward_tensor_lst = []
@@ -538,14 +538,9 @@ class RayPPOTrainer:
         The driver process only need to call the compute functions of the worker group through RPC to construct the PPO dataflow.
         The light-weight advantage computation is done on the driver process.
         """
-        logger = Tracking(
-            project_name=self.config.trainer.project_name,
-            experiment_name=self.config.trainer.experiment_name,
-            default_backend=self.config.trainer.logger,
-            config=self.config.to_dict(),
-        )
-        val_metrics: Optional[Dict[str, Any]] = None
+        self.logger = Tracker(loggers=self.config.trainer.logger, config=self.config.to_dict())
         self.global_step = 0
+        val_metrics: Optional[Dict[str, Any]] = None
 
         # load checkpoint before doing anything
         self._load_checkpoint()
@@ -554,8 +549,7 @@ class RayPPOTrainer:
         # currently, we only support validation using the reward_function.
         if self.val_reward_fn is not None and self.config.trainer.val_before_train:
             val_metrics = self._validate()
-            print(f"Initial validation metrics: {json.dumps(val_metrics, indent=2)}")
-            logger.log(data=val_metrics, step=self.global_step)
+            self.logger.log(data=val_metrics, step=self.global_step)
             if self.config.trainer.val_only:
                 return
 
@@ -699,8 +693,7 @@ class RayPPOTrainer:
                 metrics.update(compute_timing_metrics(batch=batch, timing_raw=timing_raw))
                 metrics.update(compute_throughout_metrics(batch=batch, timing_raw=timing_raw, n_gpus=n_gpus))
 
-                # TODO: make a canonical logger that supports various backend
-                logger.log(data=metrics, step=self.global_step)
+                self.logger.log(data=metrics, step=self.global_step)
 
         # perform validation after training
         if self.val_reward_fn is not None:
@@ -710,9 +703,9 @@ class RayPPOTrainer:
                 or self.global_step % self.config.trainer.val_freq != 0
             ):
                 val_metrics = self._validate()
-                logger.log(data=val_metrics, step=self.global_step)
+                self.logger.log(data=val_metrics, step=self.global_step)
 
-            print(f"Final validation metrics: {json.dumps(val_metrics, indent=2)}")
+            print(f"Final validation metrics: {convert_dict_to_str(val_metrics)}")
 
         if self.config.trainer.save_freq <= 0 or self.global_step % self.config.trainer.save_freq != 0:
             self._save_checkpoint()

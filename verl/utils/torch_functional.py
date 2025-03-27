@@ -66,9 +66,9 @@ def log_probs_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> torch.T
     return output.view(*batch_dim)
 
 
-def masked_mean(values: torch.Tensor, mask: torch.Tensor, dim: int = None) -> torch.Tensor:
+def masked_mean(values: torch.Tensor, mask: torch.Tensor, dim: int = None, eps: float = 1e-8) -> torch.Tensor:
     """Compute mean of tensor with a masked values."""
-    return (values * mask).sum(dim=dim) / mask.sum(dim=dim)
+    return (values * mask).sum(dim=dim) / (mask.sum(dim=dim) + eps)
 
 
 def masked_var(values: torch.Tensor, mask: torch.Tensor, unbiased: bool = True) -> torch.Tensor:
@@ -79,7 +79,8 @@ def masked_var(values: torch.Tensor, mask: torch.Tensor, unbiased: bool = True) 
     if unbiased:
         mask_sum = mask.sum()
         if mask_sum <= 1:
-            raise ValueError("The sum of the mask is less than one, which can cause a division by zero.")
+            print("The sum of the mask is less than one, which can cause a division by zero.")
+            return variance
 
         bessel_correction = mask_sum / (mask_sum - 1)
         variance = variance * bessel_correction
@@ -87,10 +88,10 @@ def masked_var(values: torch.Tensor, mask: torch.Tensor, unbiased: bool = True) 
     return variance
 
 
-def masked_whiten(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+def masked_whiten(values: torch.Tensor, mask: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
     """Whiten values with masked values."""
     mean, var = masked_mean(values, mask), masked_var(values, mask)
-    return (values - mean) * torch.rsqrt(var + 1e-8)
+    return (values - mean) * torch.rsqrt(var + eps)
 
 
 def get_eos_mask(response_ids: torch.Tensor, eos_token_id: Union[int, List[int]] = 2, dtype: torch.dtype = torch.long):

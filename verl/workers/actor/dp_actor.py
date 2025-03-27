@@ -210,7 +210,7 @@ class DataParallelPPOActor(BasePPOActor):
 
         temperature = data.meta_info["temperature"]  # temperature must be in the data.meta_info to avoid slient error
         select_keys = ["responses", "input_ids", "attention_mask", "position_ids", "old_log_probs", "advantages"]
-        if self.config.use_kl_loss and self.config.report_kl:
+        if self.config.use_kl_loss and not self.config.disable_kl:
             select_keys.append("ref_log_probs")
 
         if "multi_modal_inputs" in data.non_tensor_batch.keys():
