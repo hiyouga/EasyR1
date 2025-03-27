@@ -33,8 +33,8 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = False) -> Dict[str
 
     max_response_length = batch.batch["responses"].size(-1)
 
-    prompt_mask = batch.batch["attention_mask"][:, :-max_response_length]
-    response_mask = batch.batch["attention_mask"][:, -max_response_length:]
+    prompt_mask = batch.batch["attention_mask"][:, :-max_response_length].bool()
+    response_mask = batch.batch["attention_mask"][:, -max_response_length:].bool()
 
     max_prompt_length = prompt_mask.size(-1)
     prompt_length = prompt_mask.sum(-1).float()
