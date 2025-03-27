@@ -161,7 +161,8 @@ class RLHFDataset(Dataset):
             max_pixels=None,
             min_pixels=None,
             video_frames=4,
-            worker_id=None
+            worker_id=None,
+            time_series_encoder=None,
     ):
         try:
             self.tokenizer = tokenizer
@@ -174,6 +175,7 @@ class RLHFDataset(Dataset):
             self.min_pixels = min_pixels
             self.video_frames = video_frames
             self.worker_id = worker_id or os.getpid()
+            self.time_series_encoder = time_series_encoder
 
             logger.info(f"Worker {self.worker_id}: Initializing RLHFDataset with data_path={data_path}")
 
@@ -289,12 +291,45 @@ class RLHFDataset(Dataset):
                         for _ in range(self.video_frames):
                             processed_images.append(Image.new("RGB", (224, 224), (255, 255, 255)))
 
+            # Process time series if they exist
+            processed_ts = []
+            if "time-series" in row_dict and row_dict["time-series"]:
+                logger.debug(f"Worker {self.worker_id}: Processing time series for item {index}")
+                for i, ts_item in enumerate(row_dict["time-series"]):
+                    try:
+                        if isinstance(ts_item, str):
+                            full_path = os.path.join(self.data_dir, ts_item)
+                            logger.debug(f"Worker {self.worker_id}: Loading time series {i} from {full_path}")
+
+                            if not os.path.exists(full_path):
+                                logger.warning(f"Worker {self.worker_id}: Time series file not found: {full_path}")
+                                ts_data = np.zeros((100, 1))
+                            else:
+                                ts_data = np.load(full_path)
+                        else:
+                            # Assume it's already np array or similar
+                            ts_data = ts_item
+
+                        # Process the time series with encoder
+                        encoded_ts = self.time_series_encoder(ts_data)
+                        processed_ts.append(encoded_ts)
+
+                    except Exception as e:
+                        logger.error(f"Worker {self.worker_id}: Error processing time series {i} for item {index}: {str(e)}")
+                        logger.error(traceback.format_exc())
+                        # TODO: output_size need to be fed
+                        processed_ts.append(torch.zeros(self.time_series_encoder.output_size))  # Add dummy tensor with proper size
+
+                    
             if "images" in row_dict and len(row_dict["images"]) > 0:
                 data_source = row_dict["images"][0].split("/")[0]
                 dataset = row_dict["images"][0].split("/")[1]
             elif "videos" in row_dict and len(row_dict["videos"]) > 0:
                 data_source = row_dict["videos"][0].split("/")[0]
                 dataset = row_dict["videos"][0].split("/")[1]
+            elif "time-series" in row_dict and len(row_dict["time-series"]) > 0:
+                data_source = row_dict["time-series"][0].split("/")[0]
+                dataset = row_dict["time-series"][0].split("/")[1]
             else:
                 data_source = "text"
                 dataset = "text"
@@ -307,6 +342,9 @@ class RLHFDataset(Dataset):
                 processed_images = [Image.new("RGB", (224, 224), (255, 255, 255))]
 
             row_dict["images"] = processed_images
+
+            if processed_ts:
+                row_dict["time-series"] = processed_ts
 
             # Replace all image tokens in prompt with placeholders
             prompt = prompt.replace("<video>", "<image>")
