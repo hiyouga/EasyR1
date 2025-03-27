@@ -35,6 +35,13 @@ class GenerationLogger(ABC):
 
 
 @dataclass
+class ConsoleGenerationLogger(GenerationLogger):
+    def log(self, samples: List[Tuple[str, str, float]], step: int) -> None:
+        for inp, out, score in samples:
+            print(f"[prompt] {inp}\n[output] {out}\n[score] {score}\n")
+
+
+@dataclass
 class WandbGenerationLogger(GenerationLogger):
     def log(self, samples: List[Tuple[str, str, float]], step: int) -> None:
         # Create column names for all samples
@@ -71,15 +78,21 @@ class SwanlabGenerationLogger(GenerationLogger):
         swanlab.log({"val/generations": swanlab_text_list}, step=step)
 
 
+GEN_LOGGERS = {
+    "console": ConsoleGenerationLogger,
+    "wandb": WandbGenerationLogger,
+    "swanlab": SwanlabGenerationLogger,
+}
+
+
 @dataclass
 class AggregateGenerationsLogger:
     def __init__(self, loggers: List[str]):
         self.loggers: List[GenerationLogger] = []
-        if "wandb" in loggers:
-            self.loggers.append(WandbGenerationLogger())
 
-        if "swanlab" in loggers:
-            self.loggers.append(SwanlabGenerationLogger())
+        for logger in loggers:
+            if logger in GEN_LOGGERS:
+                self.loggers.append(GEN_LOGGERS[logger]())
 
     def log(self, samples: List[Tuple[str, str, float]], step: int) -> None:
         for logger in self.loggers:

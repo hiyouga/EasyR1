@@ -435,7 +435,7 @@ class FSDPWorker(Worker):
             delta_time = timer.last
             global_num_tokens = data.meta_info["global_token_num"]
             estimated_flops, promised_flops = self.flops_counter.estimate_flops(global_num_tokens, delta_time)
-            metrics["perf/mfu/actor"] = (
+            metrics["perf/mfu_actor"] = (
                 estimated_flops * self.config.actor.ppo_epochs / (promised_flops * self.world_size)
             )
             metrics["perf/max_memory_allocated_gb"] = (
@@ -587,7 +587,7 @@ class FSDPWorker(Worker):
             delta_time = timer.last
             global_num_tokens = data.meta_info["global_token_num"]
             estimated_flops, promised_flops = self.flops_counter.estimate_flops(global_num_tokens, delta_time)
-            metrics["perf/mfu/critic"] = (
+            metrics["perf/mfu_critic"] = (
                 estimated_flops * self.config.actor.ppo_epochs / (promised_flops * self.world_size)
             )
 
