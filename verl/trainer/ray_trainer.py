@@ -634,7 +634,7 @@ class RayPPOTrainer:
 
                     with _timer("adv", timing_raw):
                         # apply kl penalty if available
-                        if not self.config.algorithm.use_kl_loss:  # apply kl penalty to reward
+                        if not self.config.algorithm.use_kl_loss and self.use_reference_policy:  # apply kl penalty to reward
                             batch, kl_metrics = apply_kl_penalty(
                                 batch, kl_ctrl=self.kl_ctrl, kl_penalty=self.config.algorithm.kl_penalty
                             )
