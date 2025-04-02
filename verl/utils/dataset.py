@@ -373,7 +373,14 @@ class RLHFDataset(Dataset):
         prompt = prompt.replace("<image>", "<|vision_start|><|image_pad|><|vision_end|>")
         image_count_in_prompt = prompt.count("<|vision_start|>")
         assert image_count == image_count_in_prompt, f"Image count mismatch: {image_count} != {image_count_in_prompt}"
-        model_inputs = self.processor(row_dict["multi_modal_data"]["image"], prompt, return_tensors="pt")
+        try:
+            model_inputs = self.processor(row_dict["multi_modal_data"]["image"], prompt, return_tensors="pt")
+        except Exception as e:
+            logger.error(f"Worker {self.worker_id}: Error processing model inputs: {str(e)}")
+            # remove image
+            row_dict["images"] = [Image.new("RGB", (224, 224), (255, 255, 255))]
+            row_dict["multi_modal_data"]["image"] = row_dict["images"]
+            model_inputs = self.processor(row_dict["multi_modal_data"]["image"], prompt, return_tensors="pt")
         input_ids = model_inputs.pop("input_ids")[0]
         attention_mask = model_inputs.pop("attention_mask")[0]
 

@@ -19,10 +19,10 @@ algorithm:
 worker:
   actor:
     global_batch_size: 128
-    micro_batch_size_per_device_for_update: 4
-    micro_batch_size_per_device_for_experience: 16
-    max_grad_norm: 1.0
-    use_kl_loss: false
+    micro_batch_size_per_device_for_update: 2
+    micro_batch_size_per_device_for_experience: 8
+    max_grad_norm: 10.0
+    use_kl_loss: true
     kl_loss_coef: 1.0e-3
     kl_loss_type: low_var_kl
     padding_free: true
@@ -33,9 +33,9 @@ worker:
       trust_remote_code: false
       freeze_vision_tower: false
     optim:
-      lr: 5.0e-7
+      lr: 5.0e-6
       betas: [0.9, 0.95]
-      weight_decay: 1.0e-3
+      weight_decay: 1.0e-2
     fsdp:
       enable_full_shard: true
       enable_cpu_offload: false
@@ -47,10 +47,10 @@ worker:
   rollout:
     temperature: 1.0
     n: 5
-    gpu_memory_utilization: 0.5
+    gpu_memory_utilization: 0.3
     enforce_eager: false
     enable_chunked_prefill: false
-    tensor_parallel_size: 4
+    tensor_parallel_size: 2
     limit_images: 0
     val_override_config:
       temperature: 0.5

@@ -25,6 +25,7 @@ def apply_ulysses_patch(model_type: str) -> None:
     elif model_type in ("qwen2_vl", "qwen2_5_vl"):
         from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import Qwen2_5_VLFlashAttention2
         from transformers.models.qwen2_vl.modeling_qwen2_vl import Qwen2VLFlashAttention2
+        from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import Qwen2_5_VLModel
 
         Qwen2VLFlashAttention2.forward = qwen2_vl_attn_forward
         Qwen2_5_VLFlashAttention2.forward = qwen2_vl_attn_forward

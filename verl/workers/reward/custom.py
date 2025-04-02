@@ -148,14 +148,18 @@ class CustomRewardManager:
                 json_data = extract_json_from_response(response_str)
                 if json_data:
                     pred_bboxes = []
-                    for item in json_data:
-                        if isinstance(item, dict) and "bbox_2d" in item:
-                            pred_bboxes.append(item["bbox_2d"])
 
-                    if pred_bboxes:
-                        iou_score = calculate_bbox_iou(pred_bboxes, seg_mask, box)
-                        iou_scores.append(iou_score)
-                    else:
+                    try:
+                        for item in json_data:
+                            if isinstance(item, dict) and "bbox_2d" in item:
+                                pred_bboxes.append(item["bbox_2d"])
+
+                        if pred_bboxes:
+                            iou_score = calculate_bbox_iou(pred_bboxes, seg_mask, box)
+                            iou_scores.append(iou_score)
+                        else:
+                            iou_scores.append(0.0)
+                    except:
                         iou_scores.append(0.0)
                 else:
                     iou_scores.append(0.0)

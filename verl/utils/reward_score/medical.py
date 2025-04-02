@@ -66,7 +66,7 @@ def extract_json_from_response(text):
             cleaned = match.strip().replace("'", "\"")
             parsed_json = ast.literal_eval(cleaned)
             return parsed_json
-        except (SyntaxError, ValueError):
+        except:
             continue
 
     return None
@@ -223,7 +223,7 @@ def evaluate_bbox_format(predict_str):
                 cleaned = json_str.replace("'", "\"")
                 parsed_json = ast.literal_eval(cleaned)
                 format_score += 0.1  # Only 10% for requiring fallback parsing
-            except (SyntaxError, ValueError):
+            except:
                 return format_score  # Failed to parse
 
         # Check if it's a list of objects
