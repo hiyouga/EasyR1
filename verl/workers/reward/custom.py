@@ -14,7 +14,7 @@
 
 
 from collections import defaultdict
-from typing import Any, Callable, Dict, Tuple, TypedDict
+from typing import Callable, Dict, List, Tuple, TypedDict
 
 import torch
 from transformers import PreTrainedTokenizer
@@ -39,7 +39,7 @@ class CustomRewardManager:
         else:
             raise NotImplementedError()
 
-    def __call__(self, data: DataProto) -> Tuple[torch.Tensor, Dict[str, Any]]:
+    def __call__(self, data: DataProto) -> Tuple[torch.Tensor, Dict[str, List[float]]]:
         reward_tensor = torch.zeros_like(data.batch["responses"], dtype=torch.float32)
         reward_metrics = defaultdict(list)
         for i in range(len(data)):
@@ -49,7 +49,7 @@ class CustomRewardManager:
             valid_response_length = response_mask.sum()
             valid_response_ids = response_ids[:valid_response_length]
 
-            response_str = self.tokenizer.decode(valid_response_ids, skip_special_tokens=True)
+            response_str = self.tokenizer.decode(valid_response_ids, skip_special_tokens=False)
             ground_truth = data_item.non_tensor_batch["ground_truth"]
 
             score = self.compute_score(response_str, ground_truth)

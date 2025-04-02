@@ -94,27 +94,29 @@ def masked_whiten(values: torch.Tensor, mask: torch.Tensor, eps: float = 1e-8) -
     return (values - mean) * torch.rsqrt(var + eps)
 
 
-def get_eos_mask(response_ids: torch.Tensor, eos_token_id: Union[int, List[int]] = 2, dtype: torch.dtype = torch.long):
+def get_response_mask(
+    response_ids: torch.Tensor, eos_token_id: Union[int, List[int]] = 2, dtype: torch.dtype = torch.long
+):
     """Get the mask for the response ids, the mask will be 0 after the first eos token.
 
     eos_token_id can be int or list: 1 or [1, 2].
     ```
     e.g. eos_token = 1
-    response_ids: [0, 0, 2, 4, 3, 5, 1, 0, 0]
-    eos_mask:     [1, 1, 1, 1, 1, 1, 1, 0, 0]
+    response_ids:  [0, 0, 2, 4, 3, 5, 1, 0, 0]
+    response_mask: [1, 1, 1, 1, 1, 1, 1, 0, 0]
     ```
     """
     if isinstance(eos_token_id, int):
         eos_token_id = [eos_token_id]
 
-    eos_mask = torch.zeros_like(response_ids, dtype=torch.bool)
+    response_mask = torch.zeros_like(response_ids, dtype=torch.bool)
     for token_id in eos_token_id:
-        eos_mask |= response_ids.eq(token_id)
+        response_mask |= response_ids.eq(token_id)
 
-    eos_mask = eos_mask.long()
-    eos_mask = (torch.cumsum(eos_mask, dim=1) - eos_mask).bool()
-    eos_mask = torch.logical_not(eos_mask).to(dtype)
-    return eos_mask
+    response_mask = response_mask.long()
+    response_mask = (torch.cumsum(response_mask, dim=1) - response_mask).bool()
+    response_mask = torch.logical_not(response_mask).to(dtype)
+    return response_mask
 
 
 def pad_2d_list_to_length(

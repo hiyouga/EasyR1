@@ -30,6 +30,7 @@ def math_acc_reward(predict_str: str, ground_truth: str) -> float:
 
 
 def math_compute_score(predict_str: str, ground_truth: str) -> Dict[str, float]:
+    predict_str = re.sub(r"\s*(<|>|/)\s*", r"\1", predict_str)  # handle qwen2.5vl-32b format
     format = math_format_reward(predict_str)
     accuracy = math_acc_reward(predict_str, ground_truth)
     return {

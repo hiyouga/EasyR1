@@ -250,18 +250,21 @@ class DataParallelPPOActor(BasePPOActor):
 
                     # all return: (bsz, response_length)
                     log_probs = self._forward_micro_batch(model_inputs, temperature=temperature)
+                    entropy_loss = -VF.masked_mean(log_probs, response_mask)  # estimator of entropy loss
 
-                    pg_loss, pg_clipfrac, ppo_kl = core_algos.compute_policy_loss(
+                    pg_loss, pg_clipfrac_higher, pg_clipfrac_lower, ppo_kl = core_algos.compute_policy_loss(
                         old_log_probs=old_log_probs,
                         log_probs=log_probs,
                         advantages=advantages,
-                        eos_mask=response_mask,
-                        cliprange=self.config.clip_ratio,
+                        response_mask=response_mask,
+                        clip_ratio_low=self.config.clip_ratio_low,
+                        clip_ratio_high=self.config.clip_ratio_high,
+                        clip_ratio_dual=self.config.clip_ratio_dual,
                     )
                     if "ref_log_probs" in model_inputs:
                         ref_log_probs = model_inputs["ref_log_probs"]
                         # compute kl loss
-                        kld = core_algos.kl_penalty(
+                        kld = core_algos.compute_kl(
                             log_probs=log_probs,
                             ref_log_probs=ref_log_probs,
                             kl_penalty=self.config.kl_penalty,
@@ -276,7 +279,9 @@ class DataParallelPPOActor(BasePPOActor):
 
                     batch_metrics = {
                         "actor/pg_loss": pg_loss.detach().item(),
-                        "actor/pg_clipfrac": pg_clipfrac.detach().item(),
+                        "actor/pg_clipfrac_higher": pg_clipfrac_higher.detach().item(),
+                        "actor/pg_clipfrac_lower": pg_clipfrac_lower.detach().item(),
+                        "actor/entropy_loss": entropy_loss.detach().item(),
                         "actor/ppo_kl": ppo_kl.detach().item(),
                     }
                     append_to_dict(metrics, batch_metrics)

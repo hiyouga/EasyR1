@@ -23,7 +23,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum, auto
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 
 import numpy as np
 import ray
@@ -48,9 +48,6 @@ from ..workers.fsdp_workers import FSDPWorker
 from . import core_algos
 from .config import PPOConfig
 from .metrics import compute_data_metrics, compute_throughout_metrics, compute_timing_metrics, reduce_metrics
-
-
-WorkerType = Type[Worker]
 
 
 class Role(IntEnum):
@@ -132,11 +129,11 @@ def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.KLController, kl_penal
 
     # compute kl between ref_policy and current policy
     if "ref_log_probs" in data.batch.keys():
-        kld = core_algos.kl_penalty(
+        kld = core_algos.compute_kl(
             data.batch["old_log_probs"], data.batch["ref_log_probs"], kl_penalty=kl_penalty
         )  # (batch_size, response_length)
         kld = kld * response_mask
-        beta = kl_ctrl.value
+        beta = kl_ctrl.kl_coef
     else:
         beta = 0
         kld = torch.zeros_like(response_mask, dtype=torch.float32)
@@ -161,25 +158,21 @@ def compute_advantage(data: DataProto, adv_estimator: AdvantageEstimator, gamma:
     if adv_estimator == AdvantageEstimator.GAE:
         values = data.batch["values"]
         advantages, returns = core_algos.compute_gae_advantage_return(
-            token_level_rewards=token_level_rewards, values=values, eos_mask=response_mask, gamma=gamma, lam=lam
+            token_level_rewards, values, response_mask, gamma, lam
         )
     elif adv_estimator == AdvantageEstimator.GRPO:
-        advantages, returns = core_algos.compute_grpo_outcome_advantage(
-            token_level_rewards=token_level_rewards, eos_mask=response_mask, index=index
-        )
+        advantages, returns = core_algos.compute_grpo_outcome_advantage(token_level_rewards, response_mask, index)
     elif adv_estimator == AdvantageEstimator.REINFORCE_PLUS_PLUS:
         advantages, returns = core_algos.compute_reinforce_plus_plus_outcome_advantage(
-            token_level_rewards=token_level_rewards, eos_mask=response_mask, gamma=gamma
+            token_level_rewards, response_mask, gamma
         )
     elif adv_estimator == AdvantageEstimator.REMAX:
         reward_baselines = data.batch["reward_baselines"]
         advantages, returns = core_algos.compute_remax_outcome_advantage(
-            token_level_rewards=token_level_rewards, reward_baselines=reward_baselines, eos_mask=response_mask
+            token_level_rewards, reward_baselines, response_mask
         )
     elif adv_estimator == AdvantageEstimator.RLOO:
-        advantages, returns = core_algos.compute_rloo_outcome_advantage(
-            token_level_rewards=token_level_rewards, eos_mask=response_mask, index=index
-        )
+        advantages, returns = core_algos.compute_rloo_outcome_advantage(token_level_rewards, response_mask, index)
     else:
         raise NotImplementedError
 
@@ -206,11 +199,11 @@ class RayPPOTrainer:
         config: PPOConfig,
         tokenizer: PreTrainedTokenizer,
         processor: Optional[ProcessorMixin],
-        role_worker_mapping: dict[Role, WorkerType],
+        role_worker_mapping: dict[Role, Type[Worker]],
         resource_pool_manager: ResourcePoolManager,
-        ray_worker_group_cls: RayWorkerGroup = RayWorkerGroup,
-        reward_fn: Callable = None,
-        val_reward_fn: Callable = None,
+        ray_worker_group_cls: Type[RayWorkerGroup] = RayWorkerGroup,
+        reward_fn: Optional[Callable[[DataProto], Tuple[torch.Tensor, Dict[str, List[float]]]]] = None,
+        val_reward_fn: Optional[Callable[[DataProto], Tuple[torch.Tensor, Dict[str, List[float]]]]] = None,
     ):
         self.tokenizer = tokenizer
         self.processor = processor
@@ -253,6 +246,9 @@ class RayPPOTrainer:
 
         if self.use_critic and config.data.rollout_batch_size % config.worker.critic.global_batch_size != 0:
             raise ValueError("Rollout batch size must be divisible by global batch size.")
+
+        if config.algorithm.adv_estimator in (AdvantageEstimator.GRPO, AdvantageEstimator.RLOO) and config.worker.rollout.n == 1:
+            raise ValueError("GRPO and RLOO algorithm need `config.worker.rollout.n > 1`.")
 
         self._create_dataloader()
 
@@ -576,7 +572,8 @@ class RayPPOTrainer:
                     if self.config.algorithm.adv_estimator == "remax":
                         with _timer("gen_max", timing_raw):
                             gen_baseline_batch = deepcopy(gen_batch)
-                            gen_baseline_batch.meta_info["temperature"] = 0.0
+                            gen_baseline_batch.meta_info["temperature"] = 0
+                            gen_baseline_batch.meta_info["n"] = 1
                             gen_baseline_output = self.actor_rollout_wg.generate_sequences(gen_baseline_batch)
 
                             batch = batch.union(gen_baseline_output)
@@ -634,7 +631,8 @@ class RayPPOTrainer:
 
                     with _timer("adv", timing_raw):
                         # apply kl penalty if available
-                        if not self.config.algorithm.use_kl_loss and self.use_reference_policy:  # apply kl penalty to reward
+                        if not self.config.algorithm.use_kl_loss and self.use_reference_policy:
+                            # apply kl penalty to reward
                             batch, kl_metrics = apply_kl_penalty(
                                 batch, kl_ctrl=self.kl_ctrl, kl_penalty=self.config.algorithm.kl_penalty
                             )

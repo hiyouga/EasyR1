@@ -199,14 +199,14 @@ class DataParallelPPOCritic(BasePPOCritic):
                     values = model_inputs["values"]
                     returns = model_inputs["returns"]
                     response_length = responses.size(1)
-                    eos_mask = attention_mask[:, -response_length - 1 : -1]  # shift left for value computation
+                    action_mask = attention_mask[:, -response_length - 1 : -1]  # shift left for value computation
 
                     vpreds = self._forward_micro_batch(model_inputs)
                     vf_loss, vf_clipfrac = core_algos.compute_value_loss(
                         vpreds=vpreds,
                         returns=returns,
                         values=values,
-                        eos_mask=eos_mask,
+                        action_mask=action_mask,
                         cliprange_value=self.config.cliprange_value,
                     )
                     loss = vf_loss / gradient_accumulation
@@ -215,7 +215,7 @@ class DataParallelPPOCritic(BasePPOCritic):
                     batch_metrics = {
                         "critic/vf_loss": vf_loss.detach().item(),
                         "critic/vf_clipfrac": vf_clipfrac.detach().item(),
-                        "critic/vpred_mean": VF.masked_mean(vpreds, eos_mask).detach().item(),
+                        "critic/vpred_mean": VF.masked_mean(vpreds, action_mask).detach().item(),
                     }
                     append_to_dict(metrics, batch_metrics)
 

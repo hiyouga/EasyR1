@@ -144,6 +144,12 @@ These features are temporarily disabled for now, we plan to fix them one-by-one 
 
 👋 Join our [WeChat group](assets/wechat.jpg).
 
+## FAQs
+
+> RuntimeError: CUDA Error: out of memory at /workspace/csrc/cumem_allocator.cpp:62
+
+Reduce the `worker.rollout.gpu_memory_utilization`.
+
 ## Citation
 
 Core contributors: [Yaowei Zheng](https://github.com/hiyouga), [Junting Lu](https://github.com/AL-377), [Shenzhi Wang](https://github.com/Shenzhi-Wang), [Zhangchi Feng](https://github.com/BUAADreamer), [Dongdong Kuang](https://github.com/Kuangdd01) and Yuwen Xiong
