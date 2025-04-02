@@ -17,17 +17,18 @@ Critic config
 
 from dataclasses import dataclass, field
 
-from verl.workers.actor.config import FSDPConfig, ModelConfig, OffloadConfig, OptimConfig
+from ..actor.config import FSDPConfig, ModelConfig, OffloadConfig, OptimConfig
 
 
 @dataclass
 class CriticConfig:
     strategy: str = "fsdp"
     global_batch_size: int = 256
-    micro_batch_size_per_device_for_update: int = field(default=-1, init=False)
-    micro_batch_size_per_device_for_experience: int = field(default=-1, init=False)
+    micro_batch_size_per_device_for_update: int = 4
+    micro_batch_size_per_device_for_experience: int = 16
     max_grad_norm: float = 1.0
     cliprange_value: float = 0.5
+    ppo_epochs: int = 1
     padding_free: bool = False
     ulysses_sequence_parallel_size: int = 1
     model: ModelConfig = field(default_factory=ModelConfig)

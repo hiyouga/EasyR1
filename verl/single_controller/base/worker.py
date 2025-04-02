@@ -21,8 +21,8 @@ from dataclasses import dataclass
 
 import ray
 
-from verl.single_controller.base.decorator import Dispatch, Execute, register
-from verl.single_controller.base.register_center.ray import create_worker_group_register_center
+from .decorator import Dispatch, Execute, register
+from .register_center.ray import create_worker_group_register_center
 
 
 @dataclass
@@ -149,6 +149,7 @@ class Worker(WorkerHelper):
             if val is not None:
                 # print(f"set {key} to {val}")
                 os.environ[key] = str(val)
+
         os.environ["REDIS_STORE_SERVER_HOST"] = (
             str(self._master_addr).replace("[", "").replace("]", "") if self._master_addr else ""
         )

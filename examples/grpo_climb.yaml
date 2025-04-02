@@ -2,6 +2,8 @@ data:
   train_files: /mnt/8T/high_modality/geom_train.jsonl
   val_files: /mnt/8T/high_modality/geom_valid.jsonl
   prompt_key: problem
+  answer_key: answer
+  image_key: images
   max_prompt_length: 2048
   max_response_length: 2048
   rollout_batch_size: 64

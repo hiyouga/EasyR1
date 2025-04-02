@@ -21,18 +21,16 @@ import threading
 import time
 from typing import Any, Callable, Dict, List
 
-from verl.single_controller.base.decorator import (
-    MAGIC_ATTR,
-    Dispatch,
-    get_predefined_dispatch_fn,
-    get_predefined_execute_fn,
-)
+from .decorator import MAGIC_ATTR, Dispatch, get_predefined_dispatch_fn, get_predefined_execute_fn
 
 
 class ResourcePool:
+    """The resource pool with meta info such as world_size."""
+
     def __init__(self, process_on_nodes=None, max_collocate_count: int = 10, n_gpus_per_node=8) -> None:
         if process_on_nodes is None:
             process_on_nodes = []
+
         self._store = process_on_nodes
         self.max_collocate_count = max_collocate_count
         self.n_gpus_per_node = n_gpus_per_node  # this is left for future huawei GPU that contains 16 GPUs per node
@@ -73,12 +71,6 @@ class ClassWithInitArgs:
         self.args = args
         self.kwargs = kwargs
 
-    # def add_arg(self, arg):
-    #     self.args += (arg,)
-
-    # def add_kwarg(self, key, value):
-    #     self.kwargs[key] = value
-
     def __call__(self) -> Any:
         return self.cls(*self.args, **self.kwargs)
 
@@ -91,10 +83,13 @@ def check_workers_alive(workers: List, is_alive: Callable, gap_time: float = 1) 
             if not is_alive(worker):
                 logging.warning(f"Worker {worker} is not alive, sending signal to main thread")
                 signal.raise_signal(signal.SIGABRT)
+
         time.sleep(gap_time)
 
 
 class WorkerGroup:
+    """A group of workers"""
+
     def __init__(self, resource_pool: ResourcePool, **kwargs) -> None:
         self._is_init_with_detached_workers = True if resource_pool is None else False
 
@@ -136,14 +131,10 @@ class WorkerGroup:
     def world_size(self):
         return len(self._workers)
 
-    # execute_all_async and execute_rank_zero_async should be implemented by RayWorkerGroup, TorchRPCWorkerGroup,
-    # MegatronWorkerGroup, XperfWorkerGroup should skip
-
     def _bind_worker_method(self, user_defined_cls, func_generator):
         """
         Bind the worker method to the WorkerGroup
         """
-
         for method_name in dir(user_defined_cls):
             try:
                 method = getattr(user_defined_cls, method_name)

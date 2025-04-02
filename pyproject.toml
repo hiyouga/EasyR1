@@ -4,17 +4,25 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "verl"
-dynamic = ["version", "dependencies", "optional-dependencies", "readme", "license"]
-requires-python = ">=3.8"
+dynamic = [
+    "version",
+    "dependencies",
+    "optional-dependencies",
+    "requires-python",
+    "authors",
+    "description",
+    "readme",
+    "license"
+]
 
 [tool.ruff]
-target-version = "py38"
+target-version = "py39"
 line-length = 119
 indent-width = 4
 
 [tool.ruff.lint]
 ignore = ["C901", "E501", "E741", "W605", "C408"]
-select = ["C", "E", "F", "I", "W"]
+select = ["C", "E", "F", "I", "W", "RUF022"]
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["E402", "F401", "F403", "F811"]

@@ -238,7 +238,7 @@ class Gather(torch.autograd.Function):
         )
 
 
-def gather_outpus_and_unpad(
+def gather_outputs_and_unpad(
     x: Tensor,
     gather_dim: int,
     unpad_dim: int = None,

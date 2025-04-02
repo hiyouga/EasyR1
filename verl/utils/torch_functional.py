@@ -16,14 +16,14 @@ Contain small torch utilities
 """
 
 import math
-from typing import List, Literal, Union
+from typing import Dict, List, Literal, Optional, Union
 
 import torch
 import torch.distributed
 import torch.nn.functional as F
+from tensordict import TensorDict
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR
-from transformers import PreTrainedTokenizer
 
 
 try:
@@ -34,101 +34,69 @@ except ImportError:
     FLAH_ATTN_CROSS_ENTROPY_LOSS_AVAILABLE = False
 
 
-def logprobs_from_logits(logits, labels):
-    """
-    See: https://github.com/pytorch/pytorch/issues/563#issuecomment-330103591
-    """
-    if FLAH_ATTN_CROSS_ENTROPY_LOSS_AVAILABLE:
-        batch_dim = logits.shape[:-1]
-        last_dim = logits.shape[-1]
-        logits = logits.reshape(-1, last_dim)
-        labels = labels.reshape(-1)
-        output = logprobs_from_logits_flash_attn(logits, labels)
-        output = output.view(*batch_dim)
-    else:
-        output = logprobs_from_logits_v2(logits, labels)
-    return output
+@torch.compiler.disable()
+def logprobs_from_logits_flash_attn(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+    output = cross_entropy_loss(logits, labels, inplace_backward=True)
+    if not isinstance(output, tuple):
+        raise ValueError(
+            "please make sure flash-attn>=2.4.3 where cross_entropy_loss returns Tuple[losses, z_losses]."
+        )
 
-
-def logprobs_from_logits_flash_attn(logits, labels):
-    output = cross_entropy_loss(logits, labels)
-    assert isinstance(output, tuple), (
-        "please make sure flash-attn>=2.4.3 where cross_entropy_loss returns Tuple[losses, z_losses]."
-    )
     return -output[0]
 
 
-def logprobs_from_logits_v2(logits: torch.FloatTensor, labels):
+def logprobs_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
     """
-    A memory efficient implementation of logprobs_from_logits
+    We may use torch compile to speed up computing.
     """
-    if logits.dtype in [torch.float32, torch.float64]:
-        logits_labels = torch.gather(logits, dim=-1, index=labels.unsqueeze(-1)).squeeze(-1)
-        # loop to reduce peak mem consumption
-        logsumexp_values = torch.stack([torch.logsumexp(l, dim=-1) for l in logits])
-        logprobs_labels = logits_labels - logsumexp_values  # log_softmax(x_i) = x_i - logsumexp(x)
-    else:
-        # logsumexp approach is unstable with bfloat16, fall back to slightly less efficent approach
-        logprobs_labels = []
-        for row_logits, row_labels in zip(logits, labels):  # loop to reduce peak mem consumption
-            row_logprobs = F.log_softmax(row_logits, dim=-1)
-            row_logprobs_labels = row_logprobs.gather(dim=-1, index=row_labels.unsqueeze(-1)).squeeze(-1)
-            logprobs_labels.append(row_logprobs_labels)
+    batch_dim = logits.shape[:-1]
+    vocab_dim = logits.shape[-1]
+    logits = logits.contiguous().view(-1, vocab_dim)
+    labels = labels.contiguous().view(-1)
+    if FLAH_ATTN_CROSS_ENTROPY_LOSS_AVAILABLE:
+        output = logprobs_from_logits_flash_attn(logits, labels)
+    else:  # fall back to torch kernel, upcast logits to fp32
+        output = F.cross_entropy(logits.float(), labels, reduction="none")
 
-        logprobs_labels = torch.stack(logprobs_labels)
-
-    return logprobs_labels
+    return output.view(*batch_dim)
 
 
-def clip_by_value(x, tensor_min, tensor_max):
+def clip_by_value(tensor: torch.Tensor, tensor_min: torch.Tensor, tensor_max: torch.Tensor) -> torch.Tensor:
     """
     Tensor extenstion to torch.clamp
     https://github.com/pytorch/pytorch/issues/2793#issuecomment-428784713
     """
-    clipped = torch.max(torch.min(x, tensor_max), tensor_min)
-    return clipped
+    return torch.max(torch.min(tensor, tensor_max), tensor_min)
 
 
-def entropy_from_logits(logits: torch.Tensor):
-    """Calculate entropy from logits."""
-    pd = torch.nn.functional.softmax(logits, dim=-1)
-    entropy = torch.logsumexp(logits, dim=-1) - torch.sum(pd * logits, dim=-1)
-    return entropy
-
-
-def masked_mean(values, mask, axis=None) -> torch.Tensor:
+def masked_mean(values: torch.Tensor, mask: torch.Tensor, dim: int = None) -> torch.Tensor:
     """Compute mean of tensor with a masked values."""
-    return (values * mask).sum(axis=axis) / mask.sum(axis=axis)
+    return (values * mask).sum(dim=dim) / mask.sum(dim=dim)
 
 
-def masked_var(values, mask, unbiased=True):
+def masked_var(values: torch.Tensor, mask: torch.Tensor, unbiased: bool = True) -> torch.Tensor:
     """Compute variance of tensor with masked values."""
     mean = masked_mean(values, mask)
     centered_values = values - mean
     variance = masked_mean(centered_values**2, mask)
     if unbiased:
         mask_sum = mask.sum()
-        if mask_sum == 0:
-            raise ValueError("At least one element in the mask has to be 1.")
-        # note that if mask_sum == 1, then there is a division by zero issue
-        # to avoid it you just need to use a larger minibatch_size
-        if mask_sum == 1:
-            raise ValueError("The sum of the mask is one, which can cause a division by zero.")
+        if mask_sum <= 1:
+            raise ValueError("The sum of the mask is less than one, which can cause a division by zero.")
+
         bessel_correction = mask_sum / (mask_sum - 1)
         variance = variance * bessel_correction
+
     return variance
 
 
-def masked_whiten(values, mask, shift_mean=True):
+def masked_whiten(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     """Whiten values with masked values."""
     mean, var = masked_mean(values, mask), masked_var(values, mask)
-    whitened = (values - mean) * torch.rsqrt(var + 1e-8)
-    if not shift_mean:
-        whitened += mean
-    return whitened
+    return (values - mean) * torch.rsqrt(var + 1e-8)
 
 
-def get_eos_mask(response_ids: torch.Tensor, eos_token: Union[int, List[int]] = 2, dtype=torch.int64):
+def get_eos_mask(response_ids: torch.Tensor, eos_token: Union[int, List[int]] = 2, dtype: torch.dtype = torch.int64):
     """
     end of sentence token can be int or list: 1 or [1, 2]
     e.g. eos_token=1
@@ -148,7 +116,9 @@ def get_eos_mask(response_ids: torch.Tensor, eos_token: Union[int, List[int]] = 
     return eos_mask
 
 
-def pad_2d_list_to_length(response, pad_token_id, max_length=None) -> torch.Tensor:
+def pad_2d_list_to_length(
+    response: List[List[int]], pad_token_id: int, max_length: Optional[int] = None
+) -> torch.Tensor:
     """
     pad a 2D list (e.g. responses, logprobs) to a 2D tensor.
     """
@@ -162,74 +132,58 @@ def pad_2d_list_to_length(response, pad_token_id, max_length=None) -> torch.Tens
     return tensor
 
 
-def pad_sequence_to_length(tensors, max_seq_len, pad_token_id, left_pad=False):
+def pad_sequence_to_length(
+    tensor: torch.Tensor, max_seq_len: int, pad_token_id: int, left_pad: bool = False
+) -> torch.Tensor:
     """
-    pad a 2D tensors (e.g. responses, logprobs) in the last dim to max_seq_length.
-    input shape: [bs, seq_length]
-    output shape: [bs, max_seq_length]
-    (0, max_seq_len - tensors.shape[-1]) means right pad to max_seq_length and no left pad
+    Pad a nD tensors in the last dim to max_seq_len.
     """
-    if tensors.shape[-1] >= max_seq_len:
-        return tensors
+    if tensor.size(-1) >= max_seq_len:
+        return tensor
 
-    pad_tuple = (max_seq_len - tensors.shape[-1], 0) if left_pad else (0, max_seq_len - tensors.shape[-1])
-    return F.pad(tensors, pad_tuple, "constant", pad_token_id)
+    pad_shape = list(tensor.shape)
+    pad_shape[-1] = max_seq_len - tensor.size(-1)
+    pad_tensor = torch.full(pad_shape, fill_value=pad_token_id, dtype=tensor.dtype, device=tensor.device)
+    return torch.cat((pad_tensor, tensor), dim=-1) if left_pad else torch.cat((tensor, pad_tensor), dim=-1)
 
 
-def tokenize_and_postprocess_data(
-    prompt: str,
-    tokenizer: PreTrainedTokenizer,
+def postprocess_data(
+    input_ids: torch.Tensor,
+    attention_mask: torch.Tensor,
+    position_ids: torch.Tensor,
     max_length: int,
     pad_token_id: int,
     left_pad: bool = True,
     truncation: Literal["left", "right", "error"] = "error",
 ):
     """
-    input_data is the output from tokenizer.
+    Pad or truncate data.
     """
     assert truncation in ["left", "right", "error"]
-
-    input_data = tokenizer(prompt, return_tensors="pt", add_special_tokens=False)
-
-    input_ids = input_data["input_ids"][0]
-    attention_mask = input_data["attention_mask"][0]
-    sequence_length = len(input_ids)
-    if sequence_length < max_length:
+    seq_length = len(input_ids)
+    if seq_length < max_length:
         input_ids = pad_sequence_to_length(
             input_ids, max_seq_len=max_length, pad_token_id=pad_token_id, left_pad=left_pad
         )
         attention_mask = pad_sequence_to_length(
             attention_mask, max_seq_len=max_length, pad_token_id=0, left_pad=left_pad
         )
-    elif sequence_length > max_length:
-        if truncation == "left":
-            # actually, left truncation may not be reasonable
-            input_ids = input_ids[-max_length:]
-            attention_mask = attention_mask[-max_length:]
+        position_ids = pad_sequence_to_length(position_ids, max_seq_len=max_length, pad_token_id=0, left_pad=left_pad)
+    elif seq_length > max_length:
+        if truncation == "left":  # actually, left truncation may not be reasonable
+            input_ids = input_ids[..., -max_length:]
+            attention_mask = attention_mask[..., -max_length:]
+            position_ids = position_ids[..., -max_length:]
         elif truncation == "right":
-            input_ids = input_ids[:max_length]
-            attention_mask = attention_mask[:max_length]
+            input_ids = input_ids[..., :max_length]
+            attention_mask = attention_mask[..., :max_length]
+            position_ids = position_ids[..., :max_length]
         elif truncation == "error":
-            raise NotImplementedError(f"{sequence_length=} is larger than {max_length=}")
+            raise NotImplementedError(f"{seq_length} is larger than {max_length}.")
         else:
-            raise NotImplementedError(f"Unknown truncation method {truncation}")
+            raise NotImplementedError(f"Unknown truncation method {truncation}.")
 
-    return input_ids, attention_mask
-
-
-def remove_pad_token(input_ids: torch.Tensor, attention_mask: torch.Tensor):
-    """Remove the pad token.
-
-    Args:
-        input_ids shape: [bs, seq_length]
-        attention_mask shape: [bs, seq_length]
-    Returns:
-        no_padding_batch(List[List[int]]): contains the rmpad token ids per query.
-    """
-    no_padding_batch = []
-    for ids, mask in zip(input_ids, attention_mask):
-        no_padding_batch.append((ids[len(ids) - mask.sum() :]).cpu().numpy().tolist())
-    return no_padding_batch
+    return input_ids, attention_mask, position_ids
 
 
 def get_cosine_schedule_with_warmup(
@@ -286,13 +240,35 @@ def get_constant_schedule_with_warmup(
     return LambdaLR(optimizer, lr_lambda, last_epoch)
 
 
-def get_unpad_data(attention_mask):
-    seqlens_in_batch = attention_mask.sum(dim=-1, dtype=torch.int32)
-    indices = torch.nonzero(attention_mask.flatten(), as_tuple=False).flatten()
-    max_seqlen_in_batch = seqlens_in_batch.max().item()
-    cu_seqlens = F.pad(torch.cumsum(seqlens_in_batch, dim=0, dtype=torch.int32), (1, 0))
-    return (
-        indices,
-        cu_seqlens,
-        max_seqlen_in_batch,
-    )
+def allgather_dict_tensors(tensors: Union[Dict[str, torch.Tensor], TensorDict], size, group, dim=0):
+    """
+    TODO: optimize this.
+    - We can use async ops
+    - We can use only one allgather
+    Args:
+        tensors:
+        size:
+        group:
+
+    Returns:
+
+    """
+    if isinstance(tensors, TensorDict):
+        is_tensor_dict = True
+        tensors_as_dict = tensors.to_dict()
+    else:
+        tensors_as_dict = tensors
+        is_tensor_dict = False
+
+    output = {}
+    sorted_keys = sorted(tensors_as_dict.keys())
+    for key in sorted_keys:
+        val = tensors_as_dict[key]
+        output[key] = [torch.empty_like(val) for _ in range(size)]
+        torch.distributed.all_gather(output[key], val, group=group, async_op=False)
+        output[key] = torch.cat(output[key], dim=dim)
+
+    if is_tensor_dict:
+        output = TensorDict(source=output, batch_size=tensors.batch_size[0] * size)
+
+    return output

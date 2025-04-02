@@ -13,6 +13,8 @@
 # limitations under the License.
 
 import os
+import random
+import string
 import time
 from typing import Any, Dict, List, Tuple
 from unittest.mock import patch
@@ -23,17 +25,14 @@ from ray.util import list_named_actors
 from ray.util.placement_group import PlacementGroup, placement_group
 from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy, PlacementGroupSchedulingStrategy
 
-from verl.single_controller.base import ClassWithInitArgs, ResourcePool, Worker, WorkerGroup
-from verl.single_controller.base.decorator import MAGIC_ATTR
+from ..base import ClassWithInitArgs, ResourcePool, Worker, WorkerGroup
+from ..base.decorator import MAGIC_ATTR
 
 
 __all__ = ["Worker"]
 
 
 def get_random_string(length: int) -> str:
-    import random
-    import string
-
     letters_digits = string.ascii_letters + string.digits
     return "".join(random.choice(letters_digits) for _ in range(length))
 
@@ -48,6 +47,26 @@ def func_generator(self, method_name, dispatch_fn, collect_fn, execute_fn, block
         return output
 
     return func
+
+
+def sort_placement_group_by_node_ip(pgs: List[PlacementGroup]) -> List[PlacementGroup]:
+    """
+    Sort the placement groups by node ip, all bundles in a single placement group should be on the same node.
+
+    FSDPCheckpointManager saves sharded model states and optimizer states in local storage, which requires RANK
+    to be consistent across nodes when resume from checkpoint.
+
+    With this function, if there's only one resource pool and there's no node change, RANK should be consistent
+    across nodes in multiple ray jobs, even if the whole ray cluster is restarted.
+    """
+    node_ip = {node["NodeID"]: node["NodeManagerAddress"] for node in ray.nodes()}
+    pg_ip = {}
+    for pg in pgs:
+        specs = ray._private.state.state.placement_group_table(pg.id)
+        # all bunles should be on the same node
+        node_id = specs["bundles_to_node_id"][0]
+        pg_ip[pg.id] = node_ip[node_id]
+    return sorted(pgs, key=lambda pg: pg_ip[pg.id])
 
 
 class RayResourcePool(ResourcePool):
@@ -232,8 +251,8 @@ class RayWorkerGroup(WorkerGroup):
         num_gpus = 1 / resource_pool.max_collocate_count
 
         rank = -1
-        for pg_idx, local_world_size in enumerate(resource_pool.store):
-            pg = pgs[pg_idx]
+        local_world_size = resource_pool.store[0]
+        for pg_idx, pg in enumerate(sort_placement_group_by_node_ip(pgs)):
             assert local_world_size <= pg.bundle_count, f"when generating for {self.name_prefix}, for the "
             for local_rank in range(local_world_size):
                 rank += 1

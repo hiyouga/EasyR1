@@ -21,23 +21,25 @@ When working with FSDP:
 from contextlib import contextmanager
 from typing import Any, List, Union
 
+import numpy as np
 import torch
 import torch.distributed
 from tensordict import TensorDict
 from transformers import PreTrainedTokenizer
 from vllm import LLM, RequestOutput, SamplingParams
 
-from verl import DataProto
-from verl.utils.torch_functional import get_eos_mask, pad_2d_list_to_length
-from verl.workers.rollout.base import BaseRollout
-from verl.workers.rollout.config import RolloutConfig
+from ....protocol import DataProto
+from ....utils import torch_functional as VF
+from ....utils.torch_dtypes import PrecisionType
+from ..base import BaseRollout
+from ..config import RolloutConfig
 
 
-def _repeat_interleave(features: Union[torch.Tensor, List[Any]], repeats: int) -> Union[torch.Tensor, List[Any]]:
-    if isinstance(features, torch.Tensor):
-        return features.repeat_interleave(repeats, dim=0)
+def _repeat_interleave(value: Union[torch.Tensor, np.ndarray], repeats: int) -> Union[torch.Tensor, List[Any]]:
+    if isinstance(value, torch.Tensor):
+        return value.repeat_interleave(repeats, dim=0)
     else:
-        return [feature for feature in features for _ in range(repeats)]
+        return np.repeat(value, repeats, axis=0)
 
 
 class vLLMRollout(BaseRollout):
@@ -69,7 +71,7 @@ class vLLMRollout(BaseRollout):
             model=model_path,
             skip_tokenizer_init=False,
             tensor_parallel_size=config.tensor_parallel_size,
-            dtype=config.dtype,
+            dtype=PrecisionType.to_str(PrecisionType.to_dtype(config.dtype)),
             gpu_memory_utilization=config.gpu_memory_utilization,
             enforce_eager=config.enforce_eager,
             max_model_len=config.prompt_length + config.response_length,
@@ -111,7 +113,7 @@ class vLLMRollout(BaseRollout):
             setattr(self.sampling_params, key, value)
 
     @torch.no_grad()
-    def generate_sequences(self, prompts: DataProto, **kwargs) -> DataProto:
+    def generate_sequences(self, prompts: DataProto) -> DataProto:
         # left-padded attention_mask
         input_ids: torch.Tensor = prompts.batch["input_ids"]  # (bs, prompt_length)
         attention_mask: torch.Tensor = prompts.batch["attention_mask"]
@@ -119,54 +121,56 @@ class vLLMRollout(BaseRollout):
         eos_token_id: int = prompts.meta_info["eos_token_id"]
         batch_size = input_ids.size(0)
 
-        do_sample = prompts.meta_info.get("do_sample", True)
-        if not do_sample:
-            kwargs = {
-                "n": 1,
-                "temperature": 0.0,
-                "top_p": 1.0,
-                "top_k": -1,
-                "min_p": 0.0,
-            }
-
         non_tensor_batch = prompts.non_tensor_batch
         if batch_size != len(non_tensor_batch["raw_prompt_ids"]):
             raise RuntimeError("vllm sharding manager is not work properly.")
 
-        if "images" in non_tensor_batch:
+        # Extract segmentation masks and bounding boxes if they exist
+        segmentation_masks = None
+        if "segmentation_mask" in non_tensor_batch:
+            segmentation_masks = non_tensor_batch.pop("segmentation_mask")
+
+        bboxes = None
+        if "bbox" in non_tensor_batch:
+            bboxes = non_tensor_batch.pop("bbox")
+
+        if "multi_modal_data" in non_tensor_batch:
             vllm_inputs = []
-            for raw_prompt_ids, images in zip(non_tensor_batch.pop("raw_prompt_ids"), non_tensor_batch.pop("images")):
-                vllm_inputs.append({"prompt_token_ids": raw_prompt_ids, "multi_modal_data": {"image": images}})
+            for raw_prompt_ids, multi_modal_data in zip(
+                    non_tensor_batch.pop("raw_prompt_ids"), non_tensor_batch.pop("multi_modal_data")
+            ):
+                vllm_inputs.append({"prompt_token_ids": raw_prompt_ids, "multi_modal_data": multi_modal_data})
         else:
             vllm_inputs = [
                 {"prompt_token_ids": raw_prompt_ids} for raw_prompt_ids in non_tensor_batch.pop("raw_prompt_ids")
             ]
 
         # users can customize different sampling_params at different run
-        with self.update_sampling_params(**kwargs):
+        with self.update_sampling_params(**prompts.meta_info):
             completions: List[RequestOutput] = self.inference_engine.generate(
                 prompts=vllm_inputs, sampling_params=self.sampling_params
             )
+            response_ids = [output.token_ids for completion in completions for output in completion.outputs]
+            response_ids = VF.pad_2d_list_to_length(
+                response_ids, self.pad_token_id, max_length=self.config.response_length
+            ).to(input_ids.device)
 
-        response_ids = []
-        for completion in completions:
-            for output in completion.outputs:
-                response_ids.append(output.token_ids)
+            if self.sampling_params.n > 1:
+                batch_size = batch_size * self.sampling_params.n
+                input_ids = _repeat_interleave(input_ids, self.sampling_params.n)
+                attention_mask = _repeat_interleave(attention_mask, self.sampling_params.n)
+                position_ids = _repeat_interleave(position_ids, self.sampling_params.n)
 
-        response_ids = pad_2d_list_to_length(
-            response_ids, self.pad_token_id, max_length=self.config.response_length
-        ).to(input_ids.device)
+                # Also repeat segmentation masks and bounding boxes if they exist
+                if segmentation_masks is not None:
+                    segmentation_masks = _repeat_interleave(segmentation_masks, self.sampling_params.n)
+                if bboxes is not None:
+                    bboxes = _repeat_interleave(bboxes, self.sampling_params.n)
 
-        if self.config.n > 1 and do_sample:
-            batch_size = batch_size * self.config.n
-            input_ids = _repeat_interleave(input_ids, self.config.n)
-            attention_mask = _repeat_interleave(attention_mask, self.config.n)
-            position_ids = _repeat_interleave(position_ids, self.config.n)
-            if "pixel_values" in non_tensor_batch.keys():
-                non_tensor_batch["pixel_values"] = _repeat_interleave(non_tensor_batch["pixel_values"], self.config.n)
-                non_tensor_batch["image_grid_thw"] = _repeat_interleave(
-                    non_tensor_batch["image_grid_thw"], self.config.n
-                )
+                if "multi_modal_inputs" in non_tensor_batch.keys():
+                    non_tensor_batch["multi_modal_inputs"] = _repeat_interleave(
+                        non_tensor_batch["multi_modal_inputs"], self.sampling_params.n
+                    )
 
         sequence_ids = torch.cat([input_ids, response_ids], dim=-1)
         response_length = response_ids.size(1)
@@ -180,20 +184,26 @@ class vLLMRollout(BaseRollout):
         # position_ids:   [0,0,0,0,0,1,2,3 | 4,5,6,7,8,9,10,11]
         response_position_ids = position_ids[..., -1:] + delta_position_id
         position_ids = torch.cat([position_ids, response_position_ids], dim=-1)
-        response_attention_mask = get_eos_mask(
+        response_attention_mask = VF.get_eos_mask(
             response_ids=response_ids, eos_token=eos_token_id, dtype=attention_mask.dtype
         )
         attention_mask = torch.cat((attention_mask, response_attention_mask), dim=-1)
 
+        # Create the TensorDict with our additional data
+        batch_dict = {
+            "prompts": input_ids,
+            "responses": response_ids,
+            "input_ids": sequence_ids,  # here input_ids become the whole sentences
+            "attention_mask": attention_mask,
+            "position_ids": position_ids,
+        }
+
+        # Add segmentation masks and bounding boxes if they exist
+        if segmentation_masks is not None:
+            batch_dict["segmentation_mask"] = segmentation_masks
+        if bboxes is not None:
+            batch_dict["bbox"] = bboxes
+
         # all the tp ranks should contain the same data here. data in all ranks are valid
-        batch = TensorDict(
-            {
-                "prompts": input_ids,
-                "responses": response_ids,
-                "input_ids": sequence_ids,  # here input_ids become the whole sentences
-                "attention_mask": attention_mask,
-                "position_ids": position_ids,
-            },
-            batch_size=batch_size,
-        )
+        batch = TensorDict(batch_dict, batch_size=batch_size)
         return DataProto(batch=batch, non_tensor_batch=non_tensor_batch)

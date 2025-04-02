@@ -17,9 +17,8 @@ Contains a resharding manager that binds weights from FSDP zero3 to XPerfGPT
 
 from torch.distributed.device_mesh import DeviceMesh
 
-from verl import DataProto
-from verl.utils.ulysses import get_ulysses_sequence_parallel_group, set_ulysses_sequence_parallel_group
-
+from ...protocol import DataProto, all_gather_data_proto
+from ...utils.ulysses import get_ulysses_sequence_parallel_group, set_ulysses_sequence_parallel_group
 from .base import BaseShardingManager
 
 
@@ -48,9 +47,9 @@ class FSDPUlyssesShardingManager(BaseShardingManager):
         In Ulysses, we need to make sure the same data is used across a SP group
         """
         if self.device_mesh is not None:
+            sp_size = self.device_mesh["sp"].size()
             sp_group = self.device_mesh["sp"].get_group()
-            data = data.to("cuda")
-            data.all_gather(sp_group)
+            all_gather_data_proto(data, size=sp_size, group=sp_group)
 
         return data
 
