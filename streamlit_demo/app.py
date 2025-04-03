@@ -410,9 +410,10 @@ with left_col:
             else:
                 st.markdown(user_message["content"])
 
-        # Now that we've used the image, we can clear it for future uploads
+        # Now that we've used the image, clear it completely
         st.session_state.current_image = None
         st.session_state.processed_image = False
+        st.session_state.selected_sample = None  # Also clear the selected sample
 
         # Rerun to display user message and trigger assistant response
         st.rerun()
@@ -601,8 +602,10 @@ with right_col:
                                 # Add to messages
                                 st.session_state.messages.append(user_message)
 
-                                # We don't clear current_image yet, so it's still available
-                                # for the next step in the conversation
+                                # Immediately clear the image after adding it to the message
+                                st.session_state.current_image = None
+                                st.session_state.processed_image = False
+                                st.session_state.selected_sample = None
 
                                 # Force a rerun to update the chat
                                 st.rerun()
