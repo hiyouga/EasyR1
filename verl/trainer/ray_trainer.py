@@ -238,15 +238,23 @@ class RayPPOTrainer:
         if config.data.rollout_batch_size % config.worker.actor.global_batch_size != 0:
             raise ValueError("Rollout batch size must be divisible by actor global batch size.")
 
-        if config.data.rollout_batch_size % config.worker.actor.micro_batch_size_per_device_for_experience != 0:
-            raise ValueError("Rollout batch size must be divisible by actor micro batch size for experience.")
+        if (
+            config.data.rollout_batch_size * config.worker.rollout.n
+        ) % config.worker.actor.micro_batch_size_per_device_for_experience != 0:
+            raise ValueError(
+                "Rollout batch size * rollout.n must be divisible by actor micro batch size for experience."
+            )
 
         if self.use_critic:
             if config.data.rollout_batch_size % config.worker.critic.global_batch_size != 0:
                 raise ValueError("Rollout batch size must be divisible by critic global batch size.")
 
-            if config.data.rollout_batch_size % config.worker.critic.micro_batch_size_per_device_for_experience != 0:
-                raise ValueError("Rollout batch size must be divisible by critic micro batch size for experience.")
+            if (
+                config.data.rollout_batch_size * config.worker.rollout.n
+            ) % config.worker.critic.micro_batch_size_per_device_for_experience != 0:
+                raise ValueError(
+                    "Rollout batch size * rollout.n must be divisible by critic micro batch size for experience."
+                )
 
         if (
             config.algorithm.adv_estimator in (AdvantageEstimator.GRPO, AdvantageEstimator.RLOO)
