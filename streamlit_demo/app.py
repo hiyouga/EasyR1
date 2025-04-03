@@ -191,10 +191,17 @@ def generate_follow_up_suggestions():
         recent_messages = st.session_state.messages[-8:] if len(
             st.session_state.messages) > 8 else st.session_state.messages
 
+        # Filter out metadata from messages before sending to API
+        filtered_messages = []
+        for msg in recent_messages:
+            # Create a copy of the message without metadata
+            filtered_msg = {k: v for k, v in msg.items() if k != 'metadata'}
+            filtered_messages.append(filtered_msg)
+
         # Call the API to generate follow-up suggestions
         response = client.chat.completions.create(
             model=st.session_state.model_name,
-            messages=[system_message] + recent_messages,
+            messages=[system_message] + filtered_messages,
             max_tokens=256,
             temperature=0.7
         )
@@ -283,6 +290,14 @@ with left_col:
             else:
                 st.markdown(message["content"])
 
+            # Display ground truth if available as small gray text (only for user messages with images)
+            if message["role"] == "user" and "metadata" in message and "ground_truth" in message["metadata"]:
+                st.markdown(f"""
+                <div style="color: #999; font-size: 0.8em; margin-top: 5px; font-style: italic;">
+                    Ground truth: {message["metadata"]["ground_truth"]}
+                </div>
+                """, unsafe_allow_html=True)
+
     # Generate assistant response if last message is from user
     if len(st.session_state.messages) > 0 and st.session_state.messages[-1]["role"] == "user":
         with st.chat_message("assistant"):
@@ -298,13 +313,24 @@ with left_col:
                 # Prepare system message
                 system_message = {
                     "role": "system",
-                    "content": "You FIRST think about the reasoning process as an internal monologue and then provide the final answer. The reasoning process MUST BE enclosed within <think> </think> tags. The final answer MUST BE put in \\boxed{}."
+                    "content": "You are a radiologist expert. You are confident with your diagnosis."
+                               "You FIRST think about the reasoning process precisely as an internal monologue and then provide the final answer. "
+                               "The reasoning process MUST BE enclosed within <think> </think> tags. "
+                               "Then, you can present the analysis to users in a friendly manner outside the thinking tag. "
+                               "Finally, the final answer MUST BE put in \\boxed{}. "
                 }
+
+                # Filter out metadata from messages before sending to API
+                filtered_messages = []
+                for msg in st.session_state.messages:
+                    # Create a copy of the message without metadata
+                    filtered_msg = {k: v for k, v in msg.items() if k != 'metadata'}
+                    filtered_messages.append(filtered_msg)
 
                 # Call the API with streaming
                 response = client.chat.completions.create(
                     model=st.session_state.model_name,
-                    messages=[system_message] + st.session_state.messages,
+                    messages=[system_message] + filtered_messages,
                     stream=True,
                     max_tokens=1024
                 )
@@ -678,13 +704,20 @@ with right_col:
                                     }
                                 }
 
+                                # Get the ground truth answer if available
+                                ground_truth = sample.get("answer", "No ground truth available")
+
                                 # Create user message with the selected image and prompt
                                 user_message = {
                                     "role": "user",
                                     "content": [
                                         st.session_state.current_image,
                                         {"type": "text", "text": problem_text}
-                                    ]
+                                    ],
+                                    # Store ground truth in the message object but don't send to model
+                                    "metadata": {
+                                        "ground_truth": ground_truth
+                                    }
                                 }
 
                                 # Add to messages
