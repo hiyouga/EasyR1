@@ -29,11 +29,11 @@ from tensordict import TensorDict
 from transformers import PreTrainedTokenizer
 from vllm import LLM, RequestOutput, SamplingParams
 
-from ....protocol import DataProto
-from ....utils import torch_functional as VF
-from ....utils.torch_dtypes import PrecisionType
-from ..base import BaseRollout
-from ..config import RolloutConfig
+from ...protocol import DataProto
+from ...utils import torch_functional as VF
+from ...utils.torch_dtypes import PrecisionType
+from .base import BaseRollout
+from .config import RolloutConfig
 
 
 def _repeat_interleave(value: Union[torch.Tensor, np.ndarray], repeats: int) -> Union[torch.Tensor, List[Any]]:
@@ -58,9 +58,6 @@ class vLLMRollout(BaseRollout):
         self.pad_token_id = tokenizer.pad_token_id
         if config.tensor_parallel_size > torch.distributed.get_world_size():
             raise ValueError("Tensor parallelism size should be less than world size.")
-
-        if not config.enforce_eager and config.free_cache_engine:
-            raise ValueError("CUDA graph should be disabled when `free_cache_engine` is True.")
 
         if config.max_num_batched_tokens < config.prompt_length + config.response_length:
             raise ValueError("max_num_batched_tokens should be greater than prompt_length + response_length.")

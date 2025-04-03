@@ -57,7 +57,7 @@ from ..utils.torch_functional import AnyPrecisionAdamW, get_constant_schedule_wi
 from .actor import DataParallelPPOActor
 from .config import ActorConfig, CriticConfig, FSDPConfig, ModelConfig, OptimConfig, RefConfig, WorkerConfig
 from .critic import DataParallelPPOCritic
-from .rollout.vllm_rollout import vLLMRollout
+from .rollout import vLLMRollout
 from .sharding_manager import FSDPVLLMShardingManager
 from .sharding_manager.fsdp_ulysses import FSDPUlyssesShardingManager
 
@@ -74,6 +74,10 @@ class FSDPWorker(Worker):
 
         if not dist.is_initialized():
             dist.init_process_group(backend="nccl")
+
+        # improve numerical stability
+        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
 
         self._is_actor = self.role in ["actor", "actor_rollout", "actor_rollout_ref"]
         self._is_critic = self.role == "critic"
@@ -131,7 +135,7 @@ class FSDPWorker(Worker):
             config.global_batch_size // self.device_mesh.size() * config.ulysses_sequence_parallel_size
         )
         if config.global_batch_size_per_device == 0:
-            raise ValueError(f"{role} global batch size must be larger than num gpus.")
+            raise ValueError(f"{role} global batch size * ulysses size must be larger than num gpus.")
 
         if config.global_batch_size_per_device % config.micro_batch_size_per_device_for_update != 0:
             raise ValueError(f"{role} global batch size per device must be divisible by the micro batch size.")
@@ -413,7 +417,7 @@ class FSDPWorker(Worker):
         if self._use_param_offload:
             offload_fsdp_model(self.fsdp_module)
 
-        if self._use_optimizer_offload:
+        if self._use_optimizer_offload:  # avoid OOM in resuming
             offload_fsdp_optimizer(self.optimizer)
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)

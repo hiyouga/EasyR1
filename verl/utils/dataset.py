@@ -90,7 +90,7 @@ class RLHFDataset(Dataset, ImageProcessMixin):
         image_key: str = "images",
         max_prompt_length: int = 1024,
         truncation: str = "error",
-        system_prompt: str = None,
+        format_prompt: str = None,
         max_pixels: int = None,
         min_pixels: int = None,
     ):
@@ -101,7 +101,7 @@ class RLHFDataset(Dataset, ImageProcessMixin):
         self.image_key = image_key
         self.max_prompt_length = max_prompt_length
         self.truncation = truncation
-        self.system_prompt = system_prompt
+        self.format_prompt = format_prompt
         self.max_pixels = max_pixels
         self.min_pixels = min_pixels
 
@@ -123,8 +123,8 @@ class RLHFDataset(Dataset, ImageProcessMixin):
     def __getitem__(self, index):
         row_dict: dict = self.dataset[index]
         prompt_str: str = row_dict[self.prompt_key]
-        if self.system_prompt:
-            prompt_str = " ".join((self.system_prompt.strip(), prompt_str))
+        if self.format_prompt:
+            prompt_str = prompt_str + " " + self.format_prompt.strip()
 
         if self.image_key in row_dict:
             # https://huggingface.co/docs/transformers/en/tasks/image_text_to_text

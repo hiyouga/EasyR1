@@ -146,7 +146,7 @@ class Tracker:
         for logger in self.loggers:
             logger.log(data=data, step=step)
 
-    def log_generation(self, samples: List[Tuple[str, str, float]], step: int) -> None:
+    def log_generation(self, samples: List[Tuple[str, str, str, float]], step: int) -> None:
         self.gen_logger.log(samples, step)
 
     def __del__(self):

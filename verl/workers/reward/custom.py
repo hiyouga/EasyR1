@@ -21,6 +21,7 @@ from transformers import PreTrainedTokenizer
 
 from ...protocol import DataProto
 from ...utils.reward_score import math_compute_score, r1v_compute_score
+from .config import RewardConfig
 
 
 class RewardScore(TypedDict):
@@ -30,14 +31,15 @@ class RewardScore(TypedDict):
 
 
 class CustomRewardManager:
-    def __init__(self, tokenizer: PreTrainedTokenizer, compute_score: str):
+    def __init__(self, tokenizer: PreTrainedTokenizer, config: RewardConfig):
+        self.config = config
         self.tokenizer = tokenizer
-        if compute_score == "math":
+        if config.score_function == "math":
             self.compute_score: Callable[[str, str], RewardScore] = math_compute_score
-        elif compute_score == "r1v":
+        elif config.score_function == "r1v":
             self.compute_score: Callable[[str, str], RewardScore] = r1v_compute_score
         else:
-            raise NotImplementedError()
+            raise NotImplementedError(f"Unknown score function {config.score_function}.")
 
     def __call__(self, data: DataProto) -> Tuple[torch.Tensor, Dict[str, List[float]]]:
         reward_tensor = torch.zeros_like(data.batch["responses"], dtype=torch.float32)
@@ -49,7 +51,9 @@ class CustomRewardManager:
             valid_response_length = response_mask.sum()
             valid_response_ids = response_ids[:valid_response_length]
 
-            response_str = self.tokenizer.decode(valid_response_ids, skip_special_tokens=False)
+            response_str = self.tokenizer.decode(
+                valid_response_ids, skip_special_tokens=self.config.skip_special_tokens
+            )
             ground_truth = data_item.non_tensor_batch["ground_truth"]
 
             score = self.compute_score(response_str, ground_truth)

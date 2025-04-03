@@ -129,25 +129,19 @@ def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.KLController, kl_penal
 
     # compute kl between ref_policy and current policy
     if "ref_log_probs" in data.batch.keys():
-        kld = core_algos.compute_kl(
-            data.batch["old_log_probs"], data.batch["ref_log_probs"], kl_penalty=kl_penalty
-        )  # (batch_size, response_length)
-        kld = kld * response_mask
-        beta = kl_ctrl.kl_coef
+        kld = core_algos.compute_kl(data.batch["old_log_probs"], data.batch["ref_log_probs"], kl_penalty=kl_penalty)
+        kld = kld * response_mask  # (batch_size, response_length)
     else:
-        beta = 0
         kld = torch.zeros_like(response_mask, dtype=torch.float32)
 
-    token_level_rewards = token_level_scores - beta * kld
+    data.batch["token_level_rewards"] = token_level_scores - kl_ctrl.kl_coef * kld
 
     current_kl = VF.masked_mean(kld, mask=response_mask, dim=-1)  # average over sequence
     current_kl = torch.mean(current_kl, dim=0).item()
+    metrics = {"critic/kl": current_kl, "critic/kl_coef": kl_ctrl.kl_coef}
 
     # According to https://github.com/huggingface/trl/blob/v0.11.0/trl/trainer/ppo_trainer.py#L880
     kl_ctrl.update(current_kl=current_kl, n_steps=batch_size)
-    data.batch["token_level_rewards"] = token_level_rewards
-
-    metrics = {"critic/kl": current_kl, "critic/kl_coef": beta}
     return data, metrics
 
 
@@ -242,12 +236,22 @@ class RayPPOTrainer:
             raise NotImplementedError(f"Unknown advantage estimator: {config.algorithm.adv_estimator}.")
 
         if config.data.rollout_batch_size % config.worker.actor.global_batch_size != 0:
-            raise ValueError("Rollout batch size must be divisible by global batch size.")
+            raise ValueError("Rollout batch size must be divisible by actor global batch size.")
 
-        if self.use_critic and config.data.rollout_batch_size % config.worker.critic.global_batch_size != 0:
-            raise ValueError("Rollout batch size must be divisible by global batch size.")
+        if config.data.rollout_batch_size % config.worker.actor.micro_batch_size_per_device_for_experience != 0:
+            raise ValueError("Rollout batch size must be divisible by actor micro batch size for experience.")
 
-        if config.algorithm.adv_estimator in (AdvantageEstimator.GRPO, AdvantageEstimator.RLOO) and config.worker.rollout.n == 1:
+        if self.use_critic:
+            if config.data.rollout_batch_size % config.worker.critic.global_batch_size != 0:
+                raise ValueError("Rollout batch size must be divisible by critic global batch size.")
+
+            if config.data.rollout_batch_size % config.worker.critic.micro_batch_size_per_device_for_experience != 0:
+                raise ValueError("Rollout batch size must be divisible by critic micro batch size for experience.")
+
+        if (
+            config.algorithm.adv_estimator in (AdvantageEstimator.GRPO, AdvantageEstimator.RLOO)
+            and config.worker.rollout.n == 1
+        ):
             raise ValueError("GRPO and RLOO algorithm need `config.worker.rollout.n > 1`.")
 
         self._create_dataloader()
@@ -262,7 +266,7 @@ class RayPPOTrainer:
             image_key=self.config.data.image_key,
             max_prompt_length=self.config.data.max_prompt_length,
             truncation="right",
-            system_prompt=self.config.data.system_prompt,
+            format_prompt=self.config.data.format_prompt,
             min_pixels=self.config.data.min_pixels,
             max_pixels=self.config.data.max_pixels,
         )
@@ -293,7 +297,7 @@ class RayPPOTrainer:
             image_key=self.config.data.image_key,
             max_prompt_length=self.config.data.max_prompt_length,
             truncation="right",
-            system_prompt=self.config.data.system_prompt,
+            format_prompt=self.config.data.format_prompt,
             min_pixels=self.config.data.min_pixels,
             max_pixels=self.config.data.max_pixels,
         )
@@ -324,13 +328,15 @@ class RayPPOTrainer:
         self.config.worker.critic.optim.training_steps = training_steps
         print(f"Total training steps: {self.training_steps}")
 
-    def _maybe_log_val_generations(self, inputs: List[str], outputs: List[str], scores: List[float]) -> None:
+    def _maybe_log_val_generations(
+        self, inputs: List[str], outputs: List[str], labels: List[str], scores: List[float]
+    ) -> None:
         """Log a table of validation samples"""
         if self.config.trainer.val_generations_to_log <= 0:
             return
 
         # Create tuples of (input, output, score) and sort by input text
-        samples = list(zip(inputs, outputs, scores))
+        samples = list(zip(inputs, outputs, labels, scores))
         samples.sort(key=lambda x: x[0])  # Sort by input text
 
         # Use fixed random seed for deterministic shuffling
@@ -343,10 +349,10 @@ class RayPPOTrainer:
     def _validate(self) -> Dict[str, Any]:
         reward_tensor_lst = []
         # Lists to collect samples for the table
-        sample_inputs, sample_outputs, sample_scores = [], [], []
+        sample_inputs, sample_outputs, sample_labels, sample_scores = [], [], [], []
         reward_metrics_lst = defaultdict(list)
-        for test_data in self.val_dataloader:
-            test_batch = DataProto.from_single_dict(test_data)
+        for batch_dict in self.val_dataloader:
+            test_batch = DataProto.from_single_dict(batch_dict)
             # Store original inputs
             input_ids = test_batch.batch["input_ids"]
             input_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in input_ids]
@@ -373,7 +379,7 @@ class RayPPOTrainer:
             output_ids = test_output_gen_batch.batch["responses"]
             output_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in output_ids]
             sample_outputs.extend(output_texts)
-
+            sample_labels.extend(test_batch.non_tensor_batch["ground_truth"].tolist())
             test_batch = test_batch.union(test_output_gen_batch)
 
             # evaluate using reward_function
@@ -387,7 +393,7 @@ class RayPPOTrainer:
             for key, value in reward_metrics.items():
                 reward_metrics_lst[key].extend(value)
 
-        self._maybe_log_val_generations(inputs=sample_inputs, outputs=sample_outputs, scores=sample_scores)
+        self._maybe_log_val_generations(sample_inputs, sample_outputs, sample_labels, sample_scores)
         reward_score = torch.cat(reward_tensor_lst, dim=0).sum(-1).mean().item()
         val_reward_metrics = {f"val/{key}_reward": value for key, value in reduce_metrics(reward_metrics_lst).items()}
         return {"val/reward_score": reward_score, **val_reward_metrics}

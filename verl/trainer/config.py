@@ -42,7 +42,7 @@ class DataConfig:
     max_response_length: int = 512
     rollout_batch_size: int = 512
     val_batch_size: int = -1
-    system_prompt: Optional[str] = None
+    format_prompt: Optional[str] = None
     shuffle: bool = True
     seed: int = 1
     max_pixels: int = 4194304

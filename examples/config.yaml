@@ -68,7 +68,8 @@ worker:
 
   reward:
     reward_type: function
-    compute_score: math
+    score_function: math
+    skip_special_tokens: true
 
 trainer:
   total_episodes: 15
@@ -80,7 +81,7 @@ trainer:
   val_freq: 5  # -1 to disable
   val_before_train: true
   val_only: false
-  val_generations_to_log: 1
+  val_generations_to_log: 3
   save_freq: 5  # -1 to disable
   save_limit: 3  # -1 to disable
   save_checkpoint_path: null
