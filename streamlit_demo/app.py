@@ -163,6 +163,7 @@ def clear_chat():
     st.session_state.current_image = None
     st.session_state.processed_image = False
     st.session_state.uploader_key += 1
+    st.session_state.follow_up_suggestions = []  # Clear follow-up suggestions
     # Do not clear loaded_samples or sample_indices to keep image consistency
     st.rerun()
 
@@ -172,6 +173,53 @@ def clear_image():
     st.session_state.current_image = None
     st.session_state.processed_image = False
     st.session_state.uploader_key += 1
+
+
+# Function to generate follow-up suggestions based on conversation history
+def generate_follow_up_suggestions():
+    if len(st.session_state.messages) < 2:  # Need at least one exchange
+        return []
+
+    try:
+        # Prepare system message for follow-up generation
+        system_message = {
+            "role": "system",
+            "content": "You are an expert at generating concise, relevant follow-up questions for medical image conversations. Generate 3-4 single-sentence follow-up question options that a user might want to ask based on the current conversation. Questions should be diverse and explore different aspects. Return ONLY a JSON array of strings with no additional text."
+        }
+
+        # Limit conversation history to last 4 exchanges (8 messages) to stay focused
+        recent_messages = st.session_state.messages[-8:] if len(
+            st.session_state.messages) > 8 else st.session_state.messages
+
+        # Call the API to generate follow-up suggestions
+        response = client.chat.completions.create(
+            model=st.session_state.model_name,
+            messages=[system_message] + recent_messages,
+            max_tokens=256,
+            temperature=0.7
+        )
+
+        # Extract and parse the JSON response
+        suggestions_text = response.choices[0].message.content.strip()
+
+        # Try to extract JSON array if wrapped in code blocks or has extra text
+        json_pattern = re.compile(r'\[.*\]', re.DOTALL)
+        json_match = json_pattern.search(suggestions_text)
+
+        if json_match:
+            suggestions_text = json_match.group(0)
+
+        # Parse the JSON array
+        suggestions = json.loads(suggestions_text)
+
+        # Ensure we return a list of strings
+        return [str(suggestion) for suggestion in suggestions][:4]  # Limit to 4 suggestions
+
+    except Exception as e:
+        st.error(f"Error generating follow-up suggestions: {str(e)}")
+        return ["Can you explain more about this finding?",
+                "What are the clinical implications?",
+                "How common is this condition?"]  # Fallback suggestions
 
 
 # Initialize session state
@@ -194,6 +242,9 @@ if "sample_indices" not in st.session_state:
 # Store loaded samples to avoid re-randomization
 if "loaded_samples" not in st.session_state:
     st.session_state.loaded_samples = None
+# Store follow-up suggestions
+if "follow_up_suggestions" not in st.session_state:
+    st.session_state.follow_up_suggestions = []
 
 # Create a two-column layout
 left_col, right_col = st.columns([3, 2])
@@ -355,6 +406,9 @@ with left_col:
                     "content": full_response
                 })
 
+                # Generate follow-up suggestions after assistant's response
+                st.session_state.follow_up_suggestions = generate_follow_up_suggestions()
+
             except Exception as e:
                 error_message = f"Error: {str(e)}"
                 st.error(error_message)
@@ -364,6 +418,38 @@ with left_col:
                 import traceback
 
                 st.code(traceback.format_exc())
+
+    # Display follow-up suggestion buttons if there are any and the last message is from the assistant
+    if (len(st.session_state.messages) > 0 and
+            st.session_state.messages[-1]["role"] == "assistant" and
+            st.session_state.follow_up_suggestions):
+
+        st.markdown("### Suggested Follow-ups")
+
+        # Create a container with a distinctive background
+        with st.container():
+            st.markdown("""
+            <div style="background-color: #f8f9fa; padding: 10px; border-radius: 5px; margin-bottom: 15px;">
+            </div>
+            """, unsafe_allow_html=True)
+
+            # Create buttons for each suggestion in two columns
+            cols = st.columns(2)
+            for i, suggestion in enumerate(st.session_state.follow_up_suggestions):
+                col_idx = i % 2
+                with cols[col_idx]:
+                    # Use a unique key for each button based on content and position
+                    button_key = f"follow_up_{i}_{hash(suggestion)}"
+                    if st.button(suggestion, key=button_key):
+                        # Add the selected suggestion as a user message
+                        st.session_state.messages.append({
+                            "role": "user",
+                            "content": suggestion
+                        })
+                        # Clear follow-up suggestions after selection
+                        st.session_state.follow_up_suggestions = []
+                        # Rerun to update the chat
+                        st.rerun()
 
     # User input
     user_input = st.chat_input("Type your message here...")
@@ -414,6 +500,8 @@ with left_col:
         st.session_state.current_image = None
         st.session_state.processed_image = False
         st.session_state.selected_sample = None  # Also clear the selected sample
+        # Clear follow-up suggestions when user sends a new message
+        st.session_state.follow_up_suggestions = []
 
         # Rerun to display user message and trigger assistant response
         st.rerun()
@@ -643,6 +731,25 @@ st.markdown("""
         white-space: pre-wrap;
         background-color: rgba(255, 255, 255, 0.5);
         padding: 5px;
+    }
+
+    /* Style for the follow-up suggestion buttons */
+    .stButton>button {
+        width: 100%;
+        text-align: left;
+        white-space: normal;
+        height: auto;
+        padding: 8px 16px;
+        margin: 5px 0;
+        background-color: #f8f9fa;
+        border: 1px solid #e1e4e8;
+        border-radius: 4px;
+        transition: all 0.2s;
+    }
+
+    .stButton>button:hover {
+        background-color: #eef2ff;
+        border-color: #7792e3;
     }
 </style>
 """, unsafe_allow_html=True)
