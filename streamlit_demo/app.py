@@ -47,7 +47,8 @@ def format_assistant_response(response_text):
         if boxed_match:
             answer = boxed_match.group(1).strip()
             # Remove the boxed part and keep any other text
-            other_text = boxed_pattern.sub('', final_response).strip()
+            # other_text = boxed_pattern.sub('', final_response).strip()
+            other_text = final_response
 
             # Display thinking process in a collapsible section with distinct styling
             with st.expander("AI's Reasoning Process", expanded=True):
@@ -129,11 +130,15 @@ def extract_content_for_streaming(text):
         if boxed_match:
             # Complete boxed content found
             answer = boxed_match.group(1).strip()
+            other = rest_of_content
+            if other.startswith('\\boxed{'):
+                other = boxed_pattern.sub('', rest_of_content).strip()
             return {
                 'mode': 'complete',
                 'thinking': thinking,
                 'answer': answer,
-                'other': boxed_pattern.sub('', rest_of_content).strip()
+                'other': other
+                # 'other': boxed_pattern.sub('', rest_of_content).strip()
             }
         else:
             # No boxed yet, or in progress
@@ -184,7 +189,7 @@ def generate_follow_up_suggestions():
         # Prepare system message for follow-up generation
         system_message = {
             "role": "system",
-            "content": "You are an expert at generating concise, relevant follow-up questions for medical image conversations. Generate 3-4 single-sentence follow-up question options that a user might want to ask based on the current conversation. Questions should be diverse and explore different aspects. Return ONLY a JSON array of strings with no additional text."
+            "content": "You are an expert at generating concise, relevant follow-up questions for medical image conversations. Generate 3-4 single-sentence follow-up question options that a user might want to ask based on the current conversation. Questions should be diverse and explore different aspects. Return ONLY a JSON array of strings with no additional text. For example: [\"What is the prognosis for this condition?\", \"Are there any differential diagnoses to consider?\", \"What additional tests would be helpful?\"]"
         }
 
         # Limit conversation history to last 4 exchanges (8 messages) to stay focused
@@ -206,27 +211,51 @@ def generate_follow_up_suggestions():
             temperature=0.7
         )
 
-        # Extract and parse the JSON response
+        # Extract the response text
         suggestions_text = response.choices[0].message.content.strip()
 
-        # Try to extract JSON array if wrapped in code blocks or has extra text
-        json_pattern = re.compile(r'\[.*\]', re.DOTALL)
-        json_match = json_pattern.search(suggestions_text)
+        try:
+            # Try to extract JSON array if wrapped in code blocks or has extra text
+            json_pattern = re.compile(r'\[.*\]', re.DOTALL)
+            json_match = json_pattern.search(suggestions_text)
 
-        if json_match:
-            suggestions_text = json_match.group(0)
+            if json_match:
+                suggestions_text = json_match.group(0)
 
-        # Parse the JSON array
-        suggestions = json.loads(suggestions_text)
+            # Parse the JSON array
+            suggestions = json.loads(suggestions_text)
 
-        # Ensure we return a list of strings
-        return [str(suggestion) for suggestion in suggestions][:4]  # Limit to 4 suggestions
+            # Ensure we return a list of strings
+            return [str(suggestion) for suggestion in suggestions][:4]  # Limit to 4 suggestions
+
+        except json.JSONDecodeError:
+            # If JSON parsing fails, try to extract suggestions directly from the text
+            try:
+                # Look for numbered or bulleted lists
+                list_items = re.findall(r'[•\-*\d]+\.?\s*(.*?)(?:\n|$)', suggestions_text)
+                if list_items and len(list_items) >= 2:
+                    return [item.strip() for item in list_items if item.strip()][:4]
+
+                # If no list format, just split by newlines
+                lines = [line.strip() for line in suggestions_text.split('\n') if line.strip()]
+                if lines and len(lines) >= 2:
+                    return [line for line in lines if not line.startswith(('```', '"""'))][:4]
+            except:
+                pass
+
+            # Use fallback suggestions without showing error
+            return ["Can you explain more about this finding?",
+                    "What are the clinical implications?",
+                    "How common is this condition?",
+                    "Are there any similar conditions to consider?"]  # Fallback suggestions
 
     except Exception as e:
-        st.error(f"Error generating follow-up suggestions: {str(e)}")
+        # Log the error but don't display it to the user
+        print(f"Error generating follow-up suggestions: {str(e)}")
         return ["Can you explain more about this finding?",
                 "What are the clinical implications?",
-                "How common is this condition?"]  # Fallback suggestions
+                "How common is this condition?",
+                "Are there any treatment options available?"]  # Fallback suggestions
 
 
 # Initialize session state
@@ -313,11 +342,14 @@ with left_col:
                 # Prepare system message
                 system_message = {
                     "role": "system",
-                    "content": "You are a radiologist expert. You are confident with your diagnosis."
-                               "You FIRST think about the reasoning process precisely as an internal monologue and then provide the final answer. "
-                               "The reasoning process MUST BE enclosed within <think> </think> tags. "
-                               "Then, you can present the analysis to users in a friendly manner outside the thinking tag. "
-                               "Finally, the final answer MUST BE put in \\boxed{}. "
+                    "content": "You FIRST think about the reasoning process as an internal monologue "
+                               ", then answer the user's question in a detailed manner, "
+                               "finally provide the final answer. The reasoning process MUST BE enclosed within "
+                               "<think> </think> tags. After you close thinking with </think>, "
+                               "you must then answer the question and recite the thinking process in a detailed, organized "
+                               "way. Finally, you must provide the final concise answer. "
+                               "The final answer MUST BE put in \\boxed{}."
+                               ""
                 }
 
                 # Filter out metadata from messages before sending to API
