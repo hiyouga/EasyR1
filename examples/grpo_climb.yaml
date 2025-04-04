@@ -29,7 +29,7 @@ worker:
       model_path: Qwen/Qwen2.5-7B-Instruct
       enable_gradient_checkpointing: true
     optim:
-      lr: 1.0e-6
+      lr: 5.0e-5
       weight_decay: 1.0e-2
     fsdp:
       param_offload: false

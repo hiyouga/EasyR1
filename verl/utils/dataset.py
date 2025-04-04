@@ -378,7 +378,7 @@ class RLHFDataset(Dataset):
         except Exception as e:
             logger.error(f"Worker {self.worker_id}: Error processing model inputs: {str(e)}")
             # remove image
-            row_dict["images"] = [Image.new("RGB", (224, 224), (255, 255, 255))]
+            row_dict["images"] = [Image.new("RGB", (224, 224), (255, 255, 255)) for _ in range(image_count)]
             row_dict["multi_modal_data"]["image"] = row_dict["images"]
             model_inputs = self.processor(row_dict["multi_modal_data"]["image"], prompt, return_tensors="pt")
         input_ids = model_inputs.pop("input_ids")[0]

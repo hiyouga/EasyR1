@@ -349,6 +349,7 @@ with left_col:
                                "you must then answer the question and recite the thinking process in a detailed, organized "
                                "way. Finally, you must provide the final concise answer. "
                                "The final answer MUST BE put in \\boxed{}."
+                               "You must answer in English. "
                                ""
                 }
 
@@ -635,7 +636,19 @@ with right_col:
         st.success("Chat history cleared!")
 
     # Sample images section
-    st.header("Sample Medical Images")
+    # st.header("Sample Medical Images")
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.header("Sample Images")
+    with col2:
+        # Align the button with the header
+        st.write("")  # Add some space
+        if st.button("Refresh", key="refresh_samples"):
+            # Regenerate the sample indices to get new random samples
+            random.shuffle(st.session_state.sample_indices)
+            # Clear the loaded samples to force reloading
+            st.session_state.loaded_samples = None
+            st.rerun()
 
     # For debugging purposes, let's add a file path check
     jsonl_path = "/mnt/8T/high_modality/geom_valid_sampled.jsonl"
@@ -717,7 +730,7 @@ with right_col:
                         try:
                             img = Image.open(img_path)
                             # Resize for thumbnails
-                            img.thumbnail((150, 150))
+                            # img.thumbnail((150, 150))
                             st.image(img, use_container_width=True)
 
                             # Create unique button key for each image
