@@ -36,48 +36,43 @@ def collate_fn(features: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     # Handle segmentation masks separately
     seg_masks = []
-    has_seg_mask = False
     max_height, max_width = 0, 0
 
     # First pass: collect all tensors and find max dimensions for segmentation masks
     for feature in features:
+        assert 'segmentation_mask' in feature
         for key, value in feature.items():
-            if key == "segmentation_mask" and value is not None:
-                has_seg_mask = True
-                if isinstance(value, torch.Tensor):
-                    # Update max dimensions
-                    if len(value.shape) == 3:  # [C, H, W]
-                        _, h, w = value.shape
-                        max_height = max(max_height, h)
-                        max_width = max(max_width, w)
-                    seg_masks.append(value)
-                else:
-                    seg_masks.append(None)
+            if key == "segmentation_mask":
+                assert isinstance(value, torch.Tensor)
+                if len(value.shape) == 3:  # [C, H, W]
+                    _, h, w = value.shape
+                    max_height = max(max_height, h)
+                    max_width = max(max_width, w)
+                seg_masks.append(value)
             elif isinstance(value, torch.Tensor):
                 tensors[key].append(value)
             else:
                 non_tensors[key].append(value)
 
     # Second pass: pad segmentation masks to max dimensions
-    if has_seg_mask:
-        padded_masks = []
-        for i, mask in enumerate(seg_masks):
-            if mask is None:
-                # Create zero tensor for missing segmentation masks
-                padded_masks.append(torch.zeros(1, max_height, max_width, dtype=torch.float32))
+    padded_masks = []
+    for i, mask in enumerate(seg_masks):
+        if mask is None:
+            # Create zero tensor for missing segmentation masks
+            padded_masks.append(torch.zeros(1, max_height, max_width, dtype=torch.float32))
+        else:
+            # Get current dimensions
+            if len(mask.shape) == 3:  # [C, H, W]
+                c, h, w = mask.shape
+                # Calculate padding (bottom, right)
+                pad_bottom = max_height - h
+                pad_right = max_width - w
+                # Pad the mask (pad order is [left, right, top, bottom])
+                padded_mask = torch.nn.functional.pad(mask, (0, pad_right, 0, pad_bottom), mode='constant', value=0)
+                padded_masks.append(padded_mask)
             else:
-                # Get current dimensions
-                if len(mask.shape) == 3:  # [C, H, W]
-                    c, h, w = mask.shape
-                    # Calculate padding (bottom, right)
-                    pad_bottom = max_height - h
-                    pad_right = max_width - w
-                    # Pad the mask (pad order is [left, right, top, bottom])
-                    padded_mask = torch.nn.functional.pad(mask, (0, pad_right, 0, pad_bottom), mode='constant', value=0)
-                    padded_masks.append(padded_mask)
-                else:
-                    # Handle unexpected shapes
-                    padded_masks.append(torch.zeros(1, max_height, max_width, dtype=torch.float32))
+                # Handle unexpected shapes
+                padded_masks.append(torch.zeros(1, max_height, max_width, dtype=torch.float32))
 
         # Stack the padded masks
         tensors["segmentation_mask"] = torch.stack(padded_masks, dim=0)
@@ -162,18 +157,18 @@ class ImageProcessMixin:
 
     def process_image(self, image: Union[Dict[str, Any], ImageObject]) -> ImageObject:
         try:
-            if max_pixels is not None and (image.width * image.height) > max_pixels:
-                resize_factor = math.sqrt(max_pixels / (image.width * image.height))
+            if self.max_pixels is not None and (image.width * image.height) > self.max_pixels:
+                resize_factor = math.sqrt(self.max_pixels / (image.width * image.height))
                 width, height = int(image.width * resize_factor), int(image.height * resize_factor)
                 logger.debug(
-                    f"Resizing image from {image.width}x{image.height} to {width}x{height} (max_pixels: {max_pixels})")
+                    f"Resizing image from {image.width}x{image.height} to {width}x{height} (max_pixels: {self.max_pixels})")
                 image = image.resize((width, height), resample=Image.Resampling.NEAREST)
 
-            if min_pixels is not None and (image.width * image.height) < min_pixels:
-                resize_factor = math.sqrt(min_pixels / (image.width * image.height))
+            if self.min_pixels is not None and (image.width * image.height) < self.min_pixels:
+                resize_factor = math.sqrt(self.min_pixels / (image.width * image.height))
                 width, height = int(image.width * resize_factor), int(image.height * resize_factor)
                 logger.debug(
-                    f"Resizing image from {image.width}x{image.height} to {width}x{height} (min_pixels: {min_pixels})")
+                    f"Resizing image from {image.width}x{image.height} to {width}x{height} (min_pixels: {self.min_pixels})")
                 image = image.resize((width, height), resample=Image.Resampling.NEAREST)
 
             if image.mode != "RGB":
@@ -295,7 +290,7 @@ class RLHFDataset(Dataset, ImageProcessMixin):
 
                     original_dimensions.append((image.width, image.height))
                     # Process the image
-                    processed_images.append(process_image(image, self.max_pixels, self.min_pixels))
+                    processed_images.append(self.process_image(image))
 
                 except Exception as e:
                     logger.error(f"Worker {self.worker_id}: Error processing image {i} for item {index}: {str(e)}")
@@ -324,7 +319,7 @@ class RLHFDataset(Dataset, ImageProcessMixin):
                             for frame in video_frames:
                                 # Store original dimensions
                                 original_dimensions.append((frame.width, frame.height))
-                                processed_images.append(process_image(frame, self.max_pixels, self.min_pixels))
+                                processed_images.append(self.process_image(frame))
                     else:
                         logger.warning(
                             f"Worker {self.worker_id}: Video item type not supported: {type(video_item)}")
@@ -332,6 +327,13 @@ class RLHFDataset(Dataset, ImageProcessMixin):
                 except Exception as e:
                     logger.error(f"Worker {self.worker_id}: Error processing video {i} for item {index}: {str(e)}")
                     logger.error(traceback.format_exc())
+
+        # get size from processed_images
+        if len(processed_images) > 0:
+            image_size = processed_images[0].size
+            logger.debug(f"Worker {self.worker_id}: Processed images size: {image_size}")
+        else:
+            image_size = (224, 224)
 
         # Load segmentation mask if available
         if "segmentation_path" in row_dict and row_dict["segmentation_path"]:
@@ -372,7 +374,8 @@ class RLHFDataset(Dataset, ImageProcessMixin):
         if len(processed_images) > 1 and image_count_in_prompt < len(processed_images):
             # add more image tokens to prompt
             missing_count = len(processed_images) - image_count_in_prompt
-            prompt = prompt.replace("<image>", "<image> " * (missing_count + 1), 1)
+            prompt_str = prompt_str.replace("<image>", "<image> " * (missing_count + 1), 1)
+        image_count_in_prompt = prompt_str.count("<image>")
         assert image_count == image_count_in_prompt, f"Image count mismatch: {image_count} != {image_count_in_prompt}"
         content_list = []
         for i, content in enumerate(prompt_str.split("<image>")):
@@ -399,7 +402,7 @@ class RLHFDataset(Dataset, ImageProcessMixin):
             try:
                 # Extract dimensions from image_grid_thw (time, height, width)
                 # We need the height and width for resizing
-                _, target_height, target_width = model_inputs["image_grid_thw"][0]
+                target_height, target_width = image_size
 
                 logger.debug(f"Worker {self.worker_id}: Resizing segmentation mask to {target_width}x{target_height}")
 
@@ -429,14 +432,13 @@ class RLHFDataset(Dataset, ImageProcessMixin):
                 logger.error(traceback.format_exc())
 
         if "segmentation_mask" not in row_dict or row_dict["segmentation_mask"] is None:
-            _, target_height, target_width = model_inputs["image_grid_thw"][0]
+            target_width, target_height = image_size
             row_dict["segmentation_mask"] = torch.zeros(1, target_height, target_width, dtype=torch.float32)
 
         # Handle bounding box information
         if "bbox" in row_dict and row_dict["bbox"]:
             try:
-                # Get the target dimensions from the model inputs
-                _, target_height, target_width = model_inputs["image_grid_thw"][0]
+                target_width, target_height = image_size
 
                 # Get original dimensions of the corresponding image
                 # We assume the bbox corresponds to the first image
@@ -451,7 +453,9 @@ class RLHFDataset(Dataset, ImageProcessMixin):
                         target_height
                     )
 
-                    logger.debug(f"Worker {self.worker_id}: Resized bbox from {row_dict['bbox']} to {resized_bbox}")
+                    logger.debug(f"Worker {self.worker_id}: Resized bbox from {row_dict['bbox']} to {resized_bbox}. "
+                                f"Original dimensions: {original_dimensions[0]}, "
+                                f"Target dimensions: {target_width}x{target_height}")
                     row_dict["bbox"] = resized_bbox
                 else:
                     logger.warning(f"Worker {self.worker_id}: No original dimensions available for bbox resizing")

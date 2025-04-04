@@ -382,7 +382,7 @@ class RayPPOTrainer:
 
             if "multi_modal_inputs" in test_batch.non_tensor_batch.keys():
                 test_gen_batch = test_batch.pop(
-                    batch_keys=["input_ids", "attention_mask", "position_ids"],
+                    batch_keys=["input_ids", "attention_mask", "position_ids", "segmentation_mask", "bbox"],
                     non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data", "multi_modal_inputs"],
                 )
             else:
@@ -616,7 +616,8 @@ class RayPPOTrainer:
                 # pop those keys for generation
                 if "multi_modal_inputs" in batch.non_tensor_batch.keys():
                     gen_batch = batch.pop(
-                        batch_keys=["input_ids", "attention_mask", "position_ids"],
+                        batch_keys=["input_ids", "attention_mask", "position_ids",
+                                               "segmentation_mask", "bbox"],
                         non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data", "multi_modal_inputs"],
                     )
                 else:
@@ -745,7 +746,7 @@ class RayPPOTrainer:
                 metrics.update(compute_data_metrics(batch=batch, use_critic=self.use_critic))
                 metrics.update(compute_timing_metrics(batch=batch, timing_raw=timing_raw))
                 metrics.update(compute_throughout_metrics(batch=batch, timing_raw=timing_raw, n_gpus=n_gpus))
-
+                wandb.log(metrics, step=self.global_step)
                 self.logger.log(data=metrics, step=self.global_step)
 
         # perform validation after training

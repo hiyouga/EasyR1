@@ -37,11 +37,12 @@ class CustomRewardManager:
     def __init__(self, tokenizer: PreTrainedTokenizer, config: RewardConfig):
         self.config = config
         self.tokenizer = tokenizer
+        self.score_function = config.score_function
         if config.score_function == "math":
             self.compute_score: Callable[[str, str], RewardScore] = math_compute_score
         elif config.score_function == "r1v":
             self.compute_score: Callable[[str, str], RewardScore] = r1v_compute_score
-        elif compute_score == "medical":
+        elif config.score_function == "medical":
             self.compute_score = medical_compute_score
         else:
             raise NotImplementedError(f"Unknown score function {config.score_function}.")
@@ -61,9 +62,16 @@ class CustomRewardManager:
             )
             ground_truth = data_item.non_tensor_batch["ground_truth"]
 
-            score = self.compute_score(response_str, ground_truth)
+            if self.score_function == "medical":
+                segmentation_mask = data_item.batch["segmentation_mask"]
+                bounding_box = data_item.batch["bbox"]
+                score = self.compute_score(response_str, ground_truth, segmentation_mask, bounding_box)
+            else:
+                score = self.compute_score(response_str, ground_truth)
             reward_tensor[i, valid_response_length - 1] = score["overall"]
             for key, value in score.items():
                 reward_metrics[key].append(value)
 
+        mean_metrics = {key: sum(value) / len(value) for key, value in reward_metrics.items()}
+        wandb.log(mean_metrics)
         return reward_tensor, reward_metrics

@@ -11,11 +11,11 @@ The reasoning process MUST BE enclosed within <think> </think> tags. The final a
 EOL
 
 # Read the system prompt from the file
-SYSTEM_PROMPT=$(cat system_prompt.txt)
+format_prompt=$(cat system_prompt.txt)
 
 python -m verl.trainer.main \
     config=examples/grpo_climb_engaging.yaml \
     algorithm.adv_estimator=reinforce_plus_plus \
-    data.system_prompt="${SYSTEM_PROMPT}" \
+    data.format_prompt="${format_prompt}" \
     worker.actor.model.model_path=Qwen/Qwen2.5-VL-7B-Instruct \
     trainer.n_gpus_per_node=2

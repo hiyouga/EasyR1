@@ -5,6 +5,7 @@ from typing import Dict
 import torch
 import numpy as np
 from mathruler.grader import extract_boxed_content
+import wandb
 
 
 def parse_conditions(text):
