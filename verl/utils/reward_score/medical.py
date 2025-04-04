@@ -1,5 +1,7 @@
 import re
 import json
+from typing import Dict
+
 import torch
 import numpy as np
 from mathruler.grader import extract_boxed_content
@@ -262,7 +264,7 @@ def evaluate_bbox_format(predict_str):
     return format_score
 
 
-def medical_compute_score(predict_str: str, ground_truth: str, segmentation_mask=None, bbox=None) -> tuple:
+def medical_compute_score(predict_str: str, ground_truth: str, segmentation_mask=None, bbox=None) -> Dict[str, float]:
     """
     Compute medical scoring including standard score, bounding box IoU, and format score.
 
@@ -330,8 +332,10 @@ def medical_compute_score(predict_str: str, ground_truth: str, segmentation_mask
         except:
             pass
 
-    # Combine format score and IoU score for the overall bbox score
-    # Weight format score at 40% and IoU score at 60%
-    bbox_score = 0.4 * format_score + 0.6 * iou_score
-
-    return standard_score, bbox_score
+    scores = {
+        "overall": 0.5 * standard_score + 0.3 * iou_score + 0.2 * format_score,
+        "standard_score": standard_score,
+        "iou_score": iou_score,
+        "format_score": format_score,
+    }
+    return scores
