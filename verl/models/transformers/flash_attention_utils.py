@@ -86,9 +86,7 @@ def _custom_flash_attention_forward(
     flash_kwargs = {"window_size": (sliding_window, sliding_window)} if use_sliding_windows else {}
 
     if _flash_supports_deterministic:
-        if deterministic is None:
-            deterministic = _flash_deterministic_enabled
-        flash_kwargs["deterministic"] = deterministic
+        flash_kwargs["deterministic"] = deterministic if deterministic is not None else _flash_deterministic_enabled
 
     if kwargs.get("softcap") is not None:
         flash_kwargs["softcap"] = kwargs.pop("softcap")
@@ -114,7 +112,7 @@ def _custom_flash_attention_forward(
         batch_size = query_states.size(0)
         query_states, key_states, value_states, _, cu_seq_lens, max_seq_lens = prepare_fa2_from_position_ids(
             query_states, key_states, value_states, position_ids
-        )  # remove channel dimension
+        )
         cu_seqlens_q, cu_seqlens_k = cu_seq_lens
         max_seqlen_in_batch_q, max_seqlen_in_batch_k = max_seq_lens
         attn_output = flash_attn_varlen_func(
@@ -172,21 +170,6 @@ def flash_attention_forward(
     key = key.transpose(1, 2)
     value = value.transpose(1, 2)
 
-    # In PEFT, usually we cast the layer norms in float32 for training stability reasons
-    # therefore the input hidden states gets silently casted in float32. Hence, we need
-    # cast them back in the correct dtype just to be sure everything works as expected.
-    # This might slowdown training & inference so it is recommended to not cast the LayerNorms
-    # in fp32. (usually our RMSNorm modules handle it correctly)
-    target_dtype = None
-    if query.dtype == torch.float32:
-        if torch.is_autocast_enabled():
-            target_dtype = torch.get_autocast_gpu_dtype()
-        # Handle the case where the model is quantized
-        elif hasattr(module.config, "_pre_quantization_dtype"):
-            target_dtype = module.config._pre_quantization_dtype
-        else:
-            target_dtype = next(layer for layer in module.modules() if isinstance(layer, torch.nn.Linear)).weight.dtype
-
     # FA2 always relies on the value set in the module, so remove it if present in kwargs to avoid passing it twice
     kwargs.pop("is_causal", None)
 
@@ -202,7 +185,6 @@ def flash_attention_forward(
         sliding_window=sliding_window,
         softcap=softcap,
         use_top_left_mask=_flash_use_top_left_mask,
-        target_dtype=target_dtype,
         **kwargs,
     )
 

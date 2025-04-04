@@ -156,31 +156,35 @@ def extract_video_frames(video_path: str, num_frames: int = 4) -> List[ImageObje
         return [Image.new("RGB", (224, 224), (128, 128, 128)) for _ in range(num_frames)]
 
 
-def process_image(image: ImageObject, max_pixels: int, min_pixels: int) -> ImageObject:
-    try:
-        if max_pixels is not None and (image.width * image.height) > max_pixels:
-            resize_factor = math.sqrt(max_pixels / (image.width * image.height))
-            width, height = int(image.width * resize_factor), int(image.height * resize_factor)
-            logger.debug(
-                f"Resizing image from {image.width}x{image.height} to {width}x{height} (max_pixels: {max_pixels})")
-            image = image.resize((width, height), resample=Image.Resampling.NEAREST)
+class ImageProcessMixin:
+    max_pixels: int
+    min_pixels: int
 
-        if min_pixels is not None and (image.width * image.height) < min_pixels:
-            resize_factor = math.sqrt(min_pixels / (image.width * image.height))
-            width, height = int(image.width * resize_factor), int(image.height * resize_factor)
-            logger.debug(
-                f"Resizing image from {image.width}x{image.height} to {width}x{height} (min_pixels: {min_pixels})")
-            image = image.resize((width, height), resample=Image.Resampling.NEAREST)
+    def process_image(self, image: Union[Dict[str, Any], ImageObject]) -> ImageObject:
+        try:
+            if max_pixels is not None and (image.width * image.height) > max_pixels:
+                resize_factor = math.sqrt(max_pixels / (image.width * image.height))
+                width, height = int(image.width * resize_factor), int(image.height * resize_factor)
+                logger.debug(
+                    f"Resizing image from {image.width}x{image.height} to {width}x{height} (max_pixels: {max_pixels})")
+                image = image.resize((width, height), resample=Image.Resampling.NEAREST)
 
-        if image.mode != "RGB":
-            image = image.convert("RGB")
+            if min_pixels is not None and (image.width * image.height) < min_pixels:
+                resize_factor = math.sqrt(min_pixels / (image.width * image.height))
+                width, height = int(image.width * resize_factor), int(image.height * resize_factor)
+                logger.debug(
+                    f"Resizing image from {image.width}x{image.height} to {width}x{height} (min_pixels: {min_pixels})")
+                image = image.resize((width, height), resample=Image.Resampling.NEAREST)
 
-        return image
-    except Exception as e:
-        logger.error(f"Error in process_image: {str(e)}")
-        # Return a small fallback image instead of crashing
-        fallback = Image.new("RGB", (224, 224), (128, 128, 128))
-        return fallback
+            if image.mode != "RGB":
+                image = image.convert("RGB")
+
+            return image
+        except Exception as e:
+            logger.error(f"Error in process_image: {str(e)}")
+            # Return a small fallback image instead of crashing
+            fallback = Image.new("RGB", (224, 224), (128, 128, 128))
+            return fallback
 
 
 def resize_bbox(bbox, original_width, original_height, new_width, new_height):
@@ -213,7 +217,7 @@ def resize_bbox(bbox, original_width, original_height, new_width, new_height):
     return [new_x_min, new_y_min, new_x_max, new_y_max]
 
 
-class RLHFDataset(Dataset):
+class RLHFDataset(Dataset, ImageProcessMixin):
     """
     We assume the dataset contains a column that contains prompts and other information
     """
@@ -228,7 +232,7 @@ class RLHFDataset(Dataset):
             image_key: str = "images",
             max_prompt_length: int = 1024,
             truncation: str = "error",
-            system_prompt: str = None,
+            format_prompt: str = None,
             max_pixels: int = None,
             min_pixels: int = None,
             video_frames=4
@@ -240,7 +244,7 @@ class RLHFDataset(Dataset):
         self.image_key = image_key
         self.max_prompt_length = max_prompt_length
         self.truncation = truncation
-        self.system_prompt = system_prompt
+        self.format_prompt = format_prompt
         self.max_pixels = max_pixels
         self.min_pixels = min_pixels
         self.video_frames = video_frames
@@ -264,10 +268,9 @@ class RLHFDataset(Dataset):
 
     def __getitem__(self, index):
         row_dict: dict = self.dataset[index]
-        messages = [{"role": "user", "content": row_dict[self.prompt_key]}]
-        if self.system_prompt:
-            messages.insert(0, {"role": "system", "content": self.system_prompt})
-        prompt = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+        prompt_str: str = row_dict[self.prompt_key]
+        if self.format_prompt:
+            prompt_str = prompt_str + " " + self.format_prompt.strip()
 
         processed_images = []
         original_dimensions = []  # Store original image dimensions
@@ -361,20 +364,27 @@ class RLHFDataset(Dataset):
         }
 
         # Replace all image tokens in prompt with placeholders
-        prompt = prompt.replace("<video>", "<image>")
-        if "<image>" not in prompt:
-            prompt = "<image> " + prompt
-        image_count_in_prompt = prompt.count("<image>")
+        prompt_str = prompt_str.replace("<video>", "<image>")
+        if "<image>" not in prompt_str:
+            prompt_str = "<image> " + prompt_str
+        image_count_in_prompt = prompt_str.count("<image>")
         image_count = len(processed_images)
         if len(processed_images) > 1 and image_count_in_prompt < len(processed_images):
             # add more image tokens to prompt
             missing_count = len(processed_images) - image_count_in_prompt
             prompt = prompt.replace("<image>", "<image> " * (missing_count + 1), 1)
-        prompt = prompt.replace("<image>", "<|vision_start|><|image_pad|><|vision_end|>")
-        image_count_in_prompt = prompt.count("<|vision_start|>")
         assert image_count == image_count_in_prompt, f"Image count mismatch: {image_count} != {image_count_in_prompt}"
+        content_list = []
+        for i, content in enumerate(prompt_str.split("<image>")):
+            if i != 0:
+                content_list.append({"type": "image"})
+
+            if content:
+                content_list.append({"type": "text", "text": content})
+        messages = [{"role": "user", "content": content_list}]
+        prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
         try:
-            model_inputs = self.processor(row_dict["multi_modal_data"]["image"], prompt, return_tensors="pt")
+            model_inputs = self.processor(row_dict["multi_modal_data"]["image"], [prompt], return_tensors="pt")
         except Exception as e:
             logger.error(f"Worker {self.worker_id}: Error processing model inputs: {str(e)}")
             # remove image
@@ -455,7 +465,7 @@ class RLHFDataset(Dataset):
         # Make bbox tensor
         row_dict["bbox"] = torch.tensor(row_dict["bbox"], dtype=torch.float32)
 
-        row_dict["multi_modal_data"] = dict(model_inputs)
+        row_dict["multi_modal_inputs"] = dict(model_inputs)
         position_ids = get_rope_index(
             self.processor,
             input_ids=input_ids,

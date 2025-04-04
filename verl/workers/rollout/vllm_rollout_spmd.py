@@ -18,6 +18,7 @@ When working with FSDP:
 - Utilize state_dict from the FSDP to synchronize the weights among tp ranks in vLLM
 """
 
+import os
 from contextlib import contextmanager
 from typing import Any, List, Union
 
@@ -28,11 +29,11 @@ from tensordict import TensorDict
 from transformers import PreTrainedTokenizer
 from vllm import LLM, RequestOutput, SamplingParams
 
-from ....protocol import DataProto
-from ....utils import torch_functional as VF
-from ....utils.torch_dtypes import PrecisionType
-from ..base import BaseRollout
-from ..config import RolloutConfig
+from ...protocol import DataProto
+from ...utils import torch_functional as VF
+from ...utils.torch_dtypes import PrecisionType
+from .base import BaseRollout
+from .config import RolloutConfig
 
 
 def _repeat_interleave(value: Union[torch.Tensor, np.ndarray], repeats: int) -> Union[torch.Tensor, List[Any]]:
@@ -52,13 +53,11 @@ class vLLMRollout(BaseRollout):
             tokenizer: the task/model tokenizer
         """
         super().__init__()
+        self.rank = int(os.getenv("RANK", "0"))
         self.config = config
         self.pad_token_id = tokenizer.pad_token_id
         if config.tensor_parallel_size > torch.distributed.get_world_size():
             raise ValueError("Tensor parallelism size should be less than world size.")
-
-        if not config.enforce_eager and config.free_cache_engine:
-            raise ValueError("CUDA graph should be disabled when `free_cache_engine` is True.")
 
         if config.max_num_batched_tokens < config.prompt_length + config.response_length:
             raise ValueError("max_num_batched_tokens should be greater than prompt_length + response_length.")
@@ -79,6 +78,7 @@ class vLLMRollout(BaseRollout):
             enable_sleep_mode=True,
             distributed_executor_backend="external_launcher",
             disable_custom_all_reduce=True,
+            disable_mm_preprocessor_cache=True,
             disable_log_stats=config.disable_log_stats,
             enable_chunked_prefill=config.enable_chunked_prefill,
             **vllm_init_kwargs,
@@ -137,18 +137,18 @@ class vLLMRollout(BaseRollout):
         if "multi_modal_data" in non_tensor_batch:
             vllm_inputs = []
             for raw_prompt_ids, multi_modal_data in zip(
-                    non_tensor_batch.pop("raw_prompt_ids"), non_tensor_batch.pop("multi_modal_data")
+                non_tensor_batch.pop("raw_prompt_ids"), non_tensor_batch.pop("multi_modal_data")
             ):
-                vllm_inputs.append({"prompt_token_ids": raw_prompt_ids, "multi_modal_data": multi_modal_data})
+                vllm_inputs.append({"prompt_token_ids": list(raw_prompt_ids), "multi_modal_data": multi_modal_data})
         else:
             vllm_inputs = [
-                {"prompt_token_ids": raw_prompt_ids} for raw_prompt_ids in non_tensor_batch.pop("raw_prompt_ids")
+                {"prompt_token_ids": list(raw_prompt_ids)} for raw_prompt_ids in non_tensor_batch.pop("raw_prompt_ids")
             ]
 
         # users can customize different sampling_params at different run
         with self.update_sampling_params(**prompts.meta_info):
             completions: List[RequestOutput] = self.inference_engine.generate(
-                prompts=vllm_inputs, sampling_params=self.sampling_params
+                prompts=vllm_inputs, sampling_params=self.sampling_params, use_tqdm=(self.rank == 0)
             )
             response_ids = [output.token_ids for completion in completions for output in completion.outputs]
             response_ids = VF.pad_2d_list_to_length(
@@ -184,26 +184,23 @@ class vLLMRollout(BaseRollout):
         # position_ids:   [0,0,0,0,0,1,2,3 | 4,5,6,7,8,9,10,11]
         response_position_ids = position_ids[..., -1:] + delta_position_id
         position_ids = torch.cat([position_ids, response_position_ids], dim=-1)
-        response_attention_mask = VF.get_eos_mask(
-            response_ids=response_ids, eos_token=eos_token_id, dtype=attention_mask.dtype
+        response_mask = VF.get_response_mask(
+            response_ids=response_ids, eos_token_id=eos_token_id, dtype=attention_mask.dtype
         )
-        attention_mask = torch.cat((attention_mask, response_attention_mask), dim=-1)
-
-        # Create the TensorDict with our additional data
-        batch_dict = {
-            "prompts": input_ids,
-            "responses": response_ids,
-            "input_ids": sequence_ids,  # here input_ids become the whole sentences
-            "attention_mask": attention_mask,
-            "position_ids": position_ids,
-        }
-
-        # Add segmentation masks and bounding boxes if they exist
-        if segmentation_masks is not None:
-            batch_dict["segmentation_mask"] = segmentation_masks
-        if bboxes is not None:
-            batch_dict["bbox"] = bboxes
+        attention_mask = torch.cat((attention_mask, response_mask), dim=-1)
 
         # all the tp ranks should contain the same data here. data in all ranks are valid
-        batch = TensorDict(batch_dict, batch_size=batch_size)
+        batch = TensorDict(
+            {
+                "prompts": input_ids,
+                "responses": response_ids,
+                "input_ids": sequence_ids,  # here input_ids become the whole sentences
+                "attention_mask": attention_mask,
+                "response_mask": response_mask,
+                "position_ids": position_ids,
+                "segmentation_mask": segmentation_masks,
+                "bbox": bboxes
+            },
+            batch_size=batch_size,
+        )
         return DataProto(batch=batch, non_tensor_batch=non_tensor_batch)

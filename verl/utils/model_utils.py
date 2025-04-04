@@ -16,7 +16,7 @@ Utilities to create common models
 """
 
 from functools import lru_cache
-from typing import Tuple
+from typing import Optional, Tuple
 
 import torch
 import torch.distributed as dist
@@ -28,14 +28,15 @@ def is_rank0() -> int:
     return (not dist.is_initialized()) or (dist.get_rank() == 0)
 
 
-def print_gpu_memory_usage(prefix: str) -> None:
+def print_gpu_memory_usage(prefix: str = "GPU memory usage") -> None:
+    """Report the current GPU VRAM usage."""
     if is_rank0():
-        memory_allocated = torch.cuda.memory_allocated() / (1024**3)
-        memory_reserved = torch.cuda.memory_reserved() / (1024**3)
-        print(f"{prefix} memory allocated: {memory_allocated:.2f} GB, memory reserved: {memory_reserved:.2f} GB.")
+        free_mem, total_mem = torch.cuda.mem_get_info()
+        print(f"{prefix}: {(total_mem - free_mem) / (1024**3):.2f} GB / {total_mem / (1024**3):.2f} GB.")
 
 
-def get_model_size(model: nn.Module, scale: str = "auto") -> Tuple[float, str]:
+def _get_model_size(model: nn.Module, scale: str = "auto") -> Tuple[float, str]:
+    """Compute the model size."""
     n_params = sum(p.numel() for p in model.parameters())
 
     if scale == "auto":
@@ -62,9 +63,11 @@ def get_model_size(model: nn.Module, scale: str = "auto") -> Tuple[float, str]:
     return n_params, scale
 
 
-def print_model_size(model: nn.Module, name: str = None) -> None:
-    n_params, scale = get_model_size(model, scale="auto")
-    if name is None:
-        name = model.__class__.__name__
+def print_model_size(model: nn.Module, name: Optional[str] = None) -> None:
+    """Print the model size."""
+    if is_rank0():
+        n_params, scale = _get_model_size(model, scale="auto")
+        if name is None:
+            name = model.__class__.__name__
 
-    print(f"{name} contains {n_params:.2f}{scale} parameters")
+        print(f"{name} contains {n_params:.2f}{scale} parameters.")

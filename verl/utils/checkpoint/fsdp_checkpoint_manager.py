@@ -14,7 +14,7 @@
 
 import os
 import warnings
-from typing import Union
+from typing import Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -49,30 +49,20 @@ class FSDPCheckpointManager(BaseCheckpointManager):
     ):
         super().__init__(model, optimizer, lr_scheduler, processing_class)
 
-    def load_checkpoint(self, path: str = None, remove_ckpt_after_load: bool = False):
+    def load_checkpoint(self, path: Optional[str] = None):
         if path is None:
             return
 
         # every rank download its own checkpoint
-        local_model_path = os.path.join(path, f"model_world_size_{self.world_size}_rank_{self.rank}.pt")
-        local_optim_path = os.path.join(path, f"optim_world_size_{self.world_size}_rank_{self.rank}.pt")
-        local_extra_state_path = os.path.join(path, f"extra_state_world_size_{self.world_size}_rank_{self.rank}.pt")
-        print(
-            f"[rank-{self.rank}]: Loading from {local_model_path} and {local_optim_path} and {local_extra_state_path}"
-        )
-        model_state_dict = torch.load(local_model_path, weights_only=False)
-        optimizer_state_dict = torch.load(local_optim_path, weights_only=False)
-        extra_state_dict = torch.load(local_extra_state_path, weights_only=False)
-
-        if remove_ckpt_after_load:
-            try:
-                os.remove(local_model_path)
-                os.remove(local_optim_path)
-                os.remove(local_extra_state_path)
-            except Exception as e:
-                print(f"[rank-{self.rank}]: remove ckpt file after loading failed, exception {e} will be ignored.")
-
+        model_path = os.path.join(path, f"model_world_size_{self.world_size}_rank_{self.rank}.pt")
+        optim_path = os.path.join(path, f"optim_world_size_{self.world_size}_rank_{self.rank}.pt")
+        extra_state_path = os.path.join(path, f"extra_state_world_size_{self.world_size}_rank_{self.rank}.pt")
+        print(f"[rank-{self.rank}]: Loading from {model_path} and {optim_path} and {extra_state_path}.")
+        model_state_dict = torch.load(model_path, weights_only=False)
+        optimizer_state_dict = torch.load(optim_path, weights_only=False)
+        extra_state_dict = torch.load(extra_state_path, weights_only=False)
         lr_scheduler_state_dict = extra_state_dict["lr_scheduler"]
+
         state_dict_config = ShardedStateDictConfig(offload_to_cpu=True)
         optim_config = ShardedOptimStateDictConfig(offload_to_cpu=True)
         with warnings.catch_warnings():
@@ -82,22 +72,15 @@ class FSDPCheckpointManager(BaseCheckpointManager):
                 if self.optimizer is not None:
                     self.optimizer.load_state_dict(optimizer_state_dict)
 
+        if self.lr_scheduler is not None:
+            self.lr_scheduler.load_state_dict(lr_scheduler_state_dict)
+
         # recover random state
         if "rng" in extra_state_dict:
             self.load_rng_state(extra_state_dict["rng"])
 
-        if self.lr_scheduler is not None:
-            self.lr_scheduler.load_state_dict(lr_scheduler_state_dict)
-
-    def save_checkpoint(self, local_path: str, global_step: int, remove_previous_ckpt: bool = False):
-        # record the previous global step
-        self.previous_global_step = global_step
-
-        # remove previous local_path
-        if remove_previous_ckpt:
-            self.remove_previous_save_local_path()
-
-        local_path = self.local_mkdir(local_path)
+    def save_checkpoint(self, path: str):
+        path = self.local_mkdir(path)
         dist.barrier()
 
         # every rank will save its own model and optim shard
@@ -121,9 +104,9 @@ class FSDPCheckpointManager(BaseCheckpointManager):
                     "lr_scheduler": lr_scheduler_state_dict,
                     "rng": self.get_rng_state(),
                 }
-                model_path = os.path.join(local_path, f"model_world_size_{self.world_size}_rank_{self.rank}.pt")
-                optim_path = os.path.join(local_path, f"optim_world_size_{self.world_size}_rank_{self.rank}.pt")
-                extra_path = os.path.join(local_path, f"extra_state_world_size_{self.world_size}_rank_{self.rank}.pt")
+                model_path = os.path.join(path, f"model_world_size_{self.world_size}_rank_{self.rank}.pt")
+                optim_path = os.path.join(path, f"optim_world_size_{self.world_size}_rank_{self.rank}.pt")
+                extra_path = os.path.join(path, f"extra_state_world_size_{self.world_size}_rank_{self.rank}.pt")
 
                 print(f"[rank-{self.rank}]: Saving model to {os.path.abspath(model_path)}.")
                 print(f"[rank-{self.rank}]: Saving checkpoint to {os.path.abspath(model_path)}.")
@@ -138,12 +121,11 @@ class FSDPCheckpointManager(BaseCheckpointManager):
         dist.barrier()
 
         if self.rank == 0:
-            hf_local_path = os.path.join(local_path, "huggingface")
-            os.makedirs(hf_local_path, exist_ok=True)
+            hf_path = os.path.join(path, "huggingface")
+            os.makedirs(hf_path, exist_ok=True)
             assert isinstance(self.model._fsdp_wrapped_module, PreTrainedModel)
-            self.model._fsdp_wrapped_module.config.save_pretrained(hf_local_path)
-            self.model._fsdp_wrapped_module.generation_config.save_pretrained(hf_local_path)
-            self.processing_class.save_pretrained(hf_local_path)
+            self.model._fsdp_wrapped_module.config.save_pretrained(hf_path)
+            self.model._fsdp_wrapped_module.generation_config.save_pretrained(hf_path)
+            self.processing_class.save_pretrained(hf_path)
 
         dist.barrier()
-        self.previous_save_local_path = local_path

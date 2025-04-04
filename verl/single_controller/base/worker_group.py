@@ -19,15 +19,17 @@ import logging
 import signal
 import threading
 import time
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 from .decorator import MAGIC_ATTR, Dispatch, get_predefined_dispatch_fn, get_predefined_execute_fn
 
 
 class ResourcePool:
-    """The resource pool with meta info such as world_size."""
+    """The resource pool with meta info such as world size."""
 
-    def __init__(self, process_on_nodes=None, max_collocate_count: int = 10, n_gpus_per_node=8) -> None:
+    def __init__(
+        self, process_on_nodes: Optional[Any] = None, max_collocate_count: int = 10, n_gpus_per_node: int = 8
+    ) -> None:
         if process_on_nodes is None:
             process_on_nodes = []
 
@@ -76,8 +78,6 @@ class ClassWithInitArgs:
 
 
 def check_workers_alive(workers: List, is_alive: Callable, gap_time: float = 1) -> None:
-    import time
-
     while True:
         for worker in workers:
             if not is_alive(worker):

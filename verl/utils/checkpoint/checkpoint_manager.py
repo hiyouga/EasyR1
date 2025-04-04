@@ -14,10 +14,11 @@
 
 import os
 import random
+import re
 import shutil
 import tempfile
 from abc import ABC, abstractmethod
-from typing import Union
+from typing import Any, Dict, Optional, Union
 
 import numpy as np
 import torch
@@ -25,6 +26,9 @@ import torch.distributed as dist
 from filelock import FileLock
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from transformers import PreTrainedTokenizer, ProcessorMixin
+
+
+CHECKPOINT_TRACKER = "latest_global_step.txt"
 
 
 class BaseCheckpointManager(ABC):
@@ -49,9 +53,6 @@ class BaseCheckpointManager(ABC):
         lr_scheduler: torch.optim.lr_scheduler.LRScheduler,
         processing_class: Union[PreTrainedTokenizer, ProcessorMixin],
     ):
-        self.previous_global_step = None
-        self.previous_save_local_path = None
-
         self.model = model
         self.optimizer = optimizer
         self.lr_scheduler = lr_scheduler
@@ -69,20 +70,8 @@ class BaseCheckpointManager(ABC):
     def save_checkpoint(self, *args, **kwargs):
         raise NotImplementedError
 
-    def remove_previous_save_local_path(self):
-        if not self.previous_save_local_path:
-            return
-
-        abs_path = os.path.abspath(self.previous_save_local_path)
-        print(f"Checkpoint manager remove previous save local path: {abs_path}")
-        if not os.path.exists(abs_path):
-            return
-
-        # remove previous local_path
-        shutil.rmtree(abs_path, ignore_errors=True)
-
     @staticmethod
-    def local_mkdir(path):
+    def local_mkdir(path: str) -> str:
         if not os.path.isabs(path):
             working_dir = os.getcwd()
             path = os.path.join(working_dir, path)
@@ -92,18 +81,16 @@ class BaseCheckpointManager(ABC):
         lock_path = os.path.join(tempfile.gettempdir(), lock_filename)
 
         try:
-            with FileLock(lock_path, timeout=60):  # Add timeout
-                # make a new dir
+            with FileLock(lock_path, timeout=60):
                 os.makedirs(path, exist_ok=True)
         except Exception as e:
             print(f"Warning: Failed to acquire lock for {path}: {e}")
-            # Even if the lock is not acquired, try to create the directory
-            os.makedirs(path, exist_ok=True)
+            os.makedirs(path, exist_ok=True)  # even if the lock is not acquired, try to create the directory
 
         return path
 
     @staticmethod
-    def get_rng_state():
+    def get_rng_state() -> Dict[str, Any]:
         rng_state = {
             "cpu": torch.get_rng_state(),
             "cuda": torch.cuda.get_rng_state(),
@@ -113,14 +100,14 @@ class BaseCheckpointManager(ABC):
         return rng_state
 
     @staticmethod
-    def load_rng_state(rng_state):
+    def load_rng_state(rng_state: Dict[str, Any]):
         torch.set_rng_state(rng_state["cpu"])
         torch.cuda.set_rng_state(rng_state["cuda"])
         np.random.set_state(rng_state["numpy"])
         random.setstate(rng_state["random"])
 
 
-def find_latest_ckpt_path(path, directory_format="global_step_{}"):
+def find_latest_ckpt_path(path: Optional[str] = None, directory_format: str = "global_step_{}") -> Optional[str]:
     if path is None:
         return None
 
@@ -131,6 +118,7 @@ def find_latest_ckpt_path(path, directory_format="global_step_{}"):
 
     with open(tracker_file, "rb") as f:
         iteration = int(f.read().decode())
+
     ckpt_path = os.path.join(path, directory_format.format(iteration))
     if not os.path.exists(ckpt_path):
         print("Checkpoint does not exist: %s", ckpt_path)
@@ -140,8 +128,33 @@ def find_latest_ckpt_path(path, directory_format="global_step_{}"):
     return ckpt_path
 
 
-def get_checkpoint_tracker_filename(root_path: str):
+def get_checkpoint_tracker_filename(root_path: str) -> str:
     """
     Tracker file rescords the latest chckpoint during training to restart from.
     """
-    return os.path.join(root_path, "latest_checkpointed_iteration.txt")
+    return os.path.join(root_path, CHECKPOINT_TRACKER)
+
+
+def remove_obsolete_ckpt(path: str, global_step: int, save_limit: int = -1, directory_format: str = "global_step_{}"):
+    """
+    Remove the obsolete checkpoints that exceed the save_limit.
+    """
+    if save_limit <= 0:
+        return
+
+    if not os.path.exists(path):
+        return
+
+    pattern = re.escape(directory_format).replace(r"\{\}", r"(\d+)")
+    ckpt_folders = []
+    for folder in os.listdir(path):
+        if match := re.match(pattern, folder):
+            step = int(match.group(1))
+            if step < global_step:
+                ckpt_folders.append((step, folder))
+
+    ckpt_folders.sort(reverse=True)
+    for _, folder in ckpt_folders[save_limit - 1 :]:
+        folder_path = os.path.join(path, folder)
+        shutil.rmtree(folder_path, ignore_errors=True)
+        print(f"Removed obsolete checkpoint: {folder_path}")

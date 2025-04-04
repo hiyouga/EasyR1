@@ -15,14 +15,11 @@
 Contain small torch utilities
 """
 
-import math
-from typing import Dict, List, Literal, Optional, Union
+from typing import List, Literal, Optional, Tuple, Union
 
 import torch
 import torch.distributed
 import torch.nn.functional as F
-from tensordict import TensorDict
-from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LambdaLR
 
 
@@ -35,7 +32,7 @@ except ImportError:
 
 
 @torch.compiler.disable()
-def logprobs_from_logits_flash_attn(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+def log_probs_from_logits_flash_attn(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
     output = cross_entropy_loss(logits, labels, inplace_backward=True)
     if not isinstance(output, tuple):
         raise ValueError(
@@ -45,33 +42,33 @@ def logprobs_from_logits_flash_attn(logits: torch.Tensor, labels: torch.Tensor) 
     return -output[0]
 
 
-def logprobs_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-    """
+def log_probs_from_logits(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+    """Compute log probs on the label ids given logits.
+
     We may use torch compile to speed up computing.
+
+    Args:
+        logits (torch.Tensor): logits of the model, shape (batch_size, seqlen, vocab_size)
+        labels (torch.Tensor): labels of the model, shape (batch_size, seqlen)
+
+    Returns:
+        torch.Tensor: log probs of the labels, shape (batch_size, seqlen)
     """
     batch_dim = logits.shape[:-1]
     vocab_dim = logits.shape[-1]
     logits = logits.contiguous().view(-1, vocab_dim)
     labels = labels.contiguous().view(-1)
     if FLAH_ATTN_CROSS_ENTROPY_LOSS_AVAILABLE:
-        output = logprobs_from_logits_flash_attn(logits, labels)
+        output = log_probs_from_logits_flash_attn(logits, labels)
     else:  # fall back to torch kernel, upcast logits to fp32
         output = F.cross_entropy(logits.float(), labels, reduction="none")
 
     return output.view(*batch_dim)
 
 
-def clip_by_value(tensor: torch.Tensor, tensor_min: torch.Tensor, tensor_max: torch.Tensor) -> torch.Tensor:
-    """
-    Tensor extenstion to torch.clamp
-    https://github.com/pytorch/pytorch/issues/2793#issuecomment-428784713
-    """
-    return torch.max(torch.min(tensor, tensor_max), tensor_min)
-
-
-def masked_mean(values: torch.Tensor, mask: torch.Tensor, dim: int = None) -> torch.Tensor:
+def masked_mean(values: torch.Tensor, mask: torch.Tensor, dim: int = None, eps: float = 1e-8) -> torch.Tensor:
     """Compute mean of tensor with a masked values."""
-    return (values * mask).sum(dim=dim) / mask.sum(dim=dim)
+    return (values * mask).sum(dim=dim) / (mask.sum(dim=dim) + eps)
 
 
 def masked_var(values: torch.Tensor, mask: torch.Tensor, unbiased: bool = True) -> torch.Tensor:
@@ -82,7 +79,8 @@ def masked_var(values: torch.Tensor, mask: torch.Tensor, unbiased: bool = True) 
     if unbiased:
         mask_sum = mask.sum()
         if mask_sum <= 1:
-            raise ValueError("The sum of the mask is less than one, which can cause a division by zero.")
+            print("The sum of the mask is less than one, which can cause a division by zero.")
+            return variance
 
         bessel_correction = mask_sum / (mask_sum - 1)
         variance = variance * bessel_correction
@@ -90,43 +88,47 @@ def masked_var(values: torch.Tensor, mask: torch.Tensor, unbiased: bool = True) 
     return variance
 
 
-def masked_whiten(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+def masked_whiten(values: torch.Tensor, mask: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
     """Whiten values with masked values."""
     mean, var = masked_mean(values, mask), masked_var(values, mask)
-    return (values - mean) * torch.rsqrt(var + 1e-8)
+    return (values - mean) * torch.rsqrt(var + eps)
 
 
-def get_eos_mask(response_ids: torch.Tensor, eos_token: Union[int, List[int]] = 2, dtype: torch.dtype = torch.int64):
+def get_response_mask(
+    response_ids: torch.Tensor, eos_token_id: Union[int, List[int]] = 2, dtype: torch.dtype = torch.long
+):
+    """Get the mask for the response ids, the mask will be 0 after the first eos token.
+
+    eos_token_id can be int or list: 1 or [1, 2].
+    ```
+    e.g. eos_token = 1
+    response_ids:  [0, 0, 2, 4, 3, 5, 1, 0, 0]
+    response_mask: [1, 1, 1, 1, 1, 1, 1, 0, 0]
+    ```
     """
-    end of sentence token can be int or list: 1 or [1, 2]
-    e.g. eos_token=1
-    response_ids: [0, 0, 2, 42, 3, 5, 1, 0, 0]
-    eos_mask:     [1, 1, 1, 1,  1, 1, 1, 0, 0]
-    """
-    if isinstance(eos_token, int):
-        eos_token = [eos_token]
+    if isinstance(eos_token_id, int):
+        eos_token_id = [eos_token_id]
 
-    eos_mask = torch.zeros_like(response_ids, dtype=torch.bool)
-    for token in eos_token:
-        eos_mask |= response_ids.eq(token)
+    response_mask = torch.zeros_like(response_ids, dtype=torch.bool)
+    for token_id in eos_token_id:
+        response_mask |= response_ids.eq(token_id)
 
-    eos_mask = eos_mask.long()
-    eos_mask = (torch.cumsum(eos_mask, dim=1) - eos_mask).bool()
-    eos_mask = torch.logical_not(eos_mask).to(dtype)
-    return eos_mask
+    response_mask = response_mask.long()
+    response_mask = (torch.cumsum(response_mask, dim=1) - response_mask).bool()
+    response_mask = torch.logical_not(response_mask).to(dtype)
+    return response_mask
 
 
 def pad_2d_list_to_length(
     response: List[List[int]], pad_token_id: int, max_length: Optional[int] = None
 ) -> torch.Tensor:
-    """
-    pad a 2D list (e.g. responses, logprobs) to a 2D tensor.
-    """
-    response_length = max(len(sub_list) for sub_list in response)
-    if max_length is not None and max_length > response_length:
+    """Pad a 2D list (e.g. responses, log_probs) to a 2D tensor."""
+    max_response_length = max(len(sub_list) for sub_list in response)
+    if max_length is not None and max_length > max_response_length:
         target_length = max_length
     else:
-        target_length = response_length
+        target_length = max_response_length
+
     padded_response = [tuple(sub_list) + (pad_token_id,) * (target_length - len(sub_list)) for sub_list in response]
     tensor = torch.tensor(padded_response)
     return tensor
@@ -135,9 +137,7 @@ def pad_2d_list_to_length(
 def pad_sequence_to_length(
     tensor: torch.Tensor, max_seq_len: int, pad_token_id: int, left_pad: bool = False
 ) -> torch.Tensor:
-    """
-    Pad a nD tensors in the last dim to max_seq_len.
-    """
+    """Pad a nD tensors in the last dim to max_seq_len."""
     if tensor.size(-1) >= max_seq_len:
         return tensor
 
@@ -156,9 +156,7 @@ def postprocess_data(
     left_pad: bool = True,
     truncation: Literal["left", "right", "error"] = "error",
 ):
-    """
-    Pad or truncate data.
-    """
+    """Pad or truncate data."""
     assert truncation in ["left", "right", "error"]
     seq_length = len(input_ids)
     if seq_length < max_length:
@@ -186,89 +184,146 @@ def postprocess_data(
     return input_ids, attention_mask, position_ids
 
 
-def get_cosine_schedule_with_warmup(
-    optimizer: Optimizer,
-    num_warmup_steps: int,
-    num_training_steps: int,
-    min_lr_ratio: float = 0.0,
-    num_cycles: float = 0.5,
-    last_epoch: int = -1,
-):
-    """
-    Create a schedule with a learning rate that decreases following the values of the cosine function between the
-    initial lr set in the optimizer to 0, after a warmup period during which it increases linearly between 0 and the
-    initial lr set in the optimizer.
-    Args:
-        optimizer (:class:`~torch.optim.Optimizer`):
-            The optimizer for which to schedule the learning rate.
-        num_warmup_steps (:obj:`int`):
-            The number of steps for the warmup phase.
-        num_training_steps (:obj:`int`):
-            The total number of training steps.
-        min_lr_ratio (:obj:`float`, `optional`, defaults to 0.0):
-            The minimum lr ratio w.r.t the maximum.
-        num_cycles (:obj:`float`, `optional`, defaults to 0.5):
-            The number of waves in the cosine schedule (the defaults is to just decrease from the max value to 0
-            following a half-cosine).
-        last_epoch (:obj:`int`, `optional`, defaults to -1):
-            The index of the last epoch when resuming training.
-    Return:
-        :obj:`torch.optim.lr_scheduler.LambdaLR` with the appropriate schedule.
-    """
-    assert min_lr_ratio >= 0 and min_lr_ratio <= 1.0
-    coef = (1 - min_lr_ratio) * 0.5
-    intercept = (1 + min_lr_ratio) * 0.5
-
-    def lr_lambda(current_step):
-        if current_step < num_warmup_steps:
-            return float(current_step) / float(max(1, num_warmup_steps))
-        progress = float(current_step - num_warmup_steps) / float(max(1, num_training_steps - num_warmup_steps))
-        x = math.cos(math.pi * float(num_cycles) * 2.0 * progress)
-        return max(0.0, x * coef + intercept)
-
-    return LambdaLR(optimizer, lr_lambda, last_epoch)
-
-
 def get_constant_schedule_with_warmup(
-    optimizer: Optimizer,
+    optimizer: torch.optim.Optimizer,
     num_warmup_steps: int,
     last_epoch: int = -1,
-):
-    def lr_lambda(current_step):
-        return min(1, float(current_step) / float(max(1, num_warmup_steps)))
+) -> torch.optim.lr_scheduler.LRScheduler:
+    """Get the lr scheduler for constant lr."""
+
+    def lr_lambda(current_step: int) -> float:
+        return min(1.0, float(current_step) / float(max(1, num_warmup_steps)))
 
     return LambdaLR(optimizer, lr_lambda, last_epoch)
 
 
-def allgather_dict_tensors(tensors: Union[Dict[str, torch.Tensor], TensorDict], size, group, dim=0):
-    """
-    TODO: optimize this.
-    - We can use async ops
-    - We can use only one allgather
-    Args:
-        tensors:
-        size:
-        group:
+# https://github.com/meta-llama/llama-cookbook/blob/v0.0.5/src/llama_cookbook/policies/anyprecision_optimizer.py
+class AnyPrecisionAdamW(torch.optim.Optimizer):
+    def __init__(
+        self,
+        params: List[torch.Tensor],
+        lr: float = 1e-3,
+        betas: Tuple[float, float] = (0.9, 0.999),
+        eps: float = 1e-8,
+        weight_decay: float = 0.0,
+        use_kahan_summation: bool = True,
+        momentum_dtype: torch.dtype = torch.bfloat16,
+        variance_dtype: torch.dtype = torch.bfloat16,
+        compensation_buffer_dtype: torch.dtype = torch.bfloat16,
+    ):
+        """
+        Args:
+                params (iterable): iterable of parameters to optimize or dicts defining parameter groups
+                lr (float, optional): learning rate (default: 1e-3)
+                betas (Tuple[float, float], optional): coefficients used for computing
+                    running averages of gradient and its square (default: (0.9, 0.999))
+                eps (float, optional): term added to the denominator to improve numerical stability (default: 1e-8)
+                weight_decay (float, optional): weight decay coefficient (default: 1e-2)
 
-    Returns:
+                # Any Precision specific
+                use_kahan_summation = creates auxiliary buffer to ensure high precision
+                model param updates (default: False)
+                momentum_dtype = dtype for momentum  (default: bfloat16)
+                variance_dtype = dtype for uncentered variance (default: bfloat16)
+                compensation_buffer_dtype  = dtype for Kahan summation buffer (default: bfloat16)
 
-    """
-    if isinstance(tensors, TensorDict):
-        is_tensor_dict = True
-        tensors_as_dict = tensors.to_dict()
-    else:
-        tensors_as_dict = tensors
-        is_tensor_dict = False
+                # Usage
+                This optimizer implements optimizer states, and Kahan summation
+                for high precision updates, all in user controlled dtypes.
+                Defaults are variance in BF16, Momentum in FP32.
+                This can be run in FSDP mixed precision, amp, or full precision,
+                depending on what training pipeline you wish to work with.
 
-    output = {}
-    sorted_keys = sorted(tensors_as_dict.keys())
-    for key in sorted_keys:
-        val = tensors_as_dict[key]
-        output[key] = [torch.empty_like(val) for _ in range(size)]
-        torch.distributed.all_gather(output[key], val, group=group, async_op=False)
-        output[key] = torch.cat(output[key], dim=dim)
+                Setting to use_kahan_summation = False, and changing momentum and
+                variance dtypes to FP32, reverts this to a standard AdamW optimizer.
 
-    if is_tensor_dict:
-        output = TensorDict(source=output, batch_size=tensors.batch_size[0] * size)
+        """
+        defaults = {
+            "lr": lr,
+            "betas": betas,
+            "eps": eps,
+            "weight_decay": weight_decay,
+            "use_kahan_summation": use_kahan_summation,
+            "momentum_dtype": momentum_dtype,
+            "variance_dtype": variance_dtype,
+            "compensation_buffer_dtype": compensation_buffer_dtype,
+        }
+        super().__init__(params, defaults)
 
-    return output
+    @torch.no_grad()
+    def step(self, closure=None):
+        """
+        Performs a single optimization step.
+
+        Args:
+            closure (callable, optional): A closure that reevaluates the model and returns the loss.
+        """
+
+        if closure is not None:
+            with torch.enable_grad():
+                closure()
+
+        for group in self.param_groups:
+            beta1, beta2 = group["betas"]
+            lr = group["lr"]
+            weight_decay = group["weight_decay"]
+            eps = group["eps"]
+            use_kahan_summation = group["use_kahan_summation"]
+
+            momentum_dtype = group["momentum_dtype"]
+            variance_dtype = group["variance_dtype"]
+            compensation_buffer_dtype = group["compensation_buffer_dtype"]
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+
+                if p.grad.is_sparse:
+                    raise RuntimeError("AnyPrecisionAdamW does not support sparse gradients.")
+
+                state = self.state[p]
+                # State initialization
+                if len(state) == 0:
+                    state["step"] = torch.tensor(0.0)
+
+                    # momentum - EMA of gradient values
+                    state["exp_avg"] = torch.zeros_like(p, dtype=momentum_dtype)
+
+                    # variance uncentered - EMA of squared gradient values
+                    state["exp_avg_sq"] = torch.zeros_like(p, dtype=variance_dtype)
+
+                    # optional Kahan summation - accumulated error tracker
+                    if use_kahan_summation:
+                        state["compensation"] = torch.zeros_like(p, dtype=compensation_buffer_dtype)
+
+                # Main processing
+                # update the steps for each param group update
+                state["step"] += 1
+                step = state["step"]
+
+                exp_avg = state["exp_avg"]
+                exp_avg_sq = state["exp_avg_sq"]
+                grad = p.grad
+
+                if weight_decay:  # weight decay, AdamW style
+                    p.data.mul_(1 - lr * weight_decay)
+
+                exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)  # update momentum
+                exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)  # update uncentered variance
+
+                bias_correction1 = 1 - beta1**step  # adjust using bias1
+                step_size = lr / bias_correction1
+
+                denom_correction = (1 - beta2**step) ** 0.5  # adjust using bias2 and avoids math import
+                centered_variance = (exp_avg_sq.sqrt() / denom_correction).add_(eps, alpha=1)
+
+                if use_kahan_summation:  # lr update to compensation
+                    compensation = state["compensation"]
+                    compensation.addcdiv_(exp_avg, centered_variance, value=-step_size)
+
+                    # update weights with compensation (Kahan summation)
+                    # save error back to compensation for next iteration
+                    temp_buffer = p.detach().clone()
+                    p.data.add_(compensation)
+                    compensation.add_(temp_buffer.sub_(p.data))
+                else:  # usual AdamW updates
+                    p.data.addcdiv_(exp_avg, centered_variance, value=-step_size)

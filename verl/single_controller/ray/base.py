@@ -14,12 +14,14 @@
 
 import os
 import random
+import re
 import string
 import time
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from unittest.mock import patch
 
 import ray
+from ray.actor import ActorHandle
 from ray.experimental.state.api import get_actor
 from ray.util import list_named_actors
 from ray.util.placement_group import PlacementGroup, placement_group
@@ -66,6 +68,7 @@ def sort_placement_group_by_node_ip(pgs: List[PlacementGroup]) -> List[Placement
         # all bunles should be on the same node
         node_id = specs["bundles_to_node_id"][0]
         pg_ip[pg.id] = node_ip[node_id]
+
     return sorted(pgs, key=lambda pg: pg_ip[pg.id])
 
 
@@ -76,7 +79,7 @@ class RayResourcePool(ResourcePool):
         use_gpu: bool = True,
         name_prefix: str = "",
         max_colocate_count: int = 5,
-        detached=False,
+        detached: bool = False,
     ) -> None:
         super().__init__(process_on_nodes, max_colocate_count)
         self.use_gpu = use_gpu
@@ -85,7 +88,7 @@ class RayResourcePool(ResourcePool):
         self.pgs = None
         self.detached = detached
 
-    def get_placement_groups(self, strategy="STRICT_PACK", name=None):
+    def get_placement_groups(self, strategy: str = "STRICT_PACK", name: Optional[str] = None) -> List[PlacementGroup]:
         if self.pgs is not None:
             return self.pgs
 
@@ -116,7 +119,7 @@ class RayResourcePool(ResourcePool):
 
 def extract_pg_from_exist(
     resource_pools: Dict[str, RayResourcePool], src_role_names: List[str], resource_pool: RayResourcePool
-) -> List:
+) -> List[PlacementGroup]:
     src_pgs = [
         pg
         for role_name, resource_pool in resource_pools.items()
@@ -170,7 +173,12 @@ class RayClassWithInitArgs(ClassWithInitArgs):
         self._options.update(options)
 
     def __call__(
-        self, placement_group, placement_group_bundle_idx, use_gpu: bool = True, num_gpus=1, sharing_with=None
+        self,
+        placement_group: PlacementGroup,
+        placement_group_bundle_idx: int,
+        use_gpu: bool = True,
+        num_gpus: int = 1,
+        sharing_with: Worker = None,
     ) -> Any:
         if sharing_with is not None:
             target_node_id = ray.get(sharing_with.get_node_id.remote())
@@ -207,8 +215,8 @@ class RayWorkerGroup(WorkerGroup):
         ray_cls_with_init: RayClassWithInitArgs = None,
         bin_pack: bool = True,
         name_prefix: str = None,
-        detached=False,
-        worker_names=None,
+        detached: bool = False,
+        worker_names: List[str] = None,
         **kwargs,
     ) -> None:
         super().__init__(resource_pool=resource_pool, **kwargs)
@@ -229,21 +237,24 @@ class RayWorkerGroup(WorkerGroup):
         if ray_cls_with_init is not None:
             self._bind_worker_method(self.ray_cls_with_init.cls, func_generator)
 
-    def _is_worker_alive(self, worker: ray.actor.ActorHandle):
+    def _is_worker_alive(self, worker: ActorHandle) -> bool:
         worker_state_dict = get_actor(worker._actor_id.hex())
         return worker_state_dict.get("state", "undefined") == "ALIVE" if worker_state_dict is not None else False
 
-    def _init_with_detached_workers(self, worker_names):
+    def _init_with_detached_workers(self, worker_names: List[str]) -> None:
         workers = [ray.get_actor(name=name) for name in worker_names]
         self._workers = workers
         self._world_size = len(worker_names)
 
-    def _init_with_resource_pool(self, resource_pool, ray_cls_with_init, bin_pack, detached):
+    def _init_with_resource_pool(
+        self, resource_pool: RayResourcePool, ray_cls_with_init: RayClassWithInitArgs, bin_pack: bool, detached: bool
+    ):
         use_gpu = resource_pool.use_gpu
 
         strategy = "PACK"
         if bin_pack:
             strategy = "STRICT_PACK"
+
         pgs = resource_pool.get_placement_groups(strategy=strategy)
         world_size = resource_pool.world_size
         self._world_size = world_size
@@ -269,8 +280,6 @@ class RayWorkerGroup(WorkerGroup):
                 if rank != 0:
                     env_vars["MASTER_ADDR"] = self._master_addr
                     env_vars["MASTER_PORT"] = self._master_port
-
-                import re
 
                 cia_name = type(ray_cls_with_init.cls).__name__
                 match = re.search(r"ActorClass\(([^)]+)\)", cia_name)  # ray.remote(Obj) -> "ActorClass(Obj)"
