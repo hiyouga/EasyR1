@@ -52,6 +52,10 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         self.tp_rank = vllm_ps.get_tensor_model_parallel_rank()
         self.tp_group = vllm_ps.get_tensor_model_parallel_group().device_group
 
+        # Record freed bytes to estimate memory usage correctly
+        # https://github.com/vllm-project/vllm/pull/11743#issuecomment-2754338119
+        self.freed_bytes = 0
+
         # Note that torch_random_states may be different on each dp rank
         self.torch_random_states = torch.cuda.get_rng_state()
         # get a random rng states
@@ -88,6 +92,7 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         print_gpu_memory_usage("After sync model weights in sharding manager")
 
         del actor_weights
+        torch.cuda.empty_cache()
         print_gpu_memory_usage("After del state_dict and empty_cache in sharding manager")
         # important: need to manually set the random states of each tp to be identical.
         if self.device_mesh is not None:
@@ -96,7 +101,10 @@ class FSDPVLLMShardingManager(BaseShardingManager):
 
     def __exit__(self, exc_type, exc_value, traceback):
         print_gpu_memory_usage("Before vllm offload in sharding manager")
+        free_bytes_before_sleep = torch.cuda.mem_get_info()[0]
         self.inference_engine.sleep(level=1)
+        free_bytes_after_sleep = torch.cuda.mem_get_info()[0]
+        self.freed_bytes = free_bytes_after_sleep - free_bytes_before_sleep
         print_gpu_memory_usage("After vllm offload in sharding manager")
 
         self.module.train()

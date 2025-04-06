@@ -7,6 +7,7 @@ data:
   max_prompt_length: 2048
   max_response_length: 2048
   rollout_batch_size: 512
+  val_batch_size: -1
   shuffle: true
   seed: 1
   max_pixels: 4194304
@@ -14,7 +15,10 @@ data:
 
 algorithm:
   adv_estimator: grpo
-  kl_coef: 0.0
+  disable_kl: false
+  use_kl_loss: true
+  kl_penalty: low_var_kl
+  kl_coef: 1.0e-2
 
 worker:
   actor:
@@ -22,9 +26,6 @@ worker:
     micro_batch_size_per_device_for_update: 4
     micro_batch_size_per_device_for_experience: 16
     max_grad_norm: 1.0
-    use_kl_loss: true
-    kl_loss_coef: 1.0e-2
-    kl_loss_type: low_var_kl
     padding_free: true
     ulysses_sequence_parallel_size: 1
     model:
@@ -35,18 +36,20 @@ worker:
     optim:
       lr: 1.0e-6
       weight_decay: 1.0e-2
+      strategy: adamw  # {adamw, adamw_bf16}
+      lr_warmup_ratio: 0.0
     fsdp:
       enable_full_shard: true
       enable_cpu_offload: false
       enable_rank0_init: true
     offload:
-      offload_params: true
-      offload_optimizer: true
+      offload_params: true  # true: more CPU memory; false: more GPU memory
+      offload_optimizer: true  # true: more CPU memory; false: more GPU memory
 
   rollout:
     temperature: 1.0
     n: 5
-    gpu_memory_utilization: 0.5
+    gpu_memory_utilization: 0.6
     enforce_eager: false
     enable_chunked_prefill: false
     tensor_parallel_size: 2
@@ -58,28 +61,28 @@ worker:
   ref:
     fsdp:
       enable_full_shard: true
-      enable_cpu_offload: true
+      enable_cpu_offload: true  # true: more CPU memory; false: more GPU memory
       enable_rank0_init: true
     offload:
       offload_params: false
 
   reward:
     reward_type: function
-    compute_score: math
+    score_function: math
+    skip_special_tokens: true
 
 trainer:
   total_episodes: 15
   logger: ["console", "wandb"]
   project_name: easy_r1
-  experiment_name: qwen2_5_7b_math
+  experiment_name: qwen2_5_7b_math_grpo
   n_gpus_per_node: 8
   nnodes: 1
-  val_freq: 5
+  val_freq: 5  # -1 to disable
   val_before_train: true
   val_only: false
-  val_generations_to_log: 1
-  save_freq: 5
-  remove_previous_ckpt: false
-  remove_ckpt_after_load: false
+  val_generations_to_log: 3
+  save_freq: 5  # -1 to disable
+  save_limit: 3  # -1 to disable
   save_checkpoint_path: null
   load_checkpoint_path: null

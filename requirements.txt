@@ -12,7 +12,7 @@ pillow
 pyarrow>=15.0.0
 pylatexenc
 qwen-vl-utils
-ray
+ray[default]
 tensordict
 torchdata
 transformers>=4.49.0

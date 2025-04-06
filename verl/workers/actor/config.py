@@ -38,6 +38,7 @@ class OptimConfig:
     lr: float = 1e-6
     betas: Tuple[float, float] = (0.9, 0.999)
     weight_decay: float = 1e-2
+    strategy: str = "adamw"
     lr_warmup_ratio: float = 0.0
     min_lr_ratio: Optional[float] = None
     warmup_style: str = "constant"
@@ -71,19 +72,23 @@ class ActorConfig:
     micro_batch_size_per_device_for_update: int = 4
     micro_batch_size_per_device_for_experience: int = 16
     max_grad_norm: float = 1.0
-    clip_ratio: float = 0.2
-    use_kl_loss: bool = True
-    kl_loss_coef: float = 1e-3
-    kl_loss_type: str = "low_var_kl"
+    clip_ratio_low: float = 0.2
+    clip_ratio_high: float = 0.3
+    clip_ratio_dual: float = 3.0
     ppo_epochs: int = 1
     padding_free: bool = False
     ulysses_sequence_parallel_size: int = 1
+    use_torch_compile: bool = True
     model: ModelConfig = field(default_factory=ModelConfig)
     optim: OptimConfig = field(default_factory=OptimConfig)
     fsdp: FSDPConfig = field(default_factory=FSDPConfig)
     offload: OffloadConfig = field(default_factory=OffloadConfig)
     """auto keys"""
     global_batch_size_per_device: int = field(default=-1, init=False)
+    disable_kl: bool = field(default=False, init=False)
+    use_kl_loss: bool = field(default=False, init=False)
+    kl_penalty: str = field(default="kl", init=False)
+    kl_coef: float = field(default=0.0, init=False)
 
 
 @dataclass
@@ -95,3 +100,4 @@ class RefConfig:
     micro_batch_size_per_device_for_experience: int = field(default=-1, init=False)
     padding_free: bool = field(default=False, init=False)
     ulysses_sequence_parallel_size: int = field(default=1, init=False)
+    use_torch_compile: bool = field(default=True, init=False)

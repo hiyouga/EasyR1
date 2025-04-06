@@ -21,4 +21,5 @@ from dataclasses import dataclass
 @dataclass
 class RewardConfig:
     reward_type: str = "function"
-    compute_score: str = "math"
+    score_function: str = "math"
+    skip_special_tokens: bool = True

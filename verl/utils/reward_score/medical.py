@@ -1,8 +1,11 @@
 import re
 import json
+from typing import Dict
+
 import torch
 import numpy as np
 from mathruler.grader import extract_boxed_content
+import wandb
 
 
 def parse_conditions(text):
@@ -66,7 +69,7 @@ def extract_json_from_response(text):
             cleaned = match.strip().replace("'", "\"")
             parsed_json = ast.literal_eval(cleaned)
             return parsed_json
-        except (SyntaxError, ValueError):
+        except:
             continue
 
     return None
@@ -223,7 +226,7 @@ def evaluate_bbox_format(predict_str):
                 cleaned = json_str.replace("'", "\"")
                 parsed_json = ast.literal_eval(cleaned)
                 format_score += 0.1  # Only 10% for requiring fallback parsing
-            except (SyntaxError, ValueError):
+            except:
                 return format_score  # Failed to parse
 
         # Check if it's a list of objects
@@ -262,7 +265,7 @@ def evaluate_bbox_format(predict_str):
     return format_score
 
 
-def medical_compute_score(predict_str: str, ground_truth: str, segmentation_mask=None, bbox=None) -> tuple:
+def medical_compute_score(predict_str: str, ground_truth: str, segmentation_mask=None, bbox=None) -> Dict[str, float]:
     """
     Compute medical scoring including standard score, bounding box IoU, and format score.
 
@@ -330,8 +333,10 @@ def medical_compute_score(predict_str: str, ground_truth: str, segmentation_mask
         except:
             pass
 
-    # Combine format score and IoU score for the overall bbox score
-    # Weight format score at 40% and IoU score at 60%
-    bbox_score = 0.4 * format_score + 0.6 * iou_score
-
-    return standard_score, bbox_score
+    scores = {
+        "overall": 0.5 * standard_score + 0.3 * iou_score + 0.2 * format_score,
+        "standard_score": standard_score,
+        "iou_score": iou_score,
+        "format_score": format_score,
+    }
+    return scores
