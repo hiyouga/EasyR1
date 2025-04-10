@@ -318,6 +318,7 @@ class FSDPWorker(Worker):
             model_path=self.config.actor.model.model_path,
             config=self.config.rollout,
             tokenizer=self.tokenizer,
+            device_mesh=rollout_device_mesh,
         )
         self.rollout_sharding_manager = FSDPVLLMShardingManager(
             module=self.fsdp_module,

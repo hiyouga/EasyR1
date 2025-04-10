@@ -26,6 +26,7 @@ import numpy as np
 import torch
 import torch.distributed
 from tensordict import TensorDict
+from torch.distributed.device_mesh import DeviceMesh
 from transformers import PreTrainedTokenizer
 from vllm import LLM, RequestOutput, SamplingParams
 
@@ -44,7 +45,9 @@ def _repeat_interleave(value: Union[torch.Tensor, np.ndarray], repeats: int) -> 
 
 
 class vLLMRollout(BaseRollout):
-    def __init__(self, model_path: str, config: RolloutConfig, tokenizer: PreTrainedTokenizer):
+    def __init__(
+        self, model_path: str, config: RolloutConfig, tokenizer: PreTrainedTokenizer, device_mesh: DeviceMesh
+    ):
         """A vLLM rollout. It requires the module is supported by the vllm.
 
         Args:
@@ -56,6 +59,7 @@ class vLLMRollout(BaseRollout):
         self.rank = int(os.getenv("RANK", "0"))
         self.config = config
         self.pad_token_id = tokenizer.pad_token_id
+        self.device_mesh = device_mesh
         if config.tensor_parallel_size > torch.distributed.get_world_size():
             raise ValueError("Tensor parallelism size should be less than world size.")
 
@@ -81,7 +85,7 @@ class vLLMRollout(BaseRollout):
             disable_mm_preprocessor_cache=True,
             disable_log_stats=config.disable_log_stats,
             enable_chunked_prefill=config.enable_chunked_prefill,
-            seed=self.rank // config.tensor_parallel_size,  # dp rank
+            seed=device_mesh["dp"].get_local_rank(),
             **vllm_init_kwargs,
         )
 

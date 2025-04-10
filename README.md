@@ -35,17 +35,14 @@ EasyR1 is efficient and scalable due to the design of **[HybirdEngine](https://a
 - Python 3.9+
 - transformers>=4.49.0
 - flash-attn>=2.4.3
-- vllm>=0.7.3
+- vllm>=0.8.3
 
 We provide a [Dockerfile](./Dockerfile) to easily build environments.
 
 We recommend using the [pre-built docker image](https://hub.docker.com/r/hiyouga/verl) in EasyR1.
 
 ```bash
-# stable
-docker pull hiyouga/verl:ngc-th2.5.1-cu120-vllm0.7.4-hotfix
-# nightly
-docker pull hiyouga/verl:ngc-th2.6.0-cu120-vllm0.8.2
+docker pull hiyouga/verl:ngc-th2.6.0-cu126-vllm0.8.3-flashinfer0.2.2-cxx11abi0
 ```
 
 ### Hardware Requirements

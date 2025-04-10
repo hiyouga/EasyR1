@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import inspect
 import warnings
 from typing import Dict, Iterable, Tuple, Union
 
@@ -34,7 +35,7 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         self,
         module: FSDP,
         inference_engine: LLM,
-        device_mesh: DeviceMesh = None,
+        device_mesh: DeviceMesh,
     ):
         self.module = module
         self.inference_engine = inference_engine
@@ -59,13 +60,10 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         # Note that torch_random_states may be different on each dp rank
         self.torch_random_states = torch.cuda.get_rng_state()
         # get a random rng states
-        if self.device_mesh is not None:
-            gen_dp_rank = self.device_mesh["dp"].get_local_rank()
-            torch.cuda.manual_seed(gen_dp_rank + 1000)  # make sure all tp ranks have the same random states
-            self.gen_random_states = torch.cuda.get_rng_state()
-            torch.cuda.set_rng_state(self.torch_random_states)
-        else:
-            self.gen_random_states = None
+        gen_dp_rank = self.device_mesh["dp"].get_local_rank()
+        torch.cuda.manual_seed(gen_dp_rank + 1000)  # make sure all tp ranks have the same random states
+        self.gen_random_states = torch.cuda.get_rng_state()
+        torch.cuda.set_rng_state(self.torch_random_states)
 
     def _make_weight_iterator(
         self, actor_weights: Dict[str, Union[torch.Tensor, DTensor]]
@@ -86,13 +84,21 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         actor_weights = self.module.state_dict()
         print_gpu_memory_usage("After state_dict() in sharding manager")
 
-        self.inference_engine.wake_up()
+        if "tags" in inspect.signature(self.inference_engine.wake_up).parameters:
+            self.inference_engine.wake_up(tags=["weights"])
+        else:
+            self.inference_engine.wake_up()
+
         model = self.inference_engine.llm_engine.model_executor.driver_worker.worker.model_runner.model
         model.load_weights(self._make_weight_iterator(actor_weights))
         print_gpu_memory_usage("After sync model weights in sharding manager")
 
         del actor_weights
         torch.cuda.empty_cache()
+
+        if "tags" in inspect.signature(self.inference_engine.wake_up).parameters:
+            self.inference_engine.wake_up(tags=["kv_cache"])
+
         print_gpu_memory_usage("After del state_dict and empty_cache in sharding manager")
         # important: need to manually set the random states of each tp to be identical.
         if self.device_mesh is not None:
