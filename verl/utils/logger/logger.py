@@ -71,7 +71,7 @@ class TensorBoardLogger(Logger):
         os.makedirs(tensorboard_dir, exist_ok=True)
         print(f"Saving tensorboard log to {tensorboard_dir}.")
         self.writer = SummaryWriter(tensorboard_dir)
-        self.writer.add_hparams(hparam_dict=flatten_dict(config), metric_dict={})
+        self.writer.add_hparams(hparam_dict=flatten_dict(config), metric_dict={"placeholder": 0})
 
     def log(self, data: Dict[str, Any], step: int) -> None:
         for key, value in data.items():

@@ -136,8 +136,8 @@ def fold_batch_dim(data: "DataProto", new_batch_size: int):
     tensor = tensor.view(new_batch_size, -1)
     tensor.auto_batch_size_(batch_dims=1)
 
-    for key, val in non_tensor.items():
-        non_tensor[key] = np.reshape(val, newshape=(new_batch_size, -1, *val.shape[1:]))
+    for key, value in non_tensor.items():
+        non_tensor[key] = np.reshape(value, newshape=(new_batch_size, -1, *value.shape[1:]))
 
     return DataProto(batch=tensor, non_tensor_batch=non_tensor, meta_info=data.meta_info)
 
@@ -182,14 +182,14 @@ class DataProto:
         if self.batch is not None:
             return self.batch.batch_size[0]
         elif self.non_tensor_batch is not None and len(self.non_tensor_batch) > 0:
-            random_key = list(self.non_tensor_batch.keys())[0]
-            return self.non_tensor_batch[random_key].shape[0]
+            pivot_key = list(self.non_tensor_batch.keys())[0]
+            return self.non_tensor_batch[pivot_key].shape[0]
         else:
             return 0
 
     def __getitem__(self, item: Union[int, slice]) -> Union["DataProto", "DataProtoItem"]:
         tensor_data = self.batch[item]
-        non_tensor_data = {key: val[item] for key, val in self.non_tensor_batch.items()}
+        non_tensor_data = {key: value[item] for key, value in self.non_tensor_batch.items()}
         return_type = DataProto if isinstance(item, slice) else DataProtoItem
         return return_type(batch=tensor_data, non_tensor_batch=non_tensor_data, meta_info=self.meta_info)
 
@@ -223,9 +223,10 @@ class DataProto:
 
     def print_size(self, prefix: str = "") -> None:
         size_of_tensordict = 0
-        for tensor in self.batch.values():
-            if isinstance(tensor, torch.Tensor):
-                size_of_tensordict += tensor.element_size() * tensor.numel()
+        if self.batch is not None:
+            for tensor in self.batch.values():
+                if isinstance(tensor, torch.Tensor):
+                    size_of_tensordict += tensor.element_size() * tensor.numel()
 
         size_of_numpy_array = 0
         for value in self.non_tensor_batch.values():
@@ -249,8 +250,8 @@ class DataProto:
             assert len(self.batch.batch_size) == 1, "only support num_batch_dims=1 when non_tensor_batch is not empty."
 
             batch_size = self.batch.batch_size[0]
-            for key, val in self.non_tensor_batch.items():
-                assert len(val) == batch_size, f"key {key} length {len(val)} is not equal to batch size {batch_size}."
+            for key, value in self.non_tensor_batch.items():
+                assert len(value) == batch_size, f"key {key} length {len(value)} is not equal to bsz {batch_size}."
 
     @classmethod
     def from_single_dict(
@@ -258,8 +259,7 @@ class DataProto:
         data: Dict[str, Union[torch.Tensor, NDArray]],
         meta_info: Optional[Dict[str, Any]] = None,
     ) -> "DataProto":
-        tensors = {}
-        non_tensors = {}
+        tensors, non_tensors = {}, {}
         for key, value in data.items():
             if isinstance(value, torch.Tensor):
                 tensors[key] = value
@@ -551,7 +551,7 @@ class DataProto:
         """
         indices_np = indices.detach().numpy()
         self.batch = self.batch[indices]
-        self.non_tensor_batch = {key: val[indices_np] for key, val in self.non_tensor_batch.items()}
+        self.non_tensor_batch = {key: value[indices_np] for key, value in self.non_tensor_batch.items()}
 
     def repeat(self, repeat_times: int = 2, interleave: bool = True) -> "DataProto":
         """
@@ -666,9 +666,9 @@ def allgather_dict_tensors(
     output = {}
     sorted_keys = sorted(tensors_as_dict.keys())
     for key in sorted_keys:
-        val = tensors_as_dict[key]
-        output[key] = [torch.empty_like(val) for _ in range(size)]
-        torch.distributed.all_gather(output[key], val, group=group, async_op=False)
+        value = tensors_as_dict[key]
+        output[key] = [torch.empty_like(value) for _ in range(size)]
+        torch.distributed.all_gather(output[key], value, group=group, async_op=False)
         output[key] = torch.cat(output[key], dim=dim)
 
     if is_tensor_dict:

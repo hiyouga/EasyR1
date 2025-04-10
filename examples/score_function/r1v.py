@@ -18,18 +18,17 @@ from typing import Dict
 from mathruler.grader import grade_answer
 
 
-def r1v_format_reward(predict_str: str) -> float:
+def format_reward(predict_str: str) -> float:
     pattern = re.compile(r"<think>.*?</think>\s*<answer>.*?</answer>", re.DOTALL)
     format_match = re.fullmatch(pattern, predict_str)
     return 1.0 if format_match else 0.0
 
 
-def r1v_accuracy_reward(predict_str: str, ground_truth: str) -> float:
+def accuracy_reward(predict_str: str, ground_truth: str) -> float:
     try:
-        ground_truth = ground_truth.strip()
         content_match = re.search(r"<answer>(.*?)</answer>", predict_str)
         given_answer = content_match.group(1).strip() if content_match else predict_str.strip()
-        if grade_answer(given_answer, ground_truth):
+        if grade_answer(given_answer, ground_truth.strip()):
             return 1.0
 
     except Exception:
@@ -38,11 +37,11 @@ def r1v_accuracy_reward(predict_str: str, ground_truth: str) -> float:
     return 0.0
 
 
-def r1v_compute_score(predict_str: str, ground_truth: str) -> Dict[str, float]:
-    format = r1v_format_reward(predict_str)
-    accuracy = r1v_accuracy_reward(predict_str, ground_truth)
+def compute_score(predict_str: str, ground_truth: str, format_weight: float = 0.5) -> Dict[str, float]:
+    format_score = format_reward(predict_str)
+    accuracy_score = accuracy_reward(predict_str, ground_truth)
     return {
-        "overall": 0.5 * accuracy + 0.5 * format,
-        "format": format,
-        "accuracy": accuracy,
+        "overall": (1 - format_weight) * accuracy_score + format_weight * format_score,
+        "format": format_score,
+        "accuracy": accuracy_score,
     }

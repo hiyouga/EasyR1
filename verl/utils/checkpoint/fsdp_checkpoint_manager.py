@@ -13,13 +13,12 @@
 # limitations under the License.
 
 import os
-import warnings
 from typing import Optional, Union
 
 import torch
 import torch.distributed as dist
+from torch.distributed.checkpoint.state_dict import StateDictOptions, get_state_dict, set_state_dict
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp import ShardedOptimStateDictConfig, ShardedStateDictConfig, StateDictType
 from transformers import PreTrainedModel, PreTrainedTokenizer, ProcessorMixin
 
 from .checkpoint_manager import BaseCheckpointManager
@@ -59,21 +58,18 @@ class FSDPCheckpointManager(BaseCheckpointManager):
         extra_state_path = os.path.join(path, f"extra_state_world_size_{self.world_size}_rank_{self.rank}.pt")
         print(f"[rank-{self.rank}]: Loading from {model_path} and {optim_path} and {extra_state_path}.")
         model_state_dict = torch.load(model_path, weights_only=False)
-        optimizer_state_dict = torch.load(optim_path, weights_only=False)
+        optim_state_dict = torch.load(optim_path, weights_only=False)
         extra_state_dict = torch.load(extra_state_path, weights_only=False)
-        lr_scheduler_state_dict = extra_state_dict["lr_scheduler"]
 
-        state_dict_config = ShardedStateDictConfig(offload_to_cpu=True)
-        optim_config = ShardedOptimStateDictConfig(offload_to_cpu=True)
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            with FSDP.state_dict_type(self.model, StateDictType.SHARDED_STATE_DICT, state_dict_config, optim_config):
-                self.model.load_state_dict(model_state_dict)
-                if self.optimizer is not None:
-                    self.optimizer.load_state_dict(optimizer_state_dict)
-
-        if self.lr_scheduler is not None:
-            self.lr_scheduler.load_state_dict(lr_scheduler_state_dict)
+        state_dict_options = StateDictOptions(cpu_offload=True)
+        set_state_dict(
+            model=self.model,
+            optimizers=self.optimizer,
+            model_state_dict=model_state_dict,
+            optim_state_dict=optim_state_dict,
+            options=state_dict_options,
+        )
+        self.lr_scheduler.load_state_dict(extra_state_dict["lr_scheduler"])
 
         # recover random state
         if "rng" in extra_state_dict:
@@ -84,38 +80,22 @@ class FSDPCheckpointManager(BaseCheckpointManager):
         dist.barrier()
 
         # every rank will save its own model and optim shard
-        state_dict_config = ShardedStateDictConfig(offload_to_cpu=True)
-        optim_config = ShardedOptimStateDictConfig(offload_to_cpu=True)
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            with FSDP.state_dict_type(self.model, StateDictType.SHARDED_STATE_DICT, state_dict_config, optim_config):
-                model_state_dict = self.model.state_dict()
-                if self.optimizer is not None:
-                    optimizer_state_dict = self.optimizer.state_dict()
-                else:
-                    optimizer_state_dict = None
+        state_dict_options = StateDictOptions(cpu_offload=True)
+        model_state_dict, optim_state_dict = get_state_dict(self.model, self.optimizer, options=state_dict_options)
+        extra_state_dict = {
+            "lr_scheduler": self.lr_scheduler.state_dict(),
+            "rng": self.get_rng_state(),
+        }
+        model_path = os.path.join(path, f"model_world_size_{self.world_size}_rank_{self.rank}.pt")
+        optim_path = os.path.join(path, f"optim_world_size_{self.world_size}_rank_{self.rank}.pt")
+        extra_path = os.path.join(path, f"extra_state_world_size_{self.world_size}_rank_{self.rank}.pt")
 
-                if self.lr_scheduler is not None:
-                    lr_scheduler_state_dict = self.lr_scheduler.state_dict()
-                else:
-                    lr_scheduler_state_dict = None
-
-                extra_state_dict = {
-                    "lr_scheduler": lr_scheduler_state_dict,
-                    "rng": self.get_rng_state(),
-                }
-                model_path = os.path.join(path, f"model_world_size_{self.world_size}_rank_{self.rank}.pt")
-                optim_path = os.path.join(path, f"optim_world_size_{self.world_size}_rank_{self.rank}.pt")
-                extra_path = os.path.join(path, f"extra_state_world_size_{self.world_size}_rank_{self.rank}.pt")
-
-                print(f"[rank-{self.rank}]: Saving model to {os.path.abspath(model_path)}.")
-                print(f"[rank-{self.rank}]: Saving checkpoint to {os.path.abspath(model_path)}.")
-                print(f"[rank-{self.rank}]: Saving extra_state to {os.path.abspath(extra_path)}.")
-                torch.save(model_state_dict, model_path)
-                if self.optimizer is not None:
-                    torch.save(optimizer_state_dict, optim_path)
-
-                torch.save(extra_state_dict, extra_path)
+        print(f"[rank-{self.rank}]: Saving model to {os.path.abspath(model_path)}.")
+        print(f"[rank-{self.rank}]: Saving checkpoint to {os.path.abspath(model_path)}.")
+        print(f"[rank-{self.rank}]: Saving extra_state to {os.path.abspath(extra_path)}.")
+        torch.save(model_state_dict, model_path)
+        torch.save(optim_state_dict, optim_path)
+        torch.save(extra_state_dict, extra_path)
 
         # wait for everyone to dump to local
         dist.barrier()

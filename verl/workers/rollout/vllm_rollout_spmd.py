@@ -20,18 +20,18 @@ When working with FSDP:
 
 import os
 from contextlib import contextmanager
-from typing import Any, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
 import torch
 import torch.distributed
 from tensordict import TensorDict
-from torch.distributed.device_mesh import DeviceMesh
 from transformers import PreTrainedTokenizer
 from vllm import LLM, RequestOutput, SamplingParams
 
 from ...protocol import DataProto
 from ...utils import torch_functional as VF
+from ...utils.tokenizer import get_processor
 from ...utils.torch_dtypes import PrecisionType
 from .base import BaseRollout
 from .config import RolloutConfig
@@ -44,10 +44,17 @@ def _repeat_interleave(value: Union[torch.Tensor, np.ndarray], repeats: int) -> 
         return np.repeat(value, repeats, axis=0)
 
 
+def _get_logit_bias(model_path: str) -> Optional[Dict[int, float]]:
+    processor = get_processor(model_path)
+    if processor is not None and hasattr(processor, "image_token"):
+        image_token_id = processor.tokenizer.convert_tokens_to_ids(processor.image_token)
+        return {image_token_id: -100}
+    else:
+        return None
+
+
 class vLLMRollout(BaseRollout):
-    def __init__(
-        self, model_path: str, config: RolloutConfig, tokenizer: PreTrainedTokenizer, device_mesh: DeviceMesh
-    ):
+    def __init__(self, model_path: str, config: RolloutConfig, tokenizer: PreTrainedTokenizer):
         """A vLLM rollout. It requires the module is supported by the vllm.
 
         Args:
@@ -59,7 +66,6 @@ class vLLMRollout(BaseRollout):
         self.rank = int(os.getenv("RANK", "0"))
         self.config = config
         self.pad_token_id = tokenizer.pad_token_id
-        self.device_mesh = device_mesh
         if config.tensor_parallel_size > torch.distributed.get_world_size():
             raise ValueError("Tensor parallelism size should be less than world size.")
 
@@ -85,14 +91,18 @@ class vLLMRollout(BaseRollout):
             disable_mm_preprocessor_cache=True,
             disable_log_stats=config.disable_log_stats,
             enable_chunked_prefill=config.enable_chunked_prefill,
-            seed=device_mesh["dp"].get_local_rank(),
+            seed=config.seed,
             **vllm_init_kwargs,
         )
 
         # Offload vllm model to reduce peak memory usage
         self.inference_engine.sleep(level=1)
 
-        sampling_kwargs = {"max_tokens": config.response_length, "detokenize": False}
+        sampling_kwargs = {
+            "max_tokens": config.response_length,
+            "detokenize": False,
+            "logit_bias": _get_logit_bias(model_path),
+        }
         default_sampling_params = SamplingParams()
         for key in config.to_dict().keys():
             if hasattr(default_sampling_params, key):
@@ -156,10 +166,6 @@ class vLLMRollout(BaseRollout):
                 input_ids = _repeat_interleave(input_ids, self.sampling_params.n)
                 attention_mask = _repeat_interleave(attention_mask, self.sampling_params.n)
                 position_ids = _repeat_interleave(position_ids, self.sampling_params.n)
-                if "multi_modal_inputs" in non_tensor_batch.keys():
-                    non_tensor_batch["multi_modal_inputs"] = _repeat_interleave(
-                        non_tensor_batch["multi_modal_inputs"], self.sampling_params.n
-                    )
 
         sequence_ids = torch.cat([input_ids, response_ids], dim=-1)
         response_length = response_ids.size(1)

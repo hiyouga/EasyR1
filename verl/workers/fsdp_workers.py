@@ -54,9 +54,7 @@ from ..utils.model_utils import print_gpu_memory_usage, print_model_size
 from ..utils.tokenizer import get_processor, get_tokenizer
 from ..utils.torch_dtypes import PrecisionType
 from ..utils.torch_functional import AnyPrecisionAdamW, get_constant_schedule_with_warmup
-from .actor import DataParallelPPOActor
 from .config import ActorConfig, CriticConfig, FSDPConfig, ModelConfig, OptimConfig, RefConfig, WorkerConfig
-from .critic import DataParallelPPOCritic
 from .rollout import vLLMRollout
 from .sharding_manager import FSDPVLLMShardingManager
 from .sharding_manager.fsdp_ulysses import FSDPUlyssesShardingManager
@@ -318,7 +316,6 @@ class FSDPWorker(Worker):
             model_path=self.config.actor.model.model_path,
             config=self.config.rollout,
             tokenizer=self.tokenizer,
-            device_mesh=rollout_device_mesh,
         )
         self.rollout_sharding_manager = FSDPVLLMShardingManager(
             module=self.fsdp_module,
@@ -366,6 +363,8 @@ class FSDPWorker(Worker):
                 print_gpu_memory_usage(f"After offload {role} optimizer during init")
 
         if self._is_actor:
+            from .actor.dp_actor import DataParallelPPOActor  # lazy import
+
             self.actor = DataParallelPPOActor(
                 config=self.config.actor,
                 actor_module=self.fsdp_module,
@@ -373,6 +372,8 @@ class FSDPWorker(Worker):
             )
 
         if self._is_critic:
+            from .critic.dp_critic import DataParallelPPOCritic  # lazy import
+
             self.critic = DataParallelPPOCritic(
                 config=self.config,
                 critic_module=self.fsdp_module,
@@ -383,6 +384,8 @@ class FSDPWorker(Worker):
             self._build_rollout()
 
         if self._is_ref:
+            from .actor.dp_actor import DataParallelPPOActor  # lazy import
+
             self.ref_policy = DataParallelPPOActor(
                 config=self.config.ref,
                 actor_module=self.fsdp_module,

@@ -13,14 +13,13 @@
 # limitations under the License.
 
 import inspect
-import warnings
 from typing import Dict, Iterable, Tuple, Union
 
 import torch
 import torch.distributed as dist
 from torch.distributed._tensor import DTensor
+from torch.distributed.checkpoint.state_dict import get_model_state_dict
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.fsdp.api import ShardedStateDictConfig, StateDictType
 from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataParallel as FSDP
 from vllm import LLM
 from vllm.distributed import parallel_state as vllm_ps
@@ -40,13 +39,6 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         self.module = module
         self.inference_engine = inference_engine
         self.device_mesh = device_mesh
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            FSDP.set_state_dict_type(
-                self.module,
-                state_dict_type=StateDictType.SHARDED_STATE_DICT,
-                state_dict_config=ShardedStateDictConfig(),
-            )
 
         self.world_size = dist.get_world_size()
         self.tp_size = vllm_ps.get_tensor_model_parallel_world_size()
@@ -81,7 +73,7 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         # vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/device_allocator/cumem.py#L103
         torch.cuda.empty_cache()
         print_gpu_memory_usage("Before state_dict() in sharding manager")
-        actor_weights = self.module.state_dict()
+        actor_weights = get_model_state_dict(self.module)
         print_gpu_memory_usage("After state_dict() in sharding manager")
 
         if "tags" in inspect.signature(self.inference_engine.wake_up).parameters:

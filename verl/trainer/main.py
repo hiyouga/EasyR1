@@ -11,9 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""
-Note that we don't combine the main with ray_trainer as ray_trainer is used by other main.
-"""
 
 import json
 
@@ -23,7 +20,7 @@ from omegaconf import OmegaConf
 from ..single_controller.ray import RayWorkerGroup
 from ..utils.tokenizer import get_processor, get_tokenizer
 from ..workers.fsdp_workers import FSDPWorker
-from ..workers.reward import CustomRewardManager
+from ..workers.reward import FunctionRewardManager
 from .config import PPOConfig
 from .ray_trainer import RayPPOTrainer, ResourcePoolManager, Role
 
@@ -35,7 +32,6 @@ class Runner:
 
     def run(self, config: PPOConfig):
         # print config
-        config.deep_post_init()
         print(json.dumps(config.to_dict(), indent=2))
 
         # instantiate tokenizer
@@ -68,8 +64,8 @@ class Runner:
         }
         resource_pool_manager = ResourcePoolManager(resource_pool_spec=resource_pool_spec, mapping=mapping)
 
-        reward_fn = CustomRewardManager(tokenizer=tokenizer, config=config.worker.reward)
-        val_reward_fn = CustomRewardManager(tokenizer=tokenizer, config=config.worker.reward)
+        reward_fn = FunctionRewardManager(config=config.worker.reward, tokenizer=tokenizer)
+        val_reward_fn = FunctionRewardManager(config=config.worker.reward, tokenizer=tokenizer)
 
         trainer = RayPPOTrainer(
             config=config,
@@ -95,11 +91,18 @@ def main():
         default_config = OmegaConf.merge(default_config, file_config)
 
     ppo_config = OmegaConf.merge(default_config, cli_args)
-    ppo_config = OmegaConf.to_object(ppo_config)
+    ppo_config: PPOConfig = OmegaConf.to_object(ppo_config)
+    ppo_config.deep_post_init()
 
     if not ray.is_initialized():
-        # this is for local ray cluster
-        ray.init(runtime_env={"env_vars": {"TOKENIZERS_PARALLELISM": "true", "NCCL_DEBUG": "WARN"}})
+        runtime_env = {
+            "env_vars": {
+                "TOKENIZERS_PARALLELISM": "true",
+                "NCCL_DEBUG": "WARN",
+                "VLLM_LOGGING_LEVEL": "INFO",
+            }
+        }
+        ray.init(runtime_env=runtime_env)
 
     runner = Runner.remote()
     ray.get(runner.run.remote(ppo_config))

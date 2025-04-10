@@ -144,20 +144,22 @@ class RLHFDataset(Dataset, ImageProcessMixin):
             attention_mask = model_inputs.pop("attention_mask")[0]
             row_dict["multi_modal_data"] = {"image": images}
             row_dict["multi_modal_inputs"] = dict(model_inputs)
-
-            # qwen2vl mrope
-            position_ids = get_rope_index(
-                self.processor,
-                input_ids=input_ids,
-                image_grid_thw=model_inputs["image_grid_thw"],
-                attention_mask=attention_mask,
-            )  # (3, seq_length)
         else:
             messages = [{"role": "user", "content": prompt_str}]
             prompt = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
             model_inputs = self.tokenizer([prompt], add_special_tokens=False, return_tensors="pt")
             input_ids = model_inputs.pop("input_ids")[0]
             attention_mask = model_inputs.pop("attention_mask")[0]
+
+        if self.processor is not None and self.processor.image_processor.__class__.__name__ == "Qwen2VLImageProcessor":
+            # qwen2vl mrope
+            position_ids = get_rope_index(
+                self.processor,
+                input_ids=input_ids,
+                image_grid_thw=model_inputs.get("image_grid_thw"),
+                attention_mask=attention_mask,
+            )  # (3, seq_length)
+        else:
             position_ids = torch.clip(attention_mask.cumsum(dim=0) - 1, min=0, max=None)  # (seq_length,)
 
         input_ids, attention_mask, position_ids = VF.postprocess_data(
