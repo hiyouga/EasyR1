@@ -149,6 +149,10 @@ def extract_video_frames(video_path: str, num_frames: int = 4) -> List[ImageObje
         logger.error(traceback.format_exc())
         # Return placeholder images
         return [Image.new("RGB", (224, 224), (128, 128, 128)) for _ in range(num_frames)]
+    finally:
+        if cap is not None and cap.isOpened():
+            cap.release()
+            logger.debug(f"Released video capture for {video_path}")
 
 
 class ImageProcessMixin:
@@ -269,6 +273,17 @@ class RLHFDataset(Dataset, ImageProcessMixin):
 
         processed_images = []
         original_dimensions = []  # Store original image dimensions
+
+        # Extract data_source and dataset
+        vision_path = row_dict['images']
+        if len(vision_path) == 0:
+            vision_path = row_dict['videos']
+        if len(vision_path) == 0:
+            row_dict["data_source"] = "unknown"
+            row_dict["dataset"] = "unknown"
+        vision_path = vision_path[0]
+        row_dict["data_source"] = vision_path.split("/")[0]
+        row_dict["dataset"] = vision_path.split("/")[1]
 
         if self.image_key in row_dict and row_dict["images"]:
             for i, image_item in enumerate(row_dict["images"]):

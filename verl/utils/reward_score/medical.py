@@ -6,6 +6,7 @@ import torch
 import numpy as np
 from mathruler.grader import extract_boxed_content
 import wandb
+import random
 
 
 def parse_conditions(text):
@@ -309,7 +310,6 @@ def medical_compute_score(predict_str: str, ground_truth: str, segmentation_mask
     json_data = extract_json_from_response(predict_str)
     if json_data:
         # Extract bounding boxes from the JSON
-        print("[Bounding Box] ", json_data)
         try:
             pred_bboxes = []
             if isinstance(json_data, list):
@@ -322,10 +322,12 @@ def medical_compute_score(predict_str: str, ground_truth: str, segmentation_mask
                 for item in json_data['objects_of_interest']:
                     if isinstance(item, dict) and "bbox_2d" in item:
                         pred_bboxes.append(item["bbox_2d"])
-            else:
-                print("Error: Invalid JSON format")
-            print("[Formatted Bounding Box] ", pred_bboxes)
-            print('[GT Bounding Box] ', bbox)
+            # else:
+            #     print("Error: Invalid JSON format")
+            if random.random() < 0.005:  # print every 0.5%
+                print("[Bounding Box] ", json_data)
+                print("[Formatted Bounding Box] ", pred_bboxes)
+                print('[GT Bounding Box] ', bbox)
 
             # Calculate IoU between predicted boxes and ground truth
             if pred_bboxes:

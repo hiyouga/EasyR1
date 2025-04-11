@@ -52,7 +52,7 @@ worker:
     gpu_memory_utilization: 0.6
     enforce_eager: false
     enable_chunked_prefill: false
-    tensor_parallel_size: 2
+    tensor_parallel_size: 4
     limit_images: 0
     val_override_config:
       temperature: 0.5

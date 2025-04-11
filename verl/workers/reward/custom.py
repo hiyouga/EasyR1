@@ -72,6 +72,6 @@ class CustomRewardManager:
             for key, value in score.items():
                 reward_metrics[key].append(value)
 
-        mean_metrics = {key: sum(value) / len(value) for key, value in reward_metrics.items()}
-        wandb.log(mean_metrics)
+        # mean_metrics = {key: sum(value) / len(value) for key, value in reward_metrics.items()}
+        # wandb.log(mean_metrics)
         return reward_tensor, reward_metrics
