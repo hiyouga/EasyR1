@@ -49,7 +49,7 @@ from ..workers.fsdp_workers import FSDPWorker
 from . import core_algos
 from .config import PPOConfig
 from .metrics import compute_data_metrics, compute_throughout_metrics, compute_timing_metrics, reduce_metrics
-from ..utils.reward_score.evaluation import compute_metrics_by_data_source
+from examples.score_function.evaluation import compute_metrics_by_data_source
 
 
 class Role(IntEnum):

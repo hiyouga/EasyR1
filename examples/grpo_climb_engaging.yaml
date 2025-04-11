@@ -43,8 +43,8 @@ worker:
       enable_cpu_offload: false
       enable_rank0_init: true
     offload:
-      offload_params: false  # true: more CPU memory; false: more GPU memory
-      offload_optimizer: false  # true: more CPU memory; false: more GPU memory
+      offload_params: true  # true: more CPU memory; false: more GPU memory
+      offload_optimizer: true  # true: more CPU memory; false: more GPU memory
 
   rollout:
     temperature: 1.0
@@ -61,14 +61,14 @@ worker:
   ref:
     fsdp:
       enable_full_shard: true
-      enable_cpu_offload: false  # true: more CPU memory; false: more GPU memory
+      enable_cpu_offload: true  # true: more CPU memory; false: more GPU memory
       enable_rank0_init: true
     offload:
       offload_params: false
 
   reward:
     reward_type: function
-    score_function: medical
+    score_function: ./examples/score_function/medical.py:medical_compute_score
     skip_special_tokens: true
 
 trainer:

@@ -25,8 +25,6 @@ import wandb
 from transformers import PreTrainedTokenizer
 
 from ...protocol import DataProto
-from ...utils.reward_score import math_compute_score, r1v_compute_score, medical_compute_score, evaluate_bbox_format, \
-    extract_json_from_response, calculate_bbox_iou
 from .config import RewardConfig
 
 
