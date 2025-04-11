@@ -15,11 +15,18 @@
 Reward config
 """
 
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
+from typing import Optional
 
 
 @dataclass
 class RewardConfig:
     reward_type: str = "function"
-    score_function: str = "math"
+    score_function: Optional[str] = None
+    score_function_kwargs: dict = field(default_factory=dict)
     skip_special_tokens: bool = True
+
+    def post_init(self):
+        if self.score_function is not None and os.path.exists(self.score_function):
+            self.score_function = os.path.abspath(self.score_function)

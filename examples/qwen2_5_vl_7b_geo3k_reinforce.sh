@@ -12,5 +12,8 @@ python3 -m verl.trainer.main \
     data.format_prompt="${FORMAT_PROMPT}" \
     worker.actor.model.model_path=${MODEL_PATH} \
     algorithm.adv_estimator=reinforce_plus_plus \
+    algorithm.use_kl_loss=false \
+    algorithm.kl_penalty=kl \
+    algorithm.kl_coef=1.0e-3 \
     trainer.experiment_name=qwen2_5_vl_7b_geo_reinforce_pp \
     trainer.n_gpus_per_node=8

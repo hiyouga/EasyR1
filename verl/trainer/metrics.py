@@ -110,11 +110,11 @@ def compute_timing_metrics(batch: DataProto, timing_raw: Dict[str, float]) -> Di
     }
 
 
-def compute_throughout_metrics(batch: DataProto, timing_raw: Dict[str, float], n_gpus: int) -> Dict[str, Any]:
+def compute_throughout_metrics(batch: DataProto, timing_raw: Dict[str, float], num_gpus: int) -> Dict[str, Any]:
     total_num_tokens = sum(batch.meta_info["global_token_num"])
     time = timing_raw["step"]
     return {
         "perf/total_num_tokens": total_num_tokens,
         "perf/time_per_step": time,
-        "perf/throughput": total_num_tokens / (time * n_gpus),
+        "perf/throughput": total_num_tokens / (time * num_gpus),
     }

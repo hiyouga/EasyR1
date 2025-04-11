@@ -86,6 +86,10 @@ class TrainerConfig:
         if self.save_checkpoint_path is None:
             self.save_checkpoint_path = os.path.join("checkpoints", self.project_name, self.experiment_name)
 
+        self.save_checkpoint_path = os.path.abspath(self.save_checkpoint_path)
+        if self.load_checkpoint_path is not None:
+            self.load_checkpoint_path = os.path.abspath(self.load_checkpoint_path)
+
 
 @dataclass
 class PPOConfig:

@@ -47,8 +47,9 @@ worker:
       offload_optimizer: true  # true: more CPU memory; false: more GPU memory
 
   rollout:
-    temperature: 1.0
     n: 5
+    temperature: 1.0
+    top_p: 0.99
     gpu_memory_utilization: 0.6
     enforce_eager: false
     enable_chunked_prefill: false
@@ -68,8 +69,7 @@ worker:
 
   reward:
     reward_type: function
-    score_function: math
-    skip_special_tokens: true
+    score_function: ./examples/score_function/math.py:compute_score
 
 trainer:
   total_episodes: 15

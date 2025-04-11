@@ -66,7 +66,7 @@ if __name__ == "__main__":
 
     print(f"Got device mesh {mesh}, mesh_dim_names {mesh_dim_names}")
 
-    assert mesh_dim_names in (("fsdp",),), f"Unsupported mesh_dim_names {mesh_dim_names}"
+    assert mesh_dim_names in (("fsdp",), ("ddp", "fsdp")), f"Unsupported mesh_dim_names {mesh_dim_names}"
 
     if "tp" in mesh_dim_names:
         # fsdp * tp
@@ -106,9 +106,10 @@ if __name__ == "__main__":
             if isinstance(tensor, DTensor):
                 state_dict[key].append(tensor._local_tensor.bfloat16())
                 placements = tuple(tensor.placements)
-                # replicated placement at dp dimension can be discarded
-                if mesh_dim_names[0] == "dp":
+                # replicated placement at ddp dimension can be discarded
+                if mesh_dim_names[0] == "ddp":
                     placements = placements[1:]
+
                 if key not in param_placements:
                     param_placements[key] = placements
                 else:
