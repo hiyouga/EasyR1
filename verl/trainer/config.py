@@ -43,11 +43,18 @@ class DataConfig:
     rollout_batch_size: int = 512
     val_batch_size: int = -1
     format_prompt: Optional[str] = None
+    format_prompt_path: Optional[str] = None
     shuffle: bool = True
     seed: int = 1
     max_pixels: int = 4194304
     min_pixels: int = 262144
 
+    def post_init(self):
+        if self.format_prompt is None and self.format_prompt_path is not None:
+            if os.path.exists(self.format_prompt_path):
+                self.format_prompt_path = os.path.abspath(self.format_prompt_path)
+                with open(self.format_prompt_path, "r", encoding="utf-8") as f:
+                    self.format_prompt = f.read()
 
 @dataclass
 class AlgorithmConfig:
