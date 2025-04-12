@@ -58,6 +58,7 @@ from .config import ActorConfig, CriticConfig, FSDPConfig, ModelConfig, OptimCon
 from .rollout import vLLMRollout
 from .sharding_manager import FSDPVLLMShardingManager
 from .sharding_manager.fsdp_ulysses import FSDPUlyssesShardingManager
+import tracemalloc
 
 
 class FSDPWorker(Worker):
@@ -84,6 +85,7 @@ class FSDPWorker(Worker):
 
         self._use_param_offload = False
         self._use_optimizer_offload = False
+        tracemalloc.start()
         if self._is_actor:
             self._use_param_offload = self.config.actor.offload.offload_params
             self._use_optimizer_offload = self.config.actor.offload.offload_optimizer
@@ -472,6 +474,11 @@ class FSDPWorker(Worker):
             offload_fsdp_optimizer(optimizer=self.optimizer)
 
         output = output.to("cpu")
+        snapshot = tracemalloc.take_snapshot()
+        top_stats = snapshot.statistics('lineno')
+        print("[ Top 10 memory users ]")
+        for stat in top_stats[:10]:
+            print(stat)
         return output
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)

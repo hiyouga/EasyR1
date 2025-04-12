@@ -1,3 +1,4 @@
+import copy
 import math
 import os
 import logging
@@ -238,6 +239,8 @@ class RLHFDataset(Dataset, ImageProcessMixin):
     ):
         self.tokenizer = tokenizer
         self.processor = processor
+        print(f"Dataset processor has class {self.processor.__class__.__name__}, "
+              f"image processor has class {self.processor.image_processor.__class__.__name__}")
         self.prompt_key = prompt_key
         self.answer_key = answer_key
         self.image_key = image_key
@@ -266,7 +269,7 @@ class RLHFDataset(Dataset, ImageProcessMixin):
         return len(self.dataset)
 
     def __getitem__(self, index):
-        row_dict: dict = self.dataset[index]
+        row_dict: dict = copy.deepcopy(self.dataset[index])
         prompt_str: str = row_dict[self.prompt_key]
         if self.format_prompt:
             prompt_str = prompt_str + " " + self.format_prompt.strip()
@@ -485,7 +488,8 @@ class RLHFDataset(Dataset, ImageProcessMixin):
         row_dict["bbox"] = torch.tensor(row_dict["bbox"], dtype=torch.float32)
 
         row_dict["multi_modal_inputs"] = dict(model_inputs)
-        if self.processor is not None and self.processor.image_processor.__class__.__name__ == "Qwen2VLImageProcessor":
+        if self.processor is not None:
+            # and self.processor.image_processor.__class__.__name__ == "Qwen2VLImageProcessor"
             # qwen2vl mrope
             position_ids = get_rope_index(
                 self.processor,

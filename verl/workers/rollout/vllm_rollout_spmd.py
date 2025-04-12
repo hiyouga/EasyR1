@@ -45,7 +45,7 @@ def _repeat_interleave(value: Union[torch.Tensor, np.ndarray], repeats: int) -> 
 
 
 def _get_logit_bias(model_path: str) -> Optional[Dict[int, float]]:
-    processor = get_processor(model_path)
+    processor = get_processor(model_path, use_fast=True)
     if processor is not None and hasattr(processor, "image_token"):
         image_token_id = processor.tokenizer.convert_tokens_to_ids(processor.image_token)
         return {image_token_id: -100}
