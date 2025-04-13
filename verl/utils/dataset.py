@@ -93,6 +93,7 @@ class RLHFDataset(Dataset, ImageProcessMixin):
         format_prompt: str = None,
         max_pixels: int = None,
         min_pixels: int = None,
+        filter_overlong_prompts: bool = False,
     ):
         self.tokenizer = tokenizer
         self.processor = processor
@@ -104,6 +105,7 @@ class RLHFDataset(Dataset, ImageProcessMixin):
         self.format_prompt = format_prompt
         self.max_pixels = max_pixels
         self.min_pixels = min_pixels
+        self.filter_overlong_prompts = filter_overlong_prompts
 
         if "@" in data_path:
             data_path, data_split = data_path.split("@")
@@ -117,8 +119,33 @@ class RLHFDataset(Dataset, ImageProcessMixin):
         else:  # remote dataset
             self.dataset = load_dataset(data_path, split=data_split)
 
+        if self.filter_overlong_prompts:
+            self.dataset = self.dataset.filter(
+                self._filter_overlong_prompts, desc=f"Filtering prompts longer than {self.max_prompt_length} tokens"
+            )
+
     def __len__(self):
         return len(self.dataset)
+
+    def _filter_overlong_prompts(self, example: dict):
+        prompt_str: str = example[self.prompt_key]
+        if self.format_prompt:
+            prompt_str = prompt_str + " " + self.format_prompt.strip()
+        if self.image_key in example:
+            # https://huggingface.co/docs/transformers/en/tasks/image_text_to_text
+            content_list = []
+            for i, content in enumerate(prompt_str.split("<image>")):
+                if i != 0:
+                    content_list.append({"type": "image"})
+
+                if content:
+                    content_list.append({"type": "text", "text": content})
+
+            messages = [{"role": "user", "content": content_list}]
+        else:
+            messages = [{"role": "user", "content": prompt_str}]
+
+        return len(self.tokenizer.apply_chat_template(messages, add_generation_prompt=True)) <= self.max_prompt_length
 
     def __getitem__(self, index):
         row_dict: dict = self.dataset[index]

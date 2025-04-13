@@ -266,6 +266,7 @@ class RayPPOTrainer:
             format_prompt=self.config.data.format_prompt,
             min_pixels=self.config.data.min_pixels,
             max_pixels=self.config.data.max_pixels,
+            filter_overlong_prompts=self.config.data.filter_overlong_prompts,
         )
         # use sampler for better ckpt resume
         if self.config.data.shuffle:
@@ -297,6 +298,7 @@ class RayPPOTrainer:
             format_prompt=self.config.data.format_prompt,
             min_pixels=self.config.data.min_pixels,
             max_pixels=self.config.data.max_pixels,
+            filter_overlong_prompts=self.config.data.filter_overlong_prompts,
         )
         self.val_dataloader = StatefulDataLoader(
             dataset=self.val_dataset,
