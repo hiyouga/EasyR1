@@ -56,6 +56,7 @@ class DataConfig:
                 with open(self.format_prompt_path, "r", encoding="utf-8") as f:
                     self.format_prompt = f.read()
 
+
 @dataclass
 class AlgorithmConfig:
     gamma: float = 1.0
