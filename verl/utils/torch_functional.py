@@ -177,7 +177,7 @@ def postprocess_data(
             attention_mask = attention_mask[..., :max_length]
             position_ids = position_ids[..., :max_length]
         elif truncation == "error":
-            raise NotImplementedError(f"{seq_length} is larger than {max_length}.")
+            raise RuntimeError(f"Input sequence length {seq_length} is longer than max length {max_length}.")
         else:
             raise NotImplementedError(f"Unknown truncation method {truncation}.")
 

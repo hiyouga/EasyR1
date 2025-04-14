@@ -47,6 +47,7 @@ class DataConfig:
     seed: int = 1
     max_pixels: int = 4194304
     min_pixels: int = 262144
+    filter_overlong_prompts: bool = True
 
     def post_init(self):
         if self.format_prompt is not None:
