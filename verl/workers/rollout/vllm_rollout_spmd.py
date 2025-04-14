@@ -11,12 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""
-The vllm_rollout that can be applied in different backend
-When working with FSDP:
-- Use DTensor weight loader (recommended) or HF weight loader
-- Utilize state_dict from the FSDP to synchronize the weights among tp ranks in vLLM
-"""
 
 import os
 from contextlib import contextmanager
@@ -44,8 +38,8 @@ def _repeat_interleave(value: Union[torch.Tensor, np.ndarray], repeats: int) -> 
         return np.repeat(value, repeats, axis=0)
 
 
-def _get_logit_bias(model_path: str) -> Optional[Dict[int, float]]:
-    processor = get_processor(model_path)
+def _get_logit_bias(model_path: str, trust_remote_code: bool) -> Optional[Dict[int, float]]:
+    processor = get_processor(model_path, trust_remote_code=trust_remote_code)
     if processor is not None and hasattr(processor, "image_token"):
         image_token_id = processor.tokenizer.convert_tokens_to_ids(processor.image_token)
         return {image_token_id: -100}
@@ -74,24 +68,30 @@ class vLLMRollout(BaseRollout):
 
         vllm_init_kwargs = {}
         if config.limit_images > 0:
-            vllm_init_kwargs = {"limit_mm_per_prompt": {"image": config.limit_images}}
+            vllm_init_kwargs["limit_mm_per_prompt"] = {"image": config.limit_images}
+
+        if config.max_model_len is not None:
+            vllm_init_kwargs["max_model_len"] = config.max_model_len
+        else:
+            vllm_init_kwargs["max_model_len"] = config.prompt_length + config.response_length
 
         self.inference_engine = LLM(
             model=model_path,
             skip_tokenizer_init=False,
-            tensor_parallel_size=config.tensor_parallel_size,
+            trust_remote_code=config.trust_remote_code,
+            load_format="dummy",
             dtype=PrecisionType.to_str(PrecisionType.to_dtype(config.dtype)),
-            gpu_memory_utilization=config.gpu_memory_utilization,
-            enforce_eager=config.enforce_eager,
-            max_model_len=config.prompt_length + config.response_length,
-            max_num_batched_tokens=config.max_num_batched_tokens,
-            enable_sleep_mode=True,
+            seed=config.seed,
             distributed_executor_backend="external_launcher",
+            tensor_parallel_size=config.tensor_parallel_size,
+            gpu_memory_utilization=config.gpu_memory_utilization,
+            max_num_batched_tokens=config.max_num_batched_tokens,
+            disable_log_stats=config.disable_log_stats,
+            enforce_eager=config.enforce_eager,
             disable_custom_all_reduce=True,
             disable_mm_preprocessor_cache=True,
-            disable_log_stats=config.disable_log_stats,
             enable_chunked_prefill=config.enable_chunked_prefill,
-            seed=config.seed,
+            enable_sleep_mode=True,
             **vllm_init_kwargs,
         )
 
@@ -101,7 +101,7 @@ class vLLMRollout(BaseRollout):
         sampling_kwargs = {
             "max_tokens": config.response_length,
             "detokenize": False,
-            "logit_bias": _get_logit_bias(model_path),
+            "logit_bias": _get_logit_bias(model_path, trust_remote_code=config.trust_remote_code),
         }
         default_sampling_params = SamplingParams()
         for key in config.to_dict().keys():

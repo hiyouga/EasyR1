@@ -30,7 +30,6 @@ import ray
 import torch
 from codetiming import Timer
 from ray.experimental.tqdm_ray import tqdm
-from torch.utils.data import RandomSampler, SequentialSampler
 from torchdata.stateful_dataloader import StatefulDataLoader
 from transformers import PreTrainedTokenizer, ProcessorMixin
 
@@ -40,7 +39,6 @@ from ..single_controller.ray import RayClassWithInitArgs, RayResourcePool, RayWo
 from ..single_controller.ray.base import create_colocated_worker_cls
 from ..utils import torch_functional as VF
 from ..utils.checkpoint import CHECKPOINT_TRACKER, remove_obsolete_ckpt
-from ..utils.dataset import RLHFDataset, collate_fn
 from ..utils.logger import Tracker
 from ..utils.py_functional import convert_dict_to_str
 from ..utils.seqlen_balancing import get_seqlen_balanced_partitions, log_seqlen_unbalance
@@ -182,6 +180,8 @@ class RayPPOTrainer:
         config: PPOConfig,
         tokenizer: PreTrainedTokenizer,
         processor: Optional[ProcessorMixin],
+        train_dataloader: StatefulDataLoader,
+        val_dataloader: StatefulDataLoader,
         role_worker_mapping: dict[Role, Type[Worker]],
         resource_pool_manager: ResourcePoolManager,
         ray_worker_group_cls: Type[RayWorkerGroup] = RayWorkerGroup,
@@ -190,6 +190,8 @@ class RayPPOTrainer:
     ):
         self.tokenizer = tokenizer
         self.processor = processor
+        self.train_dataloader = train_dataloader
+        self.val_dataloader = val_dataloader
         self.config = config
         self.reward_fn = reward_fn
         self.val_reward_fn = val_reward_fn
@@ -251,78 +253,13 @@ class RayPPOTrainer:
         ):
             raise ValueError("GRPO and RLOO algorithm need `config.worker.rollout.n > 1`.")
 
-        self._create_dataloader()
-
-    def _create_dataloader(self) -> None:
-        self.train_dataset = RLHFDataset(
-            data_path=self.config.data.train_files,
-            tokenizer=self.tokenizer,
-            processor=self.processor,
-            prompt_key=self.config.data.prompt_key,
-            answer_key=self.config.data.answer_key,
-            image_key=self.config.data.image_key,
-            max_prompt_length=self.config.data.max_prompt_length,
-            truncation="right",
-            format_prompt=self.config.data.format_prompt,
-            min_pixels=self.config.data.min_pixels,
-            max_pixels=self.config.data.max_pixels,
-        )
-        # use sampler for better ckpt resume
-        if self.config.data.shuffle:
-            train_dataloader_generator = torch.Generator()
-            train_dataloader_generator.manual_seed(self.config.data.seed)
-            sampler = RandomSampler(data_source=self.train_dataset, generator=train_dataloader_generator)
+        if config.trainer.max_steps is not None:
+            self.training_steps = config.trainer.max_steps
         else:
-            sampler = SequentialSampler(data_source=self.train_dataset)
+            self.training_steps = len(train_dataloader) * config.trainer.total_episodes
 
-        self.train_dataloader = StatefulDataLoader(
-            dataset=self.train_dataset,
-            batch_size=self.config.data.rollout_batch_size,
-            sampler=sampler,
-            num_workers=8,
-            collate_fn=collate_fn,
-            pin_memory=False,
-            drop_last=True,
-        )
-
-        self.val_dataset = RLHFDataset(
-            data_path=self.config.data.val_files,
-            tokenizer=self.tokenizer,
-            processor=self.processor,
-            prompt_key=self.config.data.prompt_key,
-            answer_key=self.config.data.answer_key,
-            image_key=self.config.data.image_key,
-            max_prompt_length=self.config.data.max_prompt_length,
-            truncation="right",
-            format_prompt=self.config.data.format_prompt,
-            min_pixels=self.config.data.min_pixels,
-            max_pixels=self.config.data.max_pixels,
-        )
-        self.val_dataloader = StatefulDataLoader(
-            dataset=self.val_dataset,
-            batch_size=len(self.val_dataset)
-            if self.config.data.val_batch_size == -1
-            else self.config.data.val_batch_size,
-            shuffle=False,
-            num_workers=8,
-            collate_fn=collate_fn,
-            pin_memory=False,
-            drop_last=False,
-        )
-
-        assert len(self.train_dataloader) >= 1
-        assert len(self.val_dataloader) >= 1
-        print(f"Size of train dataloader: {len(self.train_dataloader)}")
-        print(f"Size of val dataloader: {len(self.val_dataloader)}")
-
-        if self.config.trainer.max_steps is not None:
-            training_steps = self.config.trainer.max_steps
-        else:
-            training_steps = len(self.train_dataloader) * self.config.trainer.total_episodes
-
-        self.training_steps = training_steps
-        self.config.worker.actor.optim.training_steps = training_steps
-        self.config.worker.critic.optim.training_steps = training_steps
+        config.worker.actor.optim.training_steps = self.training_steps
+        config.worker.critic.optim.training_steps = self.training_steps
         print(f"Total training steps: {self.training_steps}")
 
     def _maybe_log_val_generations(

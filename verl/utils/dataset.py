@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
 import torch
+from jinja2 import Template
 from datasets import load_dataset
 from PIL import Image
 from PIL.Image import Image as ImageObject
@@ -90,9 +91,9 @@ class RLHFDataset(Dataset, ImageProcessMixin):
         image_key: str = "images",
         max_prompt_length: int = 1024,
         truncation: str = "error",
-        format_prompt: str = None,
-        max_pixels: int = None,
-        min_pixels: int = None,
+        format_prompt: Optional[str] = None,
+        max_pixels: Optional[int] = None,
+        min_pixels: Optional[int] = None,
     ):
         self.tokenizer = tokenizer
         self.processor = processor
@@ -101,7 +102,6 @@ class RLHFDataset(Dataset, ImageProcessMixin):
         self.image_key = image_key
         self.max_prompt_length = max_prompt_length
         self.truncation = truncation
-        self.format_prompt = format_prompt
         self.max_pixels = max_pixels
         self.min_pixels = min_pixels
 
@@ -111,11 +111,19 @@ class RLHFDataset(Dataset, ImageProcessMixin):
             data_split = "train"
 
         if os.path.isdir(data_path):
+            # when we use dataset builder, we should always refer to the train split
             self.dataset = load_dataset("parquet", data_dir=data_path, split="train")
         elif os.path.isfile(data_path):
             self.dataset = load_dataset("parquet", data_files=data_path, split="train")
-        else:  # remote dataset
+        else:
+            # load remote dataset from huggingface hub
             self.dataset = load_dataset(data_path, split=data_split)
+
+        if format_prompt:
+            with open(format_prompt, encoding="utf-8") as f:
+                self.format_prompt = f.read()
+        else:
+            self.format_prompt = None
 
     def __len__(self):
         return len(self.dataset)
@@ -124,7 +132,8 @@ class RLHFDataset(Dataset, ImageProcessMixin):
         row_dict: dict = self.dataset[index]
         prompt_str: str = row_dict[self.prompt_key]
         if self.format_prompt:
-            prompt_str = prompt_str + " " + self.format_prompt.strip()
+            format_prompt = Template(self.format_prompt.strip())
+            prompt_str = format_prompt.render(content=prompt_str)
 
         if self.image_key in row_dict:
             # https://huggingface.co/docs/transformers/en/tasks/image_text_to_text
