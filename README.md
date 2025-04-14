@@ -104,7 +104,31 @@ Please refer to the example datasets to prepare your own dataset.
 
 ## How to Run 70B+ Model in Multi-node Environment
 
-Please see the **[veRL's official doc](https://verl.readthedocs.io/en/latest/start/multinode.html)** for multi-node training and Ray debugger.
+1. Start the Ray head node.
+
+```bash
+ray start --head --port=6379 --dashboard-host=0.0.0.0
+```
+
+2. Start the Ray worker node and connect to the head node.
+
+```bash
+ray start --address=<head_node_ip>:6379
+```
+
+3. Check the Ray resource pool.
+
+```bash
+ray status
+```
+
+4. Run training script on the Ray head node only.
+
+```bash
+bash examples/qwen2_5_vl_7b_geo3k_grpo.sh
+```
+
+See the **[veRL's official doc](https://verl.readthedocs.io/en/latest/start/multinode.html)** for more details about multi-node training and Ray debugger.
 
 ## Other Baselines
 
