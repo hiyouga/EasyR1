@@ -8,6 +8,7 @@ data:
   max_response_length: 2048
   rollout_batch_size: 512
   val_batch_size: -1
+  format_prompt: null
   shuffle: true
   seed: 1
   max_pixels: 4194304

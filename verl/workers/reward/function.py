@@ -43,16 +43,13 @@ class FunctionRewardManager:
 
     def __post_init__(self):
         """Load score function."""
-        if ":" not in self.config.score_function:
-            file_path = self.config.score_function
-            function_name = "main"
-        else:
-            file_path, function_name = self.config.score_function.split(":", maxsplit=1)
+        if self.config.score_function is None:
+            raise ValueError("Score function is not provided.")
 
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"Score function file {file_path} not found.")
+        if not os.path.exists(self.config.score_function):
+            raise FileNotFoundError(f"Score function file {self.config.score_function} not found.")
 
-        spec = importlib.util.spec_from_file_location("custom_score_fn", file_path)
+        spec = importlib.util.spec_from_file_location("custom_score_fn", self.config.score_function)
         module = importlib.util.module_from_spec(spec)
         try:
             sys.modules["custom_score_fn"] = module
@@ -60,11 +57,11 @@ class FunctionRewardManager:
         except Exception as e:
             raise RuntimeError(f"Failed to load score function: {e}")
 
-        if not hasattr(module, function_name):
-            raise AttributeError(f"Module {module} does not have function {function_name}.")
+        if not hasattr(module, self.config.score_function_name):
+            raise AttributeError(f"Module {module} does not have function {self.config.score_function_name}.")
 
-        score_fn: ScoreFunction = getattr(module, function_name)
-        print(f"Using score function `{function_name}` from `{file_path}`.")
+        score_fn: ScoreFunction = getattr(module, self.config.score_function_name)
+        print(f"Using score function `{self.config.score_function_name}` from `{self.config.score_function}`.")
         self.score_fn = partial(score_fn, **self.config.score_function_kwargs)
 
     def __call__(self, data: DataProto) -> Tuple[torch.Tensor, Dict[str, List[float]]]:

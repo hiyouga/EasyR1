@@ -22,6 +22,7 @@ from ..utils.tokenizer import get_processor, get_tokenizer
 from ..workers.fsdp_workers import FSDPWorker
 from ..workers.reward import FunctionRewardManager
 from .config import PPOConfig
+from .data_loader import create_dataloader
 from .ray_trainer import RayPPOTrainer, ResourcePoolManager, Role
 
 
@@ -67,10 +68,16 @@ class Runner:
         reward_fn = FunctionRewardManager(config=config.worker.reward, tokenizer=tokenizer)
         val_reward_fn = FunctionRewardManager(config=config.worker.reward, tokenizer=tokenizer)
 
+        train_dataloader, val_dataloader = create_dataloader(
+            config=config.data, tokenizer=tokenizer, processor=processor
+        )
+
         trainer = RayPPOTrainer(
             config=config,
             tokenizer=tokenizer,
             processor=processor,
+            train_dataloader=train_dataloader,
+            val_dataloader=val_dataloader,
             role_worker_mapping=role_worker_mapping,
             resource_pool_manager=resource_pool_manager,
             ray_worker_group_cls=ray_worker_group_cls,
@@ -100,6 +107,8 @@ def main():
                 "TOKENIZERS_PARALLELISM": "true",
                 "NCCL_DEBUG": "WARN",
                 "VLLM_LOGGING_LEVEL": "INFO",
+                "TORCH_NCCL_AVOID_RECORD_STREAMS": "1",
+                "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:False",
             }
         }
         ray.init(runtime_env=runtime_env)

@@ -48,6 +48,13 @@ class DataConfig:
     max_pixels: int = 4194304
     min_pixels: int = 262144
 
+    def post_init(self):
+        if self.format_prompt is not None:
+            if os.path.exists(self.format_prompt):
+                self.format_prompt = os.path.abspath(self.format_prompt)
+            else:
+                self.format_prompt = None
+
 
 @dataclass
 class AlgorithmConfig:
@@ -101,6 +108,7 @@ class PPOConfig:
     def post_init(self):
         self.worker.rollout.prompt_length = self.data.max_prompt_length
         self.worker.rollout.response_length = self.data.max_response_length
+        self.worker.rollout.trust_remote_code = self.worker.actor.model.trust_remote_code
         self.worker.actor.disable_kl = self.algorithm.disable_kl
         self.worker.actor.use_kl_loss = self.algorithm.use_kl_loss
         self.worker.actor.kl_penalty = self.algorithm.kl_penalty

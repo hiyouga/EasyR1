@@ -145,7 +145,11 @@ These features are temporarily disabled for now, we plan to fix them one-by-one 
 
 > RuntimeError: CUDA Error: out of memory at /workspace/csrc/cumem_allocator.cpp:62
 
-Reduce the `worker.rollout.gpu_memory_utilization`.
+Reduce the `worker.rollout.gpu_memory_utilization` and enable `worker.actor.offload.offload_params`.
+
+> RuntimeError: 0 active drivers ([]). There should only be one.
+
+Uninstall `deepspeed`.
 
 ## Citation
 
