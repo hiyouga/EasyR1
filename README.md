@@ -93,16 +93,14 @@ python3 scripts/model_merger.py --local_dir checkpoints/easy_r1/exp_name/global_
 Please refer to the example datasets to prepare your own dataset.
 
 - Text dataset: https://huggingface.co/datasets/hiyouga/math12k
-- Vision-text dataset: https://huggingface.co/datasets/hiyouga/geometry3k
-
-> [!TIP]
-> EasyR1 already supports multi-image dataset.
+- Image-text dataset: https://huggingface.co/datasets/hiyouga/geometry3k
+- Multi-image-text dataset: https://huggingface.co/datasets/hiyouga/journeybench-multi-image-vqa
 
 ## How to Understand GRPO in EasyR1
 
 ![image](assets/easyr1_grpo.png)
 
-- To learn about the GRPO algorithm, you can refer to [Hugging Face's blog](https://huggingface.co/docs/trl/v0.15.2/en/grpo_trainer).
+- To learn about the GRPO algorithm, you can refer to [Hugging Face's blog](https://huggingface.co/docs/trl/v0.16.1/en/grpo_trainer).
 
 ## How to Run 70B+ Model in Multi-node Environment
 
@@ -120,8 +118,8 @@ We also reproduced the following two baselines of the [R1-V](https://github.com/
 - **Vision-R1**: Incentivizing Reasoning Capability in Multimodal Large Language Models. [![[code]](https://img.shields.io/github/stars/Osilly/Vision-R1)](https://github.com/Osilly/Vision-R1) [![[arxiv]](https://img.shields.io/badge/arxiv-2503.06749-blue)](https://arxiv.org/abs/2503.06749)
 - **Seg-Zero**: Reasoning-Chain Guided Segmentation via Cognitive Reinforcement. [![[code]](https://img.shields.io/github/stars/dvlab-research/Seg-Zero)](https://github.com/dvlab-research/Seg-Zero) [![[arxiv]](https://img.shields.io/badge/arxiv-2503.06520-blue)](https://arxiv.org/abs/2503.06520)
 - **MetaSpatial**: Reinforcing 3D Spatial Reasoning in VLMs for the Metaverse. [![[code]](https://img.shields.io/github/stars/PzySeere/MetaSpatial)](https://github.com/PzySeere/MetaSpatial) [![[arxiv]](https://img.shields.io/badge/arxiv-2503.18470-blue)](https://arxiv.org/abs/2503.18470)
-- **Temporal-R1**: Envolving Temporal Reasoning Capability into LMMs via Temporal Consistent Reward
- [![[code]](https://img.shields.io/github/stars/appletea233/Temporal-R1)](https://github.com/appletea233/Temporal-R1)
+- **Temporal-R1**: Envolving Temporal Reasoning Capability into LMMs via Temporal Consistent Reward. [![[code]](https://img.shields.io/github/stars/appletea233/Temporal-R1)](https://github.com/appletea233/Temporal-R1)
+
 ## TODO
 
 - Support LoRA (high priority).
@@ -143,13 +141,17 @@ These features are temporarily disabled for now, we plan to fix them one-by-one 
 
 ## FAQs
 
+> ValueError: Image features and image tokens do not match: tokens: 8192, features 9800
+
+Increase the `data.max_prompt_length` or reduce the `data.max_pixels`.
+
 > RuntimeError: CUDA Error: out of memory at /workspace/csrc/cumem_allocator.cpp:62
 
 Reduce the `worker.rollout.gpu_memory_utilization` and enable `worker.actor.offload.offload_params`.
 
 > RuntimeError: 0 active drivers ([]). There should only be one.
 
-Uninstall `deepspeed`.
+Uninstall `deepspeed` from the current python environment.
 
 ## Citation
 

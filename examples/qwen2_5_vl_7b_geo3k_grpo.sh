@@ -6,7 +6,6 @@ python3 -m verl.trainer.main \
     config=examples/config.yaml \
     data.train_files=hiyouga/geometry3k@train \
     data.val_files=hiyouga/geometry3k@test \
-    data.format_prompt=./examples/format_prompt/math_format.jinja \
     worker.actor.model.model_path=${MODEL_PATH} \
     trainer.experiment_name=qwen2_5_vl_7b_geo_grpo \
     trainer.n_gpus_per_node=8

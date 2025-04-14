@@ -6,7 +6,6 @@ python3 -m verl.trainer.main \
     config=examples/config.yaml \
     data.train_files=hiyouga/geometry3k@train \
     data.val_files=hiyouga/geometry3k@test \
-    data.format_prompt=./examples/format_prompt/math_format.jinja \
     worker.actor.model.model_path=${MODEL_PATH} \
     algorithm.adv_estimator=reinforce_plus_plus \
     algorithm.use_kl_loss=false \

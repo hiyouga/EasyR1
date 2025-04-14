@@ -66,15 +66,6 @@ class vLLMRollout(BaseRollout):
         if config.max_num_batched_tokens < config.prompt_length + config.response_length:
             raise ValueError("max_num_batched_tokens should be greater than prompt_length + response_length.")
 
-        vllm_init_kwargs = {}
-        if config.limit_images > 0:
-            vllm_init_kwargs["limit_mm_per_prompt"] = {"image": config.limit_images}
-
-        if config.max_model_len is not None:
-            vllm_init_kwargs["max_model_len"] = config.max_model_len
-        else:
-            vllm_init_kwargs["max_model_len"] = config.prompt_length + config.response_length
-
         self.inference_engine = LLM(
             model=model_path,
             skip_tokenizer_init=False,
@@ -82,6 +73,7 @@ class vLLMRollout(BaseRollout):
             load_format="dummy",
             dtype=PrecisionType.to_str(PrecisionType.to_dtype(config.dtype)),
             seed=config.seed,
+            max_model_len=config.max_model_len or config.prompt_length + config.response_length,
             distributed_executor_backend="external_launcher",
             tensor_parallel_size=config.tensor_parallel_size,
             gpu_memory_utilization=config.gpu_memory_utilization,
@@ -89,10 +81,10 @@ class vLLMRollout(BaseRollout):
             disable_log_stats=config.disable_log_stats,
             enforce_eager=config.enforce_eager,
             disable_custom_all_reduce=True,
+            limit_mm_per_prompt={"image": config.limit_images} if config.limit_images > 0 else None,
             disable_mm_preprocessor_cache=True,
             enable_chunked_prefill=config.enable_chunked_prefill,
             enable_sleep_mode=True,
-            **vllm_init_kwargs,
         )
 
         # Offload vllm model to reduce peak memory usage

@@ -6,7 +6,6 @@ python3 -m verl.trainer.main \
     config=examples/config.yaml \
     data.train_files=hiyouga/geometry3k@train \
     data.val_files=hiyouga/geometry3k@test \
-    data.format_prompt=./examples/format_prompt/math_format.jinja \
     worker.actor.model.model_path=${MODEL_PATH} \
     worker.actor.micro_batch_size_per_device_for_update=1 \
     worker.actor.micro_batch_size_per_device_for_experience=8 \
