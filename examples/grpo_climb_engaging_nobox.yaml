@@ -69,7 +69,7 @@ worker:
 
   reward:
     reward_type: function
-    score_function: ./examples/score_function/medical.py:medical_compute_score
+    score_function: ./examples/score_function/medical.py:medical_standard_score
     skip_special_tokens: true
 
 trainer:

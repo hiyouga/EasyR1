@@ -15,7 +15,7 @@ format_prompt=$(cat system_prompt.txt)
 
 python -m verl.trainer.main \
     config=examples/grpo_climb_engaging.yaml \
-    algorithm.adv_estimator=reinforce_plus_plus \
+    algorithm.adv_estimator=grpo \
     data.format_prompt="${format_prompt}" \
     worker.actor.model.model_path=Qwen/Qwen2.5-VL-7B-Instruct \
     trainer.n_gpus_per_node=4

@@ -17,7 +17,7 @@ Core functions to implement PPO algorithms.
 The function implemented in this file should be used by trainer with different distributed strategies to
 implement PPO
 """
-
+import math
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from typing import TYPE_CHECKING, Tuple
@@ -31,6 +31,13 @@ from ..utils import torch_functional as VF
 
 if TYPE_CHECKING:
     from .config import AlgorithmConfig
+
+
+domain_running_stats = defaultdict(lambda: {
+    "mean": 0.0,
+    "var": 0.0,    # We'll track population variance via Welford's algorithm, or something similar
+    "count": 0
+})
 
 
 class KLController(ABC):
@@ -171,6 +178,84 @@ def compute_grpo_outcome_advantage(
     for i in range(bsz):
         scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + eps)
 
+    returns = scores.unsqueeze(-1) * response_mask
+    return returns, returns
+
+
+def update_domain_stats(domain: str, x: float):
+    stats = domain_running_stats[domain]
+    stats["count"] += 1
+    c = stats["count"]
+    delta = x - stats["mean"]
+    stats["mean"] += delta / c
+    stats["var"] += delta * (x - stats["mean"])
+
+
+def get_domain_mean_std(domain: str, eps=1e-6):
+    stats = domain_running_stats[domain]
+    c = stats["count"]
+    if c < 2:
+        # not enough data, fallback
+        return stats["mean"], 1.0
+    mean = stats["mean"]
+    var = stats["var"] / (c - 1)
+    std = max(var, eps) ** 0.5
+    return mean, std
+
+
+@torch.no_grad()
+def compute_drpo_outcome_advantage(
+    token_level_rewards: torch.Tensor,   # (bs, seq_len)
+    response_mask: torch.Tensor,         # (bs, seq_len)
+    index: torch.Tensor,                 # shape (bs,); same as GRPO (each question ID repeated rollout.n times)
+    domain_info: list[str],              # length = bs, domain label for each sample
+    eps: float = 1e-6
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    DRPO advantage = domain-based normalization + group-based normalization (similar to GRPO).
+    """
+    # 1) Summation for outcome-based reward
+    scores = token_level_rewards.sum(dim=-1)  # shape: (bs,)
+
+    # 2) Domain-based standardization
+    #    For each sample i, we transform its raw score using its domain's current mean/std.
+    bsz = scores.shape[0]
+    for i in range(bsz):
+        domain = domain_info[i]
+        # first update domain stats with the raw score (optional: you might want to do two-pass or last-step updates)
+        update_domain_stats(domain, scores[i].item())
+
+        # retrieve updated domain-level mean/std
+        domain_mean, domain_std = get_domain_mean_std(domain, eps=eps)
+
+        # shift/scale the raw score
+        scores[i] = (scores[i] - domain_mean) / domain_std
+
+    # 3) Group-based "relative" step: same as GRPO
+    #    We group by question ID = index[i].
+    id2scores = defaultdict(list)
+    for i in range(bsz):
+        id2scores[index[i].item()].append(scores[i])
+
+    # compute mean/std per group
+    id2mean, id2std = {}, {}
+    for qid, val_list in id2scores.items():
+        # must have rollout.n > 1
+        group_scores = torch.stack(val_list)
+        id2mean[qid] = group_scores.mean()
+        id2std[qid]  = group_scores.std()
+
+    # final advantage
+    for i in range(bsz):
+        qid = index[i].item()
+        # standardize again
+        # (You could do any design you like: full standardization, or just subtract the group mean, etc.)
+        if id2std[qid] < eps:
+            scores[i] = scores[i] - id2mean[qid]
+        else:
+            scores[i] = (scores[i] - id2mean[qid]) / id2std[qid]
+
+    # 4) Expand back to token level
     returns = scores.unsqueeze(-1) * response_mask
     return returns, returns
 

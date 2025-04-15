@@ -76,6 +76,7 @@ class AdvantageEstimator(str, Enum):
     REINFORCE_PLUS_PLUS = "reinforce_plus_plus"
     REMAX = "remax"
     RLOO = "rloo"
+    DRPO = "drpo"
 
 
 @dataclass
@@ -139,14 +140,17 @@ def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.KLController, kl_penal
 def compute_advantage(data: DataProto, adv_estimator: AdvantageEstimator, gamma: float = 1.0, lam: float = 1.0):
     token_level_rewards = data.batch["token_level_rewards"]
     response_mask = data.batch["response_mask"]
-    index = data.non_tensor_batch["uid"]
+    index = data.non_tensor_batch["uid"]  # used by group-based algorithms like GRPO
+
     if adv_estimator == AdvantageEstimator.GAE:
         values = data.batch["values"]
         advantages, returns = core_algos.compute_gae_advantage_return(
             token_level_rewards, values, response_mask, gamma, lam
         )
     elif adv_estimator == AdvantageEstimator.GRPO:
-        advantages, returns = core_algos.compute_grpo_outcome_advantage(token_level_rewards, response_mask, index)
+        advantages, returns = core_algos.compute_grpo_outcome_advantage(
+            token_level_rewards, response_mask, index
+        )
     elif adv_estimator == AdvantageEstimator.REINFORCE_PLUS_PLUS:
         advantages, returns = core_algos.compute_reinforce_plus_plus_outcome_advantage(
             token_level_rewards, response_mask, gamma
@@ -157,9 +161,16 @@ def compute_advantage(data: DataProto, adv_estimator: AdvantageEstimator, gamma:
             token_level_rewards, reward_baselines, response_mask
         )
     elif adv_estimator == AdvantageEstimator.RLOO:
-        advantages, returns = core_algos.compute_rloo_outcome_advantage(token_level_rewards, response_mask, index)
+        advantages, returns = core_algos.compute_rloo_outcome_advantage(
+            token_level_rewards, response_mask, index
+        )
+    elif adv_estimator == AdvantageEstimator.DRPO:
+        domain_info = data.non_tensor_batch["dataset"]
+        advantages, returns = core_algos.compute_drpo_outcome_advantage(
+            token_level_rewards, response_mask, index, domain_info
+        )
     else:
-        raise NotImplementedError
+        raise NotImplementedError(f"Unknown advantage estimator: {adv_estimator}")
 
     data.batch["advantages"] = advantages
     data.batch["returns"] = returns

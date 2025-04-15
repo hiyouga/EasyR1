@@ -39,7 +39,6 @@ def get_processor(model_path: str, **kwargs) -> Optional[ProcessorMixin]:
     """Create a huggingface pretrained processor."""
     try:
         if "qwen2" in model_path.lower():
-            # Qwen2VLImageProcessorFast is not a subclass of ProcessorMixin
             image_processor = Qwen2VLImageProcessorFast.from_pretrained(model_path, **kwargs)
             processor = AutoProcessor.from_pretrained(model_path, image_processor=image_processor,
                                                       **kwargs)
@@ -47,11 +46,6 @@ def get_processor(model_path: str, **kwargs) -> Optional[ProcessorMixin]:
             processor = AutoProcessor.from_pretrained(model_path, **kwargs)
     except Exception:
         processor = None
-
-    if "use_fast" in kwargs and kwargs["use_fast"]:
-        print(f"Using fast tokenizer for class {processor.__class__.__name__} and image processor {processor.image_processor.__class__.__name__}.")
-    else:
-        print(f"Using small tokenizer for class {processor.__class__.__name__} and image processor {processor.image_processor.__class__.__name__}..")
 
     # Avoid load tokenizer, see:
     # https://github.com/huggingface/transformers/blob/v4.49.0/src/transformers/models/auto/processing_auto.py#L344
