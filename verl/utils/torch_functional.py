@@ -1,4 +1,5 @@
 # Copyright 2024 Bytedance Ltd. and/or its affiliates
+# Copyright Meta Platforms, Inc. and affiliates
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,6 +22,8 @@ import torch
 import torch.distributed
 import torch.nn.functional as F
 from torch.optim.lr_scheduler import LambdaLR
+
+from .torch_dtypes import PrecisionType
 
 
 try:
@@ -207,35 +210,42 @@ class AnyPrecisionAdamW(torch.optim.Optimizer):
         eps: float = 1e-8,
         weight_decay: float = 0.0,
         use_kahan_summation: bool = True,
-        momentum_dtype: torch.dtype = torch.bfloat16,
-        variance_dtype: torch.dtype = torch.bfloat16,
-        compensation_buffer_dtype: torch.dtype = torch.bfloat16,
+        momentum_dtype: str = "bfloat16",
+        variance_dtype: str = "bfloat16",
+        compensation_buffer_dtype: str = "bfloat16",
     ):
         """
+        AnyPrecisionAdamW: a flexible precision AdamW optimizer
+        with optional Kahan summation for high precision weight updates.
+        Allows direct control over momentum, variance and auxiliary compensation buffer dtypes.
+        Optional Kahan summation is used to offset precision reduction for the weight updates.
+        This allows full training in BFloat16 (equal or better than FP32 results in many cases)
+        due to high precision weight updates.
+
         Args:
-                params (iterable): iterable of parameters to optimize or dicts defining parameter groups
-                lr (float, optional): learning rate (default: 1e-3)
-                betas (Tuple[float, float], optional): coefficients used for computing
-                    running averages of gradient and its square (default: (0.9, 0.999))
-                eps (float, optional): term added to the denominator to improve numerical stability (default: 1e-8)
-                weight_decay (float, optional): weight decay coefficient (default: 1e-2)
+            params (iterable): iterable of parameters to optimize or dicts defining parameter groups
+            lr (float, optional): learning rate (default: 1e-3)
+            betas (Tuple[float, float], optional): coefficients used for computing
+                running averages of gradient and its square (default: (0.9, 0.999))
+            eps (float, optional): term added to the denominator to improve numerical stability (default: 1e-8)
+            weight_decay (float, optional): weight decay coefficient (default: 1e-2)
 
-                # Any Precision specific
-                use_kahan_summation = creates auxiliary buffer to ensure high precision
-                model param updates (default: False)
-                momentum_dtype = dtype for momentum  (default: bfloat16)
-                variance_dtype = dtype for uncentered variance (default: bfloat16)
-                compensation_buffer_dtype  = dtype for Kahan summation buffer (default: bfloat16)
+            # Any Precision specific
+            use_kahan_summation = creates auxiliary buffer to ensure high precision
+            model param updates (default: False)
+            momentum_dtype = dtype for momentum  (default: bfloat16)
+            variance_dtype = dtype for uncentered variance (default: bfloat16)
+            compensation_buffer_dtype = dtype for Kahan summation buffer (default: bfloat16)
 
-                # Usage
-                This optimizer implements optimizer states, and Kahan summation
-                for high precision updates, all in user controlled dtypes.
-                Defaults are variance in BF16, Momentum in FP32.
-                This can be run in FSDP mixed precision, amp, or full precision,
-                depending on what training pipeline you wish to work with.
+            # Usage
+            This optimizer implements optimizer states, and Kahan summation
+            for high precision updates, all in user controlled dtypes.
+            Defaults are variance in BF16, Momentum in FP32.
+            This can be run in FSDP mixed precision, amp, or full precision,
+            depending on what training pipeline you wish to work with.
 
-                Setting to use_kahan_summation = False, and changing momentum and
-                variance dtypes to FP32, reverts this to a standard AdamW optimizer.
+            Setting to use_kahan_summation = False, and changing momentum and
+            variance dtypes to FP32, reverts this to a standard AdamW optimizer.
 
         """
         defaults = {
@@ -270,10 +280,11 @@ class AnyPrecisionAdamW(torch.optim.Optimizer):
             eps = group["eps"]
             use_kahan_summation = group["use_kahan_summation"]
 
-            momentum_dtype = group["momentum_dtype"]
-            variance_dtype = group["variance_dtype"]
-            compensation_buffer_dtype = group["compensation_buffer_dtype"]
+            momentum_dtype = PrecisionType.to_dtype(group["momentum_dtype"])
+            variance_dtype = PrecisionType.to_dtype(group["variance_dtype"])
+            compensation_buffer_dtype = PrecisionType.to_dtype(group["compensation_buffer_dtype"])
             for p in group["params"]:
+                assert isinstance(p, torch.Tensor)  # lint
                 if p.grad is None:
                     continue
 

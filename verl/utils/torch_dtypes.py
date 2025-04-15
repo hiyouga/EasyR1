@@ -15,40 +15,28 @@
 import torch
 
 
-HALF_LIST = [16, "16", "fp16", "float16"]
-FLOAT_LIST = [32, "32", "fp32", "float32"]
+HALF_LIST = ["fp16", "float16"]
+FLOAT_LIST = ["fp32", "float32"]
 BFLOAT_LIST = ["bf16", "bfloat16"]
 
 
 class PrecisionType:
-    """Type of precision used.
-
-    >>> PrecisionType.HALF == 16
-    True
-    >>> PrecisionType.HALF in (16, "16")
-    True
-    """
-
-    HALF = "16"
-    FLOAT = "32"
-    FULL = "64"
-    BFLOAT = "bf16"
-    MIXED = "mixed"
+    """Type of precision used."""
 
     @staticmethod
-    def is_fp16(precision):
+    def is_fp16(precision: str) -> bool:
         return precision in HALF_LIST
 
     @staticmethod
-    def is_fp32(precision):
+    def is_fp32(precision: str) -> bool:
         return precision in FLOAT_LIST
 
     @staticmethod
-    def is_bf16(precision):
+    def is_bf16(precision: str) -> bool:
         return precision in BFLOAT_LIST
 
     @staticmethod
-    def to_dtype(precision) -> torch.dtype:
+    def to_dtype(precision: str) -> torch.dtype:
         if precision in HALF_LIST:
             return torch.float16
         elif precision in FLOAT_LIST:
@@ -56,7 +44,7 @@ class PrecisionType:
         elif precision in BFLOAT_LIST:
             return torch.bfloat16
         else:
-            raise RuntimeError(f"unexpected precision: {precision}")
+            raise RuntimeError(f"Unexpected precision: {precision}")
 
     @staticmethod
     def to_str(precision: torch.dtype) -> str:
@@ -67,4 +55,4 @@ class PrecisionType:
         elif precision == torch.bfloat16:
             return "bfloat16"
         else:
-            raise RuntimeError(f"unexpected precision: {precision}")
+            raise RuntimeError(f"Unexpected precision: {precision}")
