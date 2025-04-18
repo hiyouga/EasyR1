@@ -235,7 +235,7 @@ class RLHFDataset(Dataset, ImageProcessMixin):
             format_prompt: str = None,
             max_pixels: int = None,
             min_pixels: int = None,
-            video_frames=4
+            video_frames=2
     ):
         self.tokenizer = tokenizer
         self.processor = processor

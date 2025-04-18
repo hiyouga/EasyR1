@@ -77,6 +77,7 @@ class AdvantageEstimator(str, Enum):
     REMAX = "remax"
     RLOO = "rloo"
     DRPO = "drpo"
+    SDRPO = "sdrpo"
 
 
 @dataclass
@@ -167,6 +168,11 @@ def compute_advantage(data: DataProto, adv_estimator: AdvantageEstimator, gamma:
     elif adv_estimator == AdvantageEstimator.DRPO:
         domain_info = data.non_tensor_batch["dataset"]
         advantages, returns = core_algos.compute_drpo_outcome_advantage(
+            token_level_rewards, response_mask, index, domain_info
+        )
+    elif adv_estimator == AdvantageEstimator.SDRPO:
+        domain_info = data.non_tensor_batch["dataset"]
+        advantages, returns = core_algos.compute_drpo_outcome_advantage_soft_group(
             token_level_rewards, response_mask, index, domain_info
         )
     else:

@@ -106,6 +106,10 @@ class FSDPCheckpointManager(BaseCheckpointManager):
             assert isinstance(self.model._fsdp_wrapped_module, PreTrainedModel)
             self.model._fsdp_wrapped_module.config.save_pretrained(hf_path)
             self.model._fsdp_wrapped_module.generation_config.save_pretrained(hf_path)
-            self.processing_class.save_pretrained(hf_path)
+            try:
+                self.processing_class.save_pretrained(hf_path)
+            except:
+                print(f"Failed to save tokenizer to {hf_path}.")
+                pass
 
         dist.barrier()
