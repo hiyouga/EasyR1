@@ -49,7 +49,7 @@ from ..workers.fsdp_workers import FSDPWorker
 from . import core_algos
 from .config import PPOConfig
 from .metrics import compute_data_metrics, compute_throughout_metrics, compute_timing_metrics, reduce_metrics
-from ..utils.reward_score.evaluation import compute_metrics_by_data_source
+from examples.score_function.evaluation import compute_metrics_by_data_source
 
 
 class Role(IntEnum):
@@ -76,6 +76,8 @@ class AdvantageEstimator(str, Enum):
     REINFORCE_PLUS_PLUS = "reinforce_plus_plus"
     REMAX = "remax"
     RLOO = "rloo"
+    DRPO = "drpo"
+    SDRPO = "sdrpo"
 
 
 @dataclass
@@ -104,24 +106,16 @@ class ResourcePoolManager:
         """Get the resource pool of the worker."""
         return self.resource_pool_dict[self.mapping[role]]
 
-    def get_n_gpus(self) -> int:
+    def get_num_gpus(self) -> int:
         """Get the number of gpus in this cluster."""
         return sum([n_gpus for process_on_nodes in self.resource_pool_spec.values() for n_gpus in process_on_nodes])
 
     def _check_resource_available(self):
         """Check if the resource pool can be satisfied in this ray cluster."""
-        node_available_resources = ray.state.available_resources_per_node()
-        node_available_gpus = {node: node_info.get("GPU", 0) for node, node_info in node_available_resources.items()}
-
-        # check total required gpus can be satisfied
-        total_available_gpus = sum(node_available_gpus.values())
-        total_required_gpus = sum(
-            [n_gpus for process_on_nodes in self.resource_pool_spec.values() for n_gpus in process_on_nodes]
-        )
-        if total_available_gpus < total_required_gpus:
-            raise ValueError(
-                f"Total available GPUs {total_available_gpus} is less than total desired GPUs {total_required_gpus}."
-            )
+        gpus_available = ray.available_resources().get("GPU", 0)
+        gpus_required = self.get_num_gpus()
+        if gpus_available < gpus_required:
+            raise ValueError(f"Total available GPUs {gpus_available} is less than total desired GPUs {gpus_required}.")
 
 
 def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.KLController, kl_penalty="kl"):
@@ -130,15 +124,12 @@ def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.KLController, kl_penal
     response_mask = data.batch["response_mask"]
 
     # compute kl between ref_policy and current policy
-    if "ref_log_probs" in data.batch.keys():
-        kld = core_algos.compute_kl(data.batch["old_log_probs"], data.batch["ref_log_probs"], kl_penalty=kl_penalty)
-        kld = kld * response_mask  # (batch_size, response_length)
-    else:
-        kld = torch.zeros_like(response_mask, dtype=torch.float32)
+    kld = core_algos.compute_kl(data.batch["old_log_probs"], data.batch["ref_log_probs"], kl_penalty=kl_penalty)
+    kld = kld * response_mask  # (batch_size, response_length)
 
     data.batch["token_level_rewards"] = token_level_scores - kl_ctrl.kl_coef * kld
 
-    current_kl = VF.masked_mean(kld, mask=response_mask, axis=-1)  # average over sequence
+    current_kl = VF.masked_mean(kld, mask=response_mask, dim=-1)  # average over sequence
     current_kl = torch.mean(current_kl, dim=0).item()
     metrics = {"critic/kl": current_kl, "critic/kl_coef": kl_ctrl.kl_coef}
 
@@ -150,14 +141,17 @@ def apply_kl_penalty(data: DataProto, kl_ctrl: core_algos.KLController, kl_penal
 def compute_advantage(data: DataProto, adv_estimator: AdvantageEstimator, gamma: float = 1.0, lam: float = 1.0):
     token_level_rewards = data.batch["token_level_rewards"]
     response_mask = data.batch["response_mask"]
-    index = data.non_tensor_batch["uid"]
+    index = data.non_tensor_batch["uid"]  # used by group-based algorithms like GRPO
+
     if adv_estimator == AdvantageEstimator.GAE:
         values = data.batch["values"]
         advantages, returns = core_algos.compute_gae_advantage_return(
             token_level_rewards, values, response_mask, gamma, lam
         )
     elif adv_estimator == AdvantageEstimator.GRPO:
-        advantages, returns = core_algos.compute_grpo_outcome_advantage(token_level_rewards, response_mask, index)
+        advantages, returns = core_algos.compute_grpo_outcome_advantage(
+            token_level_rewards, response_mask, index
+        )
     elif adv_estimator == AdvantageEstimator.REINFORCE_PLUS_PLUS:
         advantages, returns = core_algos.compute_reinforce_plus_plus_outcome_advantage(
             token_level_rewards, response_mask, gamma
@@ -168,9 +162,21 @@ def compute_advantage(data: DataProto, adv_estimator: AdvantageEstimator, gamma:
             token_level_rewards, reward_baselines, response_mask
         )
     elif adv_estimator == AdvantageEstimator.RLOO:
-        advantages, returns = core_algos.compute_rloo_outcome_advantage(token_level_rewards, response_mask, index)
+        advantages, returns = core_algos.compute_rloo_outcome_advantage(
+            token_level_rewards, response_mask, index
+        )
+    elif adv_estimator == AdvantageEstimator.DRPO:
+        domain_info = data.non_tensor_batch["dataset"]
+        advantages, returns = core_algos.compute_drpo_outcome_advantage(
+            token_level_rewards, response_mask, index, domain_info
+        )
+    elif adv_estimator == AdvantageEstimator.SDRPO:
+        domain_info = data.non_tensor_batch["dataset"]
+        advantages, returns = core_algos.compute_drpo_outcome_advantage_soft_group(
+            token_level_rewards, response_mask, index, domain_info
+        )
     else:
-        raise NotImplementedError
+        raise NotImplementedError(f"Unknown advantage estimator: {adv_estimator}")
 
     data.batch["advantages"] = advantages
     data.batch["returns"] = returns
@@ -380,10 +386,10 @@ class RayPPOTrainer:
             data_sources = test_batch.non_tensor_batch.get("data_source", ["unknown"] * len(input_texts))
             datasets = test_batch.non_tensor_batch.get("dataset", ["unknown"] * len(input_texts))
 
-            if "multi_modal_inputs" in test_batch.non_tensor_batch.keys():
+            if "multi_modal_data" in test_batch.non_tensor_batch.keys():
                 test_gen_batch = test_batch.pop(
                     batch_keys=["input_ids", "attention_mask", "position_ids", "segmentation_mask", "bbox"],
-                    non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data", "multi_modal_inputs"],
+                    non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
                 )
             else:
                 test_gen_batch = test_batch.pop(
@@ -614,11 +620,11 @@ class RayPPOTrainer:
                 batch: DataProto = DataProto.from_single_dict(batch_dict)
 
                 # pop those keys for generation
-                if "multi_modal_inputs" in batch.non_tensor_batch.keys():
+                if "multi_modal_data" in batch.non_tensor_batch.keys():
                     gen_batch = batch.pop(
                         batch_keys=["input_ids", "attention_mask", "position_ids",
                                                "segmentation_mask", "bbox"],
-                        non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data", "multi_modal_inputs"],
+                        non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
                     )
                 else:
                     gen_batch = batch.pop(
@@ -652,6 +658,7 @@ class RayPPOTrainer:
                     # repeat to align with repeated responses in rollout
                     batch = batch.repeat(repeat_times=self.config.worker.rollout.n, interleave=True)
                     batch = batch.union(gen_batch_output)
+                    batch.non_tensor_batch.pop("multi_modal_data", None)
 
                     # compute reward
                     with _timer("reward", timing_raw):
@@ -742,11 +749,11 @@ class RayPPOTrainer:
                             self._save_checkpoint()
 
                 # collect metrics
-                n_gpus = self.resource_pool_manager.get_n_gpus()
+                num_gpus = self.resource_pool_manager.get_num_gpus()
                 metrics.update(compute_data_metrics(batch=batch, use_critic=self.use_critic))
                 metrics.update(compute_timing_metrics(batch=batch, timing_raw=timing_raw))
-                metrics.update(compute_throughout_metrics(batch=batch, timing_raw=timing_raw, n_gpus=n_gpus))
-                wandb.log(metrics, step=self.global_step)
+                metrics.update(compute_throughout_metrics(batch=batch, timing_raw=timing_raw, num_gpus=num_gpus))
+
                 self.logger.log(data=metrics, step=self.global_step)
 
         # perform validation after training

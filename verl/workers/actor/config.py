@@ -15,6 +15,7 @@
 Actor config
 """
 
+import os
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Tuple
 
@@ -31,6 +32,12 @@ class ModelConfig:
     def post_init(self):
         if self.tokenizer_path is None:
             self.tokenizer_path = self.model_path
+
+        if self.model_path is not None and os.path.exists(self.model_path):
+            self.model_path = os.path.abspath(self.model_path)
+
+        if self.tokenizer_path is not None and os.path.exists(self.tokenizer_path):
+            self.tokenizer_path = os.path.abspath(self.tokenizer_path)
 
 
 @dataclass

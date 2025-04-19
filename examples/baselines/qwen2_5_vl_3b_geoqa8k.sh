@@ -14,6 +14,6 @@ python3 -m verl.trainer.main \
     data.format_prompt="${FORMAT_PROMPT}" \
     worker.actor.model.model_path=${MODEL_PATH} \
     worker.rollout.tensor_parallel_size=1 \
-    worker.reward.score_function=r1v \
+    worker.reward.score_function=./examples/score_function/r1v.py:compute_score \
     trainer.experiment_name=qwen2_5_vl_3b_geoqa8k \
     trainer.n_gpus_per_node=8

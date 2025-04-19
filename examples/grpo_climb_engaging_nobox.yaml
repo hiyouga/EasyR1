@@ -1,17 +1,17 @@
 data:
-  train_files: hiyouga/math12k@train
-  val_files: hiyouga/math12k@test
+  train_files: /scratch/high_modality/geom_train.jsonl
+  val_files: /scratch/high_modality/geom_valid_mini.jsonl
   prompt_key: problem
   answer_key: answer
   image_key: images
-  max_prompt_length: 2048
-  max_response_length: 2048
+  max_prompt_length: 4000
+  max_response_length: 4000
   rollout_batch_size: 512
-  val_batch_size: -1
+  val_batch_size: 512
   shuffle: true
   seed: 1
-  max_pixels: 4194304
-  min_pixels: 262144
+  max_pixels: 524288
+  min_pixels: 65536
 
 algorithm:
   adv_estimator: grpo
@@ -31,7 +31,7 @@ worker:
     model:
       model_path: Qwen/Qwen2.5-7B-Instruct
       enable_gradient_checkpointing: true
-      trust_remote_code: false
+      trust_remote_code: true
       freeze_vision_tower: false
     optim:
       lr: 1.0e-6
@@ -43,8 +43,8 @@ worker:
       enable_cpu_offload: false
       enable_rank0_init: true
     offload:
-      offload_params: true  # true: more CPU memory; false: more GPU memory
-      offload_optimizer: true  # true: more CPU memory; false: more GPU memory
+      offload_params: false  # true: more CPU memory; false: more GPU memory
+      offload_optimizer: false  # true: more CPU memory; false: more GPU memory
 
   rollout:
     n: 5
@@ -54,7 +54,7 @@ worker:
     enforce_eager: false
     enable_chunked_prefill: false
     tensor_parallel_size: 4
-    limit_images: 0
+    limit_images: 16
     val_override_config:
       temperature: 0.5
       n: 1
@@ -62,27 +62,28 @@ worker:
   ref:
     fsdp:
       enable_full_shard: true
-      enable_cpu_offload: true  # true: more CPU memory; false: more GPU memory
+      enable_cpu_offload: false  # true: more CPU memory; false: more GPU memory
       enable_rank0_init: true
     offload:
       offload_params: false
 
   reward:
     reward_type: function
-    score_function: ./examples/score_function/math.py:compute_score
+    score_function: ./examples/score_function/medical.py:medical_standard_score
+    skip_special_tokens: true
 
 trainer:
   total_episodes: 15
   logger: ["console", "wandb"]
   project_name: easy_r1
   experiment_name: qwen2_5_7b_math_grpo
-  n_gpus_per_node: 8
+  n_gpus_per_node: 4
   nnodes: 1
-  val_freq: 5  # -1 to disable
+  val_freq: 30
   val_before_train: true
   val_only: false
   val_generations_to_log: 3
-  save_freq: 5  # -1 to disable
+  save_freq: 200  # -1 to disable
   save_limit: 3  # -1 to disable
   save_checkpoint_path: null
   load_checkpoint_path: null

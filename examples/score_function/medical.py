@@ -6,6 +6,7 @@ import torch
 import numpy as np
 from mathruler.grader import extract_boxed_content
 import wandb
+import random
 
 
 def parse_conditions(text):
@@ -309,7 +310,6 @@ def medical_compute_score(predict_str: str, ground_truth: str, segmentation_mask
     json_data = extract_json_from_response(predict_str)
     if json_data:
         # Extract bounding boxes from the JSON
-        print("[Bounding Box] ", json_data)
         try:
             pred_bboxes = []
             if isinstance(json_data, list):
@@ -322,10 +322,12 @@ def medical_compute_score(predict_str: str, ground_truth: str, segmentation_mask
                 for item in json_data['objects_of_interest']:
                     if isinstance(item, dict) and "bbox_2d" in item:
                         pred_bboxes.append(item["bbox_2d"])
-            else:
-                print("Error: Invalid JSON format")
-            print("[Formatted Bounding Box] ", pred_bboxes)
-            print('[GT Bounding Box] ', bbox)
+            # else:
+            #     print("Error: Invalid JSON format")
+            if random.random() < 0.0005:  # print every 0.5%
+                print("[Bounding Box] ", json_data)
+                print("[Formatted Bounding Box] ", pred_bboxes)
+                print('[GT Bounding Box] ', bbox)
 
             # Calculate IoU between predicted boxes and ground truth
             if pred_bboxes:
@@ -338,5 +340,47 @@ def medical_compute_score(predict_str: str, ground_truth: str, segmentation_mask
         "standard_score": standard_score,
         "iou_score": iou_score,
         "format_score": format_score,
+    }
+    return scores
+
+
+def medical_standard_score(predict_str: str, ground_truth: str, segmentation_mask=None, bbox=None) -> Dict[str, float]:
+    """
+    Compute medical scoring including standard score, bounding box IoU, and format score.
+
+    Args:
+        predict_str: The model's prediction string
+        ground_truth: The ground truth string
+        segmentation_mask: Ground truth segmentation mask tensor
+        bbox: Ground truth bounding box
+
+    Returns:
+        Tuple of (standard_score, bbox_score)
+        Note: bbox_score is a combination of IoU score and format score
+    """
+    # Calculate standard score
+    answer = extract_boxed_content(predict_str)
+    if answer == "None":
+        standard_score = 0.0  # no answer
+    else:
+        # Parse both prediction and ground truth into sets of conditions
+        predicted_conditions = parse_conditions(answer)
+        ground_truth_conditions = parse_conditions(ground_truth)
+
+        # Calculate true positives, false positives, and false negatives
+        true_positives = len(predicted_conditions.intersection(ground_truth_conditions))
+        false_positives = len(predicted_conditions - ground_truth_conditions)
+        false_negatives = len(ground_truth_conditions - predicted_conditions)
+
+        # Calculate F1 score components
+        precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
+        recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
+
+        # Calculate F1 score (harmonic mean of precision and recall)
+        standard_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+
+    scores = {
+        "overall": 0.5 * standard_score,
+        "standard_score": standard_score,
     }
     return scores

@@ -1,3 +1,4 @@
+import copy
 import math
 import os
 import logging
@@ -149,6 +150,10 @@ def extract_video_frames(video_path: str, num_frames: int = 4) -> List[ImageObje
         logger.error(traceback.format_exc())
         # Return placeholder images
         return [Image.new("RGB", (224, 224), (128, 128, 128)) for _ in range(num_frames)]
+    finally:
+        if cap is not None and cap.isOpened():
+            cap.release()
+            logger.debug(f"Released video capture for {video_path}")
 
 
 class ImageProcessMixin:
@@ -230,10 +235,12 @@ class RLHFDataset(Dataset, ImageProcessMixin):
             format_prompt: str = None,
             max_pixels: int = None,
             min_pixels: int = None,
-            video_frames=4
+            video_frames=2
     ):
         self.tokenizer = tokenizer
         self.processor = processor
+        print(f"Dataset processor has class {self.processor.__class__.__name__}, "
+              f"image processor has class {self.processor.image_processor.__class__.__name__}")
         self.prompt_key = prompt_key
         self.answer_key = answer_key
         self.image_key = image_key
@@ -262,13 +269,24 @@ class RLHFDataset(Dataset, ImageProcessMixin):
         return len(self.dataset)
 
     def __getitem__(self, index):
-        row_dict: dict = self.dataset[index]
+        row_dict: dict = copy.deepcopy(self.dataset[index])
         prompt_str: str = row_dict[self.prompt_key]
         if self.format_prompt:
             prompt_str = prompt_str + " " + self.format_prompt.strip()
 
         processed_images = []
         original_dimensions = []  # Store original image dimensions
+
+        # Extract data_source and dataset
+        vision_path = row_dict['images']
+        if len(vision_path) == 0:
+            vision_path = row_dict['videos']
+        if len(vision_path) == 0:
+            row_dict["data_source"] = "unknown"
+            row_dict["dataset"] = "unknown"
+        vision_path = vision_path[0]
+        row_dict["data_source"] = vision_path.split("/")[0]
+        row_dict["dataset"] = vision_path.split("/")[1]
 
         if self.image_key in row_dict and row_dict["images"]:
             for i, image_item in enumerate(row_dict["images"]):
@@ -470,12 +488,17 @@ class RLHFDataset(Dataset, ImageProcessMixin):
         row_dict["bbox"] = torch.tensor(row_dict["bbox"], dtype=torch.float32)
 
         row_dict["multi_modal_inputs"] = dict(model_inputs)
-        position_ids = get_rope_index(
-            self.processor,
-            input_ids=input_ids,
-            image_grid_thw=model_inputs["image_grid_thw"],
-            attention_mask=attention_mask,
-        )  # (3, seq_length)
+        if self.processor is not None:
+            # and self.processor.image_processor.__class__.__name__ == "Qwen2VLImageProcessor"
+            # qwen2vl mrope
+            position_ids = get_rope_index(
+                self.processor,
+                input_ids=input_ids,
+                image_grid_thw=model_inputs.get("image_grid_thw"),
+                attention_mask=attention_mask,
+            )  # (3, seq_length)
+        else:
+            position_ids = torch.clip(attention_mask.cumsum(dim=0) - 1, min=0, max=None)  # (seq_length,)
         input_ids, attention_mask, position_ids = VF.postprocess_data(
             input_ids=input_ids,
             attention_mask=attention_mask,

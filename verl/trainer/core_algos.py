@@ -17,7 +17,7 @@ Core functions to implement PPO algorithms.
 The function implemented in this file should be used by trainer with different distributed strategies to
 implement PPO
 """
-
+import math
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from typing import TYPE_CHECKING, Tuple
@@ -31,6 +31,16 @@ from ..utils import torch_functional as VF
 
 if TYPE_CHECKING:
     from .config import AlgorithmConfig
+
+
+domain_running_stats = defaultdict(lambda: {
+    "mean": 0.0,
+    "var": 0.0,    # We'll track population variance via Welford's algorithm, or something similar
+    "count": 0
+})
+global_running_stats = {"mean": 0.0, "var": 0.0, "count": 0}
+GLOBAL_TRAIN_STEP = 0        # you can increment this elsewhere
+FADE_STEPS = 100             # after this many steps, group-based re-centering is 0
 
 
 class KLController(ABC):
@@ -133,6 +143,19 @@ def compute_gae_advantage_return(
     return advantages, returns
 
 
+def update_global_stats(x: float):
+    """Online update of overall mean/variance with Welford’s algorithm."""
+    stats = global_running_stats
+    stats["count"] += 1
+    c = stats["count"]
+    delta = x - stats["mean"]
+    stats["mean"] += delta / c
+    stats["var"] += delta * (x - stats["mean"])
+
+def get_global_mean(eps: float = 1e-6) -> float:
+    return global_running_stats["mean"] + eps    # avoid zero‑division later
+
+
 # NOTE(sgm): this implementation only consider outcome supervision, where the reward is a scalar.
 @torch.no_grad()
 def compute_grpo_outcome_advantage(
@@ -172,6 +195,171 @@ def compute_grpo_outcome_advantage(
         scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + eps)
 
     returns = scores.unsqueeze(-1) * response_mask
+    return returns, returns
+
+
+def update_domain_stats(domain: str, x: float):
+    stats = domain_running_stats[domain]
+    stats["count"] += 1
+    c = stats["count"]
+    delta = x - stats["mean"]
+    stats["mean"] += delta / c
+    stats["var"] += delta * (x - stats["mean"])
+
+
+def get_domain_mean_std(domain: str, eps=1e-6):
+    stats = domain_running_stats[domain]
+    c = stats["count"]
+    if c < 2:
+        # not enough data, fallback
+        return stats["mean"], 1.0
+    mean = stats["mean"]
+    var = stats["var"] / (c - 1)
+    std = max(var, eps) ** 0.5
+    return mean, std
+
+
+@torch.no_grad()
+def compute_drpo_outcome_advantage(          # <-- overwrite the old version
+    token_level_rewards: torch.Tensor,       # (bs, seq_len)
+    response_mask: torch.Tensor,             # (bs, seq_len)
+    index: np.ndarray,                       # (bs,)  question UUIDs
+    domain_info: np.ndarray,                 # (bs,)  domain strings
+    eps: float = 1e-6,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    1. Sum token rewards → outcome scores.
+    2. Keep running (mean, var, count) for each domain **and** globally.
+    3. **GRPO**: question‑wise mean / std normalization (exactly as provided).
+    4. Divide the GRPO‑normalized score by a temperature
+           T_d = (N_d / N_total) · (μ_d / μ_total)
+       so that rare or hard domains receive larger advantages.
+    5. Broadcast back to token level and return (advantages, returns).
+    """
+    # ------------------------------------------------------------------ #
+    # 1) Outcome score per sample (raw)
+    # ------------------------------------------------------------------ #
+    raw_scores = token_level_rewards.sum(dim=-1)   # shape (bs,)
+    bsz = raw_scores.shape[0]
+
+    # ------------------------------------------------------------------ #
+    # 2) Update running stats (domain & global) with **raw** scores
+    # ------------------------------------------------------------------ #
+    for i in range(bsz):
+        r = raw_scores[i].item()
+        d = domain_info[i]
+
+        update_domain_stats(d, r)   # already defined elsewhere
+        update_global_stats(r)
+
+    # ------------------------------------------------------------------ #
+    # 3) GRPO question‑wise normalization  (exact code as requested)
+    # ------------------------------------------------------------------ #
+    scores = raw_scores.clone()             # will be modified in‑place
+    id2score = defaultdict(list)
+    id2mean, id2std = {}, {}
+
+    for i in range(bsz):
+        id2score[index[i]].append(scores[i])
+
+    for idx in id2score:
+        assert len(id2score[idx]) > 1, "GRPO needs rollout.n > 1."
+        id2mean[idx] = torch.mean(torch.tensor(id2score[idx]))
+        id2std[idx]  = torch.std(torch.tensor(id2score[idx]))
+
+    for i in range(bsz):
+        scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + eps)
+
+    # ------------------------------------------------------------------ #
+    # 4) Domain temperature scaling
+    # ------------------------------------------------------------------ #
+    N_total  = float(global_running_stats["count"])
+    mu_total = float(global_running_stats["mean"]) if abs(global_running_stats["mean"]) > eps else eps
+
+    for i in range(bsz):
+        d_stats = domain_running_stats[domain_info[i]]
+        N_d, mu_d = float(d_stats["count"]), float(d_stats["mean"])
+        T_d = max((N_d / N_total) * (mu_d / mu_total), eps)   # avoid zero
+        scores[i] = scores[i] / T_d
+
+    # ------------------------------------------------------------------ #
+    # 5) Broadcast back to token level
+    # ------------------------------------------------------------------ #
+    returns = scores.unsqueeze(-1) * response_mask
+    return returns, returns
+
+
+###############################################################################
+# Helper: a logistic/sigmoid
+###############################################################################
+def logistic(x: float) -> float:
+    """Returns a standard logistic(sigmoid) of x in (0,1)."""
+    return 1.0 / (1.0 + math.exp(-x))
+
+@torch.no_grad()
+def compute_drpo_outcome_advantage_soft_group(
+    token_level_rewards: torch.Tensor,  # shape (bs, seq_len)
+    response_mask: torch.Tensor,        # shape (bs, seq_len)
+    index: np.ndarray,                  # shape (bs,); question IDs for grouping
+    domain_info: np.ndarray,            # shape (bs,); domain label for each sample
+    eps: float = 1e-6
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    DRPO with domain-based normalization + a logistic domain boost + partial group re-centering,
+    now also normalizing by group std (like GRPO).
+    """
+
+    global GLOBAL_TRAIN_STEP
+
+    # 0) Summation for outcome-based reward
+    scores = token_level_rewards.sum(dim=-1)  # shape: (bs,)
+    bsz = scores.shape[0]
+    scaled_scores = torch.zeros_like(scores)
+
+    for i in range(bsz):
+        domain: str = domain_info[i]
+        raw_score = scores[i].item()
+
+        # Update domain stats
+        update_domain_stats(domain, raw_score)
+        domain_mean, domain_std = get_domain_mean_std(domain, eps=eps)
+        scaled_scores[i] = (raw_score - domain_mean) / domain_std
+
+    # 2) Soft partial group-based re-centering + now also dividing by group std
+    current_step = GLOBAL_TRAIN_STEP
+    GLOBAL_TRAIN_STEP += 1
+    print("GLOBAL_TRAIN_STEP:", GLOBAL_TRAIN_STEP)
+
+    alpha = 1.0 - min(1.0, current_step / float(FADE_STEPS)) / 2
+
+    # Gather samples by question ID
+    qid2vals = defaultdict(list)
+    for i in range(bsz):
+        qid2vals[index[i]].append(i)
+
+    # Compute group means + stds
+    qid2mean = {}
+    qid2std = {}
+    for qid, idxs in qid2vals.items():
+        group_vals = scaled_scores[idxs]
+        group_mean = group_vals.mean()
+        group_std = group_vals.std()         # we will scale by group_std
+        qid2mean[qid] = group_mean
+        qid2std[qid] = group_std
+
+    # Apply partial group offset (like GRPO) + fade-out
+    combined_scores = scaled_scores.clone()
+    for qid, idxs in qid2vals.items():
+        g_mean = qid2mean[qid]
+        g_std = qid2std[qid]
+        for i in idxs:
+            val = scaled_scores[i]
+            combined_scores[i] = ((1.0 - alpha) * val + alpha * (val - g_mean)) / (g_std + eps)
+
+    print("combined_scores: ", combined_scores)
+
+    # 3) Broadcast to token level
+    returns = combined_scores.unsqueeze(-1) * response_mask
     return returns, returns
 
 

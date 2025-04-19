@@ -14,8 +14,8 @@
 """Utils for tokenization."""
 
 from typing import Optional
-
 from transformers import AutoProcessor, AutoTokenizer, PreTrainedTokenizer, ProcessorMixin
+from transformers import Qwen2VLImageProcessorFast
 
 
 def get_tokenizer(model_path: str, **kwargs) -> PreTrainedTokenizer:
@@ -38,7 +38,12 @@ def get_tokenizer(model_path: str, **kwargs) -> PreTrainedTokenizer:
 def get_processor(model_path: str, **kwargs) -> Optional[ProcessorMixin]:
     """Create a huggingface pretrained processor."""
     try:
-        processor = AutoProcessor.from_pretrained(model_path, **kwargs)
+        if "qwen2" in model_path.lower():
+            image_processor = Qwen2VLImageProcessorFast.from_pretrained(model_path, **kwargs)
+            processor = AutoProcessor.from_pretrained(model_path, image_processor=image_processor,
+                                                      **kwargs)
+        else:
+            processor = AutoProcessor.from_pretrained(model_path, **kwargs)
     except Exception:
         processor = None
 
