@@ -631,7 +631,6 @@ class RayPPOTrainer:
                         batch_keys=["input_ids", "attention_mask", "position_ids"],
                         non_tensor_batch_keys=["raw_prompt_ids"],
                     )
-
                 with _timer("step", timing_raw):
                     # generate a batch
                     with _timer("gen", timing_raw):  # wg: worker group

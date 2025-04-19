@@ -185,6 +185,9 @@ class ImageProcessMixin:
             # Return a small fallback image instead of crashing
             fallback = Image.new("RGB", (224, 224), (128, 128, 128))
             return fallback
+        
+    def process_time_series(self, time_series: Union[np.ndarray, torch.Tensor]) -> torch.Tensor:
+        raise NotImplementedError()
 
 
 def resize_bbox(bbox, original_width, original_height, new_width, new_height):
@@ -230,6 +233,7 @@ class RLHFDataset(Dataset, ImageProcessMixin):
             prompt_key: str = "prompt",
             answer_key: str = "answer",
             image_key: str = "images",
+            time_series_key: str = "time_series",
             max_prompt_length: int = 1024,
             truncation: str = "error",
             format_prompt: str = None,
@@ -244,6 +248,7 @@ class RLHFDataset(Dataset, ImageProcessMixin):
         self.prompt_key = prompt_key
         self.answer_key = answer_key
         self.image_key = image_key
+        self.time_series_key = time_series_key
         self.max_prompt_length = max_prompt_length
         self.truncation = truncation
         self.format_prompt = format_prompt
@@ -276,6 +281,7 @@ class RLHFDataset(Dataset, ImageProcessMixin):
 
         processed_images = []
         original_dimensions = []  # Store original image dimensions
+        processed_time_series = []
 
         # Extract data_source and dataset
         vision_path = row_dict['images']
@@ -346,12 +352,43 @@ class RLHFDataset(Dataset, ImageProcessMixin):
                     logger.error(f"Worker {self.worker_id}: Error processing video {i} for item {index}: {str(e)}")
                     logger.error(traceback.format_exc())
 
+        if "time_series" in row_dict and row_dict["time_series"]:
+            logger.debug(f"Worker {self.worker_id}: Processing time series for item {index}")
+            for i, time_series_item in enumerate(row_dict["time_series"]):
+                try:
+                    if isinstance(time_series_item, str):
+                        # Load the time series if it's a path
+                        full_path = os.path.join(self.data_dir, time_series_item)
+                        logger.debug(f"Worker {self.worker_id}: Loading time series {i} from {full_path}")
+
+                        if not os.path.exists(full_path):
+                            logger.warning(f"Worker {self.worker_id}: Time series file not found: {full_path}")
+                            time_series = np.zeros((1, 256))  # Placeholder
+                        else:
+                            # Load the time series data
+                            time_series = np.load(full_path)
+                            time_series = torch.tensor(time_series)
+                    else:
+                        time_series = time_series_item
+                    
+                    processed_time_series.append(self.process_time_series(time_series))
+
+                except Exception as e:
+                    logger.error(f"Worker {self.worker_id}: Error processing time series {i} for item {index}: {str(e)}")
+                    logger.error(traceback.format_exc())
+
         # get size from processed_images
         if len(processed_images) > 0:
             image_size = processed_images[0].size
             logger.debug(f"Worker {self.worker_id}: Processed images size: {image_size}")
         else:
             image_size = (224, 224)
+
+        if len(processed_time_series) > 0:
+            time_series_size = processed_time_series[0].size()
+            logger.debug(f"Worker {self.worker_id}: Processed time series size: {time_series_size}")
+        else:
+            time_series_size = (1, 256)
 
         # Load segmentation mask if available
         if "segmentation_path" in row_dict and row_dict["segmentation_path"]:
@@ -379,8 +416,10 @@ class RLHFDataset(Dataset, ImageProcessMixin):
             original_dimensions = [(224, 224)]  # Add placeholder dimensions
 
         row_dict["images"] = processed_images
+        row_dict["time_series"] = processed_time_series
         row_dict["multi_modal_data"] = {
-            "image": processed_images
+            "image": processed_images,
+            "time_series": processed_time_series,
         }
 
         # Replace all image tokens in prompt with placeholders
@@ -411,7 +450,8 @@ class RLHFDataset(Dataset, ImageProcessMixin):
             # remove image
             row_dict["images"] = [Image.new("RGB", (224, 224), (255, 255, 255)) for _ in range(image_count)]
             row_dict["multi_modal_data"]["image"] = row_dict["images"]
-            model_inputs = self.processor(row_dict["multi_modal_data"]["image"], prompt, return_tensors="pt")
+            # model_inputs = self.processor(images=row_dict["multi_modal_data"]["image"], text=prompt, return_tensors="pt")
+            model_inputs = self.processor(images=row_dict["multi_modal_data"]["image"], text=[prompt], time_series_data=row_dict["times_series"], return_tensors="pt")
         input_ids = model_inputs.pop("input_ids")[0]
         attention_mask = model_inputs.pop("attention_mask")[0]
 

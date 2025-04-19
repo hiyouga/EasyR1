@@ -1,6 +1,8 @@
 data:
-  train_files: /scratch/high_modality/geom_train.jsonl
-  val_files: /scratch/high_modality/geom_valid_mini.jsonl
+  # train_files: /scratch/high_modality/geom_train.jsonl
+  # val_files: /scratch/high_modality/geom_valid_mini.jsonl
+  train_files: /mnt/8T/high_modality/geom_train.jsonl
+  val_files: /mnt/8T/high_modality/geom_valid_mini.jsonl
   prompt_key: problem
   answer_key: answer
   image_key: images
