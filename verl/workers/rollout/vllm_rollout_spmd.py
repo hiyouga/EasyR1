@@ -141,7 +141,8 @@ class vLLMRollout(BaseRollout):
             raise RuntimeError("vllm sharding manager is not work properly.")
 
         # Extract segmentation masks and bounding boxes if they exist
-        segmentation_masks = prompts.batch.pop("segmentation_mask")
+        # segmentation_masks = prompts.batch.pop("segmentation_mask")
+        segmentation_masks = prompts.non_tensor_batch.pop("segmentation_mask")
         bboxes = prompts.batch.pop("bbox")
 
         if "multi_modal_data" in non_tensor_batch:

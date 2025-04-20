@@ -54,7 +54,7 @@ worker:
     enforce_eager: false
     enable_chunked_prefill: false
     tensor_parallel_size: 4
-    limit_images: 2
+    limit_images: 4
     val_override_config:
       temperature: 0.5
       n: 1
@@ -80,7 +80,7 @@ trainer:
   n_gpus_per_node: 4
   nnodes: 1
   val_freq: 5
-  val_before_train: true
+  val_before_train: false
   val_only: false
   val_generations_to_log: 3
   save_freq: 50  # -1 to disable

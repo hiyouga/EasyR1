@@ -41,12 +41,16 @@ def collate_fn(features: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     # First pass: collect all tensors and find max dimensions for segmentation masks
     for feature in features:
-        assert 'segmentation_mask' in feature
         for key, value in feature.items():
             if key == "segmentation_mask":
-                assert isinstance(value, torch.Tensor)
-                if len(value.shape) == 3:  # [C, H, W]
-                    _, h, w = value.shape
+                assert isinstance(value, np.ndarray)
+                if len(value.shape) == 3:
+                    c, h, w = value.shape
+                    # Update max dimensions
+                    max_height = max(max_height, h)
+                    max_width = max(max_width, w)
+                elif len(value.shape) == 2:
+                    h, w = value.shape
                     max_height = max(max_height, h)
                     max_width = max(max_width, w)
                 seg_masks.append(value)
@@ -57,10 +61,10 @@ def collate_fn(features: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     # Second pass: pad segmentation masks to max dimensions
     padded_masks = []
-    for i, mask in enumerate(seg_masks):
+    for mask in seg_masks:
         if mask is None:
-            # Create zero tensor for missing segmentation masks
-            padded_masks.append(torch.zeros(1, max_height, max_width, dtype=torch.float32))
+            # Create zero array for missing segmentation masks
+            padded_masks.append(np.zeros((1, max_height, max_width), dtype=np.float32))
         else:
             # Get current dimensions
             if len(mask.shape) == 3:  # [C, H, W]
@@ -68,23 +72,34 @@ def collate_fn(features: List[Dict[str, Any]]) -> Dict[str, Any]:
                 # Calculate padding (bottom, right)
                 pad_bottom = max_height - h
                 pad_right = max_width - w
-                # Pad the mask (pad order is [left, right, top, bottom])
-                padded_mask = torch.nn.functional.pad(mask, (0, pad_right, 0, pad_bottom), mode='constant', value=0)
+                # Pad the mask using numpy padding
+                padded_mask = np.pad(mask, ((0, 0), (0, pad_bottom), (0, pad_right)),
+                                    mode='constant', constant_values=0)
+                padded_masks.append(padded_mask)
+            elif len(mask.shape) == 2:  # [H, W]
+                h, w = mask.shape
+                # Calculate padding (bottom, right)
+                pad_bottom = max_height - h
+                pad_right = max_width - w
+                # Pad the mask using numpy padding
+                padded_mask = np.pad(mask, ((0, pad_bottom), (0, pad_right)),
+                                   mode='constant', constant_values=0)
                 padded_masks.append(padded_mask)
             else:
                 # Handle unexpected shapes
-                padded_masks.append(torch.zeros(1, max_height, max_width, dtype=torch.float32))
+                padded_masks.append(np.zeros((1, max_height, max_width), dtype=np.float32))
 
-        # Stack the padded masks
-        tensors["segmentation_mask"] = torch.stack(padded_masks, dim=0)
+    # Add padded segmentation masks to non_tensors
+    non_tensors["segmentation_mask"] = np.array(padded_masks, dtype=object)
 
     # Stack other tensors
     for key, value in tensors.items():
-        if key != "segmentation_mask":  # We've already handled segmentation masks
-            tensors[key] = torch.stack(value, dim=0)
+        tensors[key] = torch.stack(value, dim=0)
 
+    # Convert other non-tensors to arrays
     for key, value in non_tensors.items():
-        non_tensors[key] = np.array(value, dtype=object)
+        if key != "segmentation_mask":  # We've already handled segmentation masks
+            non_tensors[key] = np.array(value, dtype=object)
 
     # Combine tensors and non-tensors
     return {**tensors, **non_tensors}
@@ -430,7 +445,6 @@ class RLHFDataset(Dataset, ImageProcessMixin):
                     resample=Image.Resampling.NEAREST
                 )
 
-                # Convert the mask to a tensor
                 mask_array = np.array(resized_mask)
 
                 # If mask is grayscale, add channel dimension
@@ -441,8 +455,8 @@ class RLHFDataset(Dataset, ImageProcessMixin):
                     mask_array = np.mean(mask_array, axis=2)[np.newaxis, :, :]
 
                 # Convert to torch tensor
-                mask_tensor = torch.from_numpy(mask_array).float()
-                row_dict["segmentation_mask"] = mask_tensor
+                # mask_tensor = torch.from_numpy(mask_array).float()
+                row_dict["segmentation_mask"] = mask_array
 
                 logger.debug(f"Worker {self.worker_id}: Successfully resized segmentation mask")
             except Exception as e:
@@ -451,7 +465,8 @@ class RLHFDataset(Dataset, ImageProcessMixin):
 
         if "segmentation_mask" not in row_dict or row_dict["segmentation_mask"] is None:
             target_width, target_height = image_size
-            row_dict["segmentation_mask"] = torch.zeros(1, target_height, target_width, dtype=torch.float32)
+            # row_dict["segmentation_mask"] = torch.zeros(1, target_height, target_width, dtype=torch.float32)
+            row_dict["segmentation_mask"] = np.zeros((target_height, target_width), dtype=np.uint8)
 
         # Handle bounding box information
         if "bbox" in row_dict and row_dict["bbox"]:

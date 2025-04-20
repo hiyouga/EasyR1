@@ -388,8 +388,8 @@ class RayPPOTrainer:
 
             if "multi_modal_data" in test_batch.non_tensor_batch.keys():
                 test_gen_batch = test_batch.pop(
-                    batch_keys=["input_ids", "attention_mask", "position_ids", "segmentation_mask", "bbox"],
-                    non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
+                    batch_keys=["input_ids", "attention_mask", "position_ids", "bbox"],
+                    non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data", "segmentation_mask"],
                 )
             else:
                 test_gen_batch = test_batch.pop(
@@ -612,6 +612,9 @@ class RayPPOTrainer:
                 self.global_step += 1
                 if self.global_step > self.training_steps:
                     break
+                # FIXME: debug; skip 139 steps
+                if self.global_step < 139:
+                    continue
 
                 metrics, timing_raw = {}, {}
                 # print key, value type
@@ -623,8 +626,8 @@ class RayPPOTrainer:
                 if "multi_modal_data" in batch.non_tensor_batch.keys():
                     gen_batch = batch.pop(
                         batch_keys=["input_ids", "attention_mask", "position_ids",
-                                               "segmentation_mask", "bbox"],
-                        non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
+                                               "bbox"],
+                        non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data", "segmentation_mask"],
                     )
                 else:
                     gen_batch = batch.pop(
