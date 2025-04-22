@@ -7,7 +7,7 @@ data:
   max_prompt_length: 2048
   max_response_length: 2048
   rollout_batch_size: 512
-  val_batch_size: -1
+  val_batch_size: 1024
   format_prompt: ./examples/format_prompt/math_format.jinja
   shuffle: true
   seed: 1
@@ -71,7 +71,7 @@ worker:
 
   reward:
     reward_type: function
-    score_function: ./examples/score_function/math.py:compute_score
+    reward_function: ./examples/reward_function/math.py:compute_score
 
 trainer:
   total_episodes: 15

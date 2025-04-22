@@ -16,7 +16,6 @@ import importlib.util
 import os
 import sys
 from collections import defaultdict
-from dataclasses import dataclass
 from functools import partial
 from typing import Callable, Dict, List, Optional, Tuple, TypedDict
 
@@ -33,38 +32,37 @@ class RewardScore(TypedDict):
     accuracy: Optional[float]
 
 
-ScoreFunction = Callable[[str, str], RewardScore]
+RewardFunction = Callable[[str, str], RewardScore]
 
 
-@dataclass
 class FunctionRewardManager:
-    config: RewardConfig
-    tokenizer: PreTrainedTokenizer
+    """Reward manager for rule-based reward."""
 
-    def __post_init__(self):
-        """Load score function."""
-        if self.config.score_function is None:
-            raise ValueError("Score function is not provided.")
+    def __init__(self, config: RewardConfig, tokenizer: PreTrainedTokenizer):
+        if config.reward_function is None:
+            raise ValueError("Reward function is not provided.")
 
-        if not os.path.exists(self.config.score_function):
-            raise FileNotFoundError(f"Score function file {self.config.score_function} not found.")
+        if not os.path.exists(config.reward_function):
+            raise FileNotFoundError(f"Reward function file {config.reward_function} not found.")
 
-        spec = importlib.util.spec_from_file_location("custom_score_fn", self.config.score_function)
+        spec = importlib.util.spec_from_file_location("custom_reward_fn", config.reward_function)
         module = importlib.util.module_from_spec(spec)
         try:
-            sys.modules["custom_score_fn"] = module
+            sys.modules["custom_reward_fn"] = module
             spec.loader.exec_module(module)
         except Exception as e:
-            raise RuntimeError(f"Failed to load score function: {e}")
+            raise RuntimeError(f"Failed to load reward function: {e}")
 
-        if not hasattr(module, self.config.score_function_name):
-            raise AttributeError(f"Module {module} does not have function {self.config.score_function_name}.")
+        if not hasattr(module, config.reward_function_name):
+            raise AttributeError(f"Module {module} does not have function {config.reward_function_name}.")
 
-        score_fn: ScoreFunction = getattr(module, self.config.score_function_name)
-        print(f"Using score function `{self.config.score_function_name}` from `{self.config.score_function}`.")
-        self.score_fn = partial(score_fn, **self.config.score_function_kwargs)
+        reward_fn: RewardFunction = getattr(module, config.reward_function_name)
+        print(f"Using reward function `{config.reward_function_name}` from `{config.reward_function}`.")
+        self.reward_fn = partial(reward_fn, **config.reward_function_kwargs)
+        self.config = config
+        self.tokenizer = tokenizer
 
-    def __call__(self, data: DataProto) -> Tuple[torch.Tensor, Dict[str, List[float]]]:
+    def compute_reward(self, data: DataProto) -> Tuple[torch.Tensor, Dict[str, List[float]]]:
         reward_tensor = torch.zeros_like(data.batch["responses"], dtype=torch.float32)
         reward_metrics = defaultdict(list)
         for i in range(len(data)):
@@ -79,7 +77,7 @@ class FunctionRewardManager:
             )
             ground_truth = data_item.non_tensor_batch["ground_truth"]
 
-            score = self.score_fn(response_str, ground_truth)
+            score = self.reward_fn(response_str, ground_truth)
             reward_tensor[i, valid_response_length - 1] = score["overall"]
             for key, value in score.items():
                 reward_metrics[key].append(value)

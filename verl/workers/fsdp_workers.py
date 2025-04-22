@@ -281,7 +281,7 @@ class FSDPWorker(Worker):
         if self._is_actor or self._is_critic:
             if optim_config.strategy == "adamw":
                 self.optimizer = torch.optim.AdamW(
-                    self.fsdp_module.parameters(),
+                    filter(lambda p: p.requires_grad, self.fsdp_module.parameters()),
                     lr=optim_config.lr,
                     betas=optim_config.betas,
                     weight_decay=optim_config.weight_decay,
@@ -289,7 +289,7 @@ class FSDPWorker(Worker):
                 )
             elif optim_config.strategy == "adamw_bf16":
                 self.optimizer = AnyPrecisionAdamW(
-                    self.fsdp_module.parameters(),
+                    filter(lambda p: p.requires_grad, self.fsdp_module.parameters()),
                     lr=optim_config.lr,
                     betas=optim_config.betas,
                     weight_decay=optim_config.weight_decay,

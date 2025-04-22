@@ -19,16 +19,14 @@ This trainer supports model-agonistic model initialization with huggingface
 import os
 import uuid
 from collections import defaultdict
-from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum, auto
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+from typing import Any, Dict, List, Optional, Type
 
 import numpy as np
 import ray
 import torch
-from codetiming import Timer
 from ray.experimental.tqdm_ray import tqdm
 from torchdata.stateful_dataloader import StatefulDataLoader
 from transformers import PreTrainedTokenizer, ProcessorMixin
@@ -40,9 +38,10 @@ from ..single_controller.ray.base import create_colocated_worker_cls
 from ..utils import torch_functional as VF
 from ..utils.checkpoint import CHECKPOINT_TRACKER, remove_obsolete_ckpt
 from ..utils.logger import Tracker
-from ..utils.py_functional import convert_dict_to_str
+from ..utils.py_functional import convert_dict_to_str, timer
 from ..utils.seqlen_balancing import get_seqlen_balanced_partitions, log_seqlen_unbalance
 from ..workers.fsdp_workers import FSDPWorker
+from ..workers.reward import FunctionRewardManager
 from . import core_algos
 from .config import PPOConfig
 from .metrics import compute_data_metrics, compute_throughout_metrics, compute_timing_metrics, reduce_metrics
@@ -162,14 +161,6 @@ def compute_advantage(data: DataProto, adv_estimator: AdvantageEstimator, gamma:
     return data
 
 
-@contextmanager
-def _timer(name: str, timing_raw: Dict[str, float]):
-    with Timer(name=name, logger=None) as timer:
-        yield
-
-    timing_raw[name] = timer.last
-
-
 class RayPPOTrainer:
     """
     Note that this trainer runs on the driver process on a single CPU/GPU node.
@@ -185,8 +176,8 @@ class RayPPOTrainer:
         role_worker_mapping: dict[Role, Type[Worker]],
         resource_pool_manager: ResourcePoolManager,
         ray_worker_group_cls: Type[RayWorkerGroup] = RayWorkerGroup,
-        reward_fn: Optional[Callable[[DataProto], Tuple[torch.Tensor, Dict[str, List[float]]]]] = None,
-        val_reward_fn: Optional[Callable[[DataProto], Tuple[torch.Tensor, Dict[str, List[float]]]]] = None,
+        reward_fn: Optional[FunctionRewardManager] = None,
+        val_reward_fn: Optional[FunctionRewardManager] = None,
     ):
         self.tokenizer = tokenizer
         self.processor = processor
@@ -307,7 +298,6 @@ class RayPPOTrainer:
             test_gen_batch, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_wg.world_size)
             test_output_gen_batch = self.actor_rollout_wg.generate_sequences(test_gen_batch)
             test_output_gen_batch = unpad_dataproto(test_output_gen_batch, pad_size=pad_size)
-            print("validation generation end")
 
             # Store generated outputs
             output_ids = test_output_gen_batch.batch["responses"]
@@ -317,7 +307,7 @@ class RayPPOTrainer:
             test_batch = test_batch.union(test_output_gen_batch)
 
             # evaluate using reward_function
-            reward_tensor, reward_metrics = self.val_reward_fn(test_batch)
+            reward_tensor, reward_metrics = ray.get(self.val_reward_fn.compute_reward.remote(test_batch))
 
             # Store scores
             scores = reward_tensor.sum(-1).cpu().tolist()
@@ -504,20 +494,20 @@ class RayPPOTrainer:
                         non_tensor_batch_keys=["raw_prompt_ids"],
                     )
 
-                with _timer("step", timing_raw):
+                with timer("step", timing_raw):
                     # generate a batch
-                    with _timer("gen", timing_raw):  # wg: worker group
+                    with timer("gen", timing_raw):  # wg: worker group
                         gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
 
                     if self.config.algorithm.adv_estimator == "remax":
-                        with _timer("gen_max", timing_raw):
+                        with timer("gen_max", timing_raw):
                             gen_baseline_batch = deepcopy(gen_batch)
                             gen_baseline_batch.meta_info["temperature"] = 0
                             gen_baseline_batch.meta_info["n"] = 1
                             gen_baseline_output = self.actor_rollout_wg.generate_sequences(gen_baseline_batch)
 
                             batch = batch.union(gen_baseline_output)
-                            reward_baseline_tensor, _ = self.reward_fn(batch)
+                            reward_baseline_tensor, _ = ray.get(self.reward_fn.compute_reward.remote(batch))
                             reward_baseline_tensor = reward_baseline_tensor.sum(dim=-1)
 
                             batch.pop(batch_keys=list(gen_baseline_output.batch.keys()))
@@ -532,19 +522,6 @@ class RayPPOTrainer:
                     batch = batch.union(gen_batch_output)
                     batch.non_tensor_batch.pop("multi_modal_data", None)
 
-                    # compute reward
-                    with _timer("reward", timing_raw):
-                        if self.use_reward_model:
-                            raise NotImplementedError("Reward model is not supported yet.")
-
-                        # we combine with rule-based rm
-                        reward_tensor, reward_metrics = self.reward_fn(batch)
-                        batch.batch["token_level_scores"] = reward_tensor
-                        reward_metrics = {
-                            f"reward/{key}": value for key, value in reduce_metrics(reward_metrics).items()
-                        }
-                        metrics.update(reward_metrics)
-
                     # balance the number of valid tokens on each dp rank.
                     # Note that this breaks the order of data inside the batch.
                     # Please take care when you implement group based adv computation such as GRPO and rloo
@@ -553,30 +530,38 @@ class RayPPOTrainer:
                     # compute global_valid tokens
                     batch.meta_info["global_token_num"] = torch.sum(batch.batch["attention_mask"], dim=-1).tolist()
 
+                    # compute reward
+                    with timer("reward", timing_raw):
+                        reward_ref = self.reward_fn.compute_reward.remote(batch)
+
                     # recompute old_log_probs
-                    with _timer("old", timing_raw):
+                    with timer("old", timing_raw):
                         old_log_probs = self.actor_rollout_wg.compute_log_probs(batch)
                         batch = batch.union(old_log_probs)
 
                     # compute ref_log_probs
                     if self.use_reference_policy:
-                        with _timer("ref", timing_raw):
+                        with timer("ref", timing_raw):
                             ref_log_probs = self.ref_policy_wg.compute_ref_log_probs(batch)
                             batch = batch.union(ref_log_probs)
 
                     # compute values
                     if self.use_critic:
-                        with _timer("values", timing_raw):
+                        with timer("values", timing_raw):
                             values = self.critic_wg.compute_values(batch)
                             batch = batch.union(values)
 
-                    with _timer("adv", timing_raw):
+                    with timer("adv", timing_raw):
+                        # get token level scores
+                        reward_tensor, reward_metrics = ray.get(reward_ref)
+                        batch.batch["token_level_scores"] = reward_tensor
+                        reward_metrics = {f"reward/{k}": v for k, v in reduce_metrics(reward_metrics).items()}
+                        metrics.update(reward_metrics)
+
                         # apply kl penalty if available
                         if not self.config.algorithm.use_kl_loss and self.use_reference_policy:
                             # apply kl penalty to reward
-                            batch, kl_metrics = apply_kl_penalty(
-                                batch, kl_ctrl=self.kl_ctrl, kl_penalty=self.config.algorithm.kl_penalty
-                            )
+                            batch, kl_metrics = apply_kl_penalty(batch, self.kl_ctrl, self.config.algorithm.kl_penalty)
                             metrics.update(kl_metrics)
                         else:
                             batch.batch["token_level_rewards"] = batch.batch["token_level_scores"]
@@ -591,7 +576,7 @@ class RayPPOTrainer:
 
                     # update critic
                     if self.use_critic:
-                        with _timer("update_critic", timing_raw):
+                        with timer("update_critic", timing_raw):
                             critic_output = self.critic_wg.update_critic(batch)
 
                         critic_metrics = reduce_metrics(critic_output.non_tensor_batch)
@@ -599,7 +584,7 @@ class RayPPOTrainer:
 
                     # update actor
                     if self.config.trainer.critic_warmup <= self.global_step:
-                        with _timer("update_actor", timing_raw):
+                        with timer("update_actor", timing_raw):
                             actor_output = self.actor_rollout_wg.update_actor(batch)
 
                         actor_metrics = reduce_metrics(actor_output.non_tensor_batch)
@@ -611,13 +596,13 @@ class RayPPOTrainer:
                         and self.config.trainer.val_freq > 0
                         and self.global_step % self.config.trainer.val_freq == 0
                     ):
-                        with _timer("validation", timing_raw):
+                        with timer("validation", timing_raw):
                             val_metrics = self._validate()
 
                         metrics.update(val_metrics)
 
                     if self.config.trainer.save_freq > 0 and self.global_step % self.config.trainer.save_freq == 0:
-                        with _timer("save_checkpoint", timing_raw):
+                        with timer("save_checkpoint", timing_raw):
                             self._save_checkpoint()
 
                 # collect metrics

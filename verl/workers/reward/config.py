@@ -23,20 +23,21 @@ from typing import Optional
 @dataclass
 class RewardConfig:
     reward_type: str = "function"
-    score_function: Optional[str] = None
-    score_function_kwargs: dict = field(default_factory=dict)
+    reward_function: Optional[str] = None
+    reward_function_kwargs: dict = field(default_factory=dict)
     skip_special_tokens: bool = True
+    num_cpus: int = 1
     """auto keys"""
-    score_function_name: Optional[str] = field(default=None, init=False)
+    reward_function_name: Optional[str] = field(default=None, init=False)
 
     def post_init(self):
-        if self.score_function is not None:
-            if ":" not in self.score_function:
-                self.score_function_name = "main"
+        if self.reward_function is not None:  # support custom reward function, e.g., ./math.py:main
+            if ":" not in self.reward_function:
+                self.reward_function_name = "main"
             else:
-                self.score_function, self.score_function_name = self.score_function.split(":", maxsplit=1)
+                self.reward_function, self.reward_function_name = self.reward_function.rsplit(":", maxsplit=1)
 
-            if os.path.exists(self.score_function):
-                self.score_function = os.path.abspath(self.score_function)
+            if os.path.exists(self.reward_function):  # ray job uses absolute path
+                self.reward_function = os.path.abspath(self.reward_function)
             else:
-                self.score_function = None
+                self.reward_function = None

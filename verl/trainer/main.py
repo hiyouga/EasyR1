@@ -65,12 +65,11 @@ class Runner:
         }
         resource_pool_manager = ResourcePoolManager(resource_pool_spec=resource_pool_spec, mapping=mapping)
 
-        reward_fn = FunctionRewardManager(config=config.worker.reward, tokenizer=tokenizer)
-        val_reward_fn = FunctionRewardManager(config=config.worker.reward, tokenizer=tokenizer)
+        RemoteRewardManager = ray.remote(FunctionRewardManager).options(num_cpus=config.worker.reward.num_cpus)
+        reward_fn = RemoteRewardManager.remote(config.worker.reward, tokenizer)
+        val_reward_fn = RemoteRewardManager.remote(config.worker.reward, tokenizer)
 
-        train_dataloader, val_dataloader = create_dataloader(
-            config=config.data, tokenizer=tokenizer, processor=processor
-        )
+        train_dataloader, val_dataloader = create_dataloader(config.data, tokenizer, processor)
 
         trainer = RayPPOTrainer(
             config=config,

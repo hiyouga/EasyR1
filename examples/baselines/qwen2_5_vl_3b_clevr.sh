@@ -9,6 +9,6 @@ python3 -m verl.trainer.main \
     data.format_prompt=./examples/format_prompt/r1v_format.jinja \
     worker.actor.model.model_path=${MODEL_PATH} \
     worker.rollout.tensor_parallel_size=1 \
-    worker.reward.score_function=./examples/score_function/r1v.py:compute_score \
+    worker.reward.reward_function=./examples/reward_function/r1v.py:compute_score \
     trainer.experiment_name=qwen2_5_vl_3b_clevr \
     trainer.n_gpus_per_node=2

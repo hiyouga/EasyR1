@@ -51,7 +51,7 @@ class DataConfig:
 
     def post_init(self):
         if self.format_prompt is not None:
-            if os.path.exists(self.format_prompt):
+            if os.path.exists(self.format_prompt):  # ray job uses absolute path
                 self.format_prompt = os.path.abspath(self.format_prompt)
             else:
                 self.format_prompt = None
@@ -94,7 +94,7 @@ class TrainerConfig:
         if self.save_checkpoint_path is None:
             self.save_checkpoint_path = os.path.join("checkpoints", self.project_name, self.experiment_name)
 
-        self.save_checkpoint_path = os.path.abspath(self.save_checkpoint_path)
+        self.save_checkpoint_path = os.path.abspath(self.save_checkpoint_path)  # ray job uses absolute path
         if self.load_checkpoint_path is not None:
             self.load_checkpoint_path = os.path.abspath(self.load_checkpoint_path)
 
