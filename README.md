@@ -136,6 +136,10 @@ We also reproduced the following two baselines of the [R1-V](https://github.com/
 - [CLEVR-70k-Counting](examples/baselines/qwen2_5_vl_3b_clevr.sh): Train the Qwen2.5-VL-3B-Instruct model on counting problem.
 - [GeoQA-8k](examples/baselines/qwen2_5_vl_3b_geoqa8k.sh): Train the Qwen2.5-VL-3B-Instruct model on GeoQA problem.
 
+## Performance Baselines
+
+See [Baselines.md](assets/baselines.md).
+
 ## Awesome Work using EasyR1
 
 - **MMR1**: Advancing the Frontiers of Multimodal Reasoning. [![[code]](https://img.shields.io/github/stars/LengSicong/MMR1)](https://github.com/LengSicong/MMR1)
