@@ -4,7 +4,7 @@ Environment: [hiyouga/verl:ngc-th2.6.0-cu126-vllm0.8.3-flashinfer0.2.2-cxx11abi0
 
 EasyR1 version: [v0.3.0](https://github.com/hiyouga/EasyR1/tree/v0.3.0)
 
-Welcome to contribute new baselines!
+Welcome to contribute new data points!
 
 ## Algorithm Baselines
 
@@ -46,7 +46,7 @@ Welcome to contribute new baselines!
 - vLLM TP: rollout.tensor_parallel_size
 - Peak Mem: Peak CPU memory usage
 - Peak VRAM: Peak GPU memory usage
-- Throughput: Number of tokens per second per GPU
+- Throughput: Number of tokens per second per GPU by one training step
 - Sec per step: Average time per step in seconds
 
 > [!NOTE]
