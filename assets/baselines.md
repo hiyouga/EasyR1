@@ -8,31 +8,31 @@ Welcome to contribute new baselines!
 
 ## Algorithm Baselines
 
-### [Qwen2.5-Instruct](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct)
+### [Qwen2.5-Instruct](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct) on [Math12k](https://huggingface.co/datasets/hiyouga/math12k)
 
-| Size | Algorithm   | Bits | Dataset | LR   | KL   | Test Score |
-| ---- | ----------- | ---- | ------- | ---- | ---- | ---------- |
-| 7B   | GRPO        | AMP  | Math12k | 1e-6 | 1e-2 | 0.73->0.79 |
+| Size | Algorithm   | Bits | LR   | KL   | Test Score |
+| ---- | ----------- | ---- | ---- | ---- | ---------- |
+| 7B   | GRPO        | AMP  | 1e-6 | 1e-2 | 0.73->0.79 |
 
-### [Qwen2.5-VL-Instruct](https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct)
+### [Qwen2.5-VL-Instruct](https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct) on [Geometry3k](https://huggingface.co/datasets/hiyouga/geometry3k)
 
-| Size | Algorithm   | Bits | Dataset | LR   | KL   | Test Score |
-| ---- | ----------- | ---- | ------- | ---- | ---- | ---------- |
-| 7B   | GRPO        | AMP  | Geo3k   | 1e-6 | 1e-2 | 0.39->0.52 |
-| 7B   | GRPO        | BF16 | Geo3k   | 1e-6 | 1e-2 | 0.39->0.52 |
-| 7B   | GRPO        | AMP  | Geo3k   | 1e-6 | 1e-3 | 0.39->0.52 |
-| 7B   | RLOO        | AMP  | Geo3k   | 1e-6 | 1e-2 | 0.39->0.53 |
-| 3B   | GRPO        | AMP  | Geo3k   | 1e-6 | 1e-2 | 0.27->0.44 |
-| 32B  | GRPO        | BF16 | Geo3k   | 1e-6 | 1e-2 | 0.46->0.61 |
+| Size | Algorithm   | Bits | LR   | KL   | Test Score |
+| ---- | ----------- | ---- | ---- | ---- | ---------- |
+| 7B   | GRPO        | AMP  | 1e-6 | 1e-2 | 0.39->0.52 |
+| 7B   | GRPO        | BF16 | 1e-6 | 1e-2 | 0.39->0.52 |
+| 7B   | GRPO        | AMP  | 1e-6 | 1e-3 | 0.39->0.52 |
+| 7B   | RLOO        | AMP  | 1e-6 | 1e-2 | 0.39->0.53 |
+| 3B   | GRPO        | AMP  | 1e-6 | 1e-2 | 0.27->0.44 |
+| 32B  | GRPO        | BF16 | 1e-6 | 1e-2 | 0.46->0.61 |
 
 > [!NOTE]
 > The hyper-parameters not listed are all the same as the default values.
 
 ## Performance Baselines
 
-### [Qwen2.5-VL-Instruct](https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct)
+### [Qwen2.5-VL-Instruct](https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct) on [Geometry3k](https://huggingface.co/datasets/hiyouga/geometry3k)
 
-| Size | GPU Type      | Bits | Batch Size | vLLM util | vLLM TP | Peak Mem | Peak VRAM | Throughput | Sec per step | Actor MFU |
+| Size | GPU Type      | Bits | Batch Size | vLLM Util | vLLM TP | Peak Mem | Peak VRAM | Throughput | Sec per step | Actor MFU |
 | ---- | ------------- | ---- | ---------- | --------- | ------- | -------- | --------- | ---------- | ------------ | --------- |
 | 3B   | 8 * H100 80GB | AMP  | 4 / 16     | 0.6       | 2       | 120GB    | 35GB      | 1200       | 180s         | 6.3%      |
 | 7B   | 8 * H100 80GB | AMP  | 4 / 16     | 0.6       | 2       | 140GB    | 60GB      | 1200       | 180s         | 13.6%     |
@@ -41,8 +41,8 @@ Welcome to contribute new baselines!
 | 7B   | 8 * H100 80GB | BF16 | 4 / 16     | 0.6       | 2       | 150GB    | 50GB      | 1280       | 190s         | 13.9%     |
 | 32B  | 8 * H100 80GB | BF16 | 1 / 8      | 0.6       | 8       | 240GB    | 68GB      | 360        | 860s         | 11.2%     |
 
-- Batch size: micro_batch_size_per_device_for_update / micro_batch_size_per_device_for_experience
-- vLLM util: rollout.gpu_memory_utilization
+- Batch Size: micro_batch_size_per_device_for_update / micro_batch_size_per_device_for_experience
+- vLLM Util: rollout.gpu_memory_utilization
 - vLLM TP: rollout.tensor_parallel_size
 - Peak Mem: Peak CPU memory usage
 - Peak VRAM: Peak GPU memory usage

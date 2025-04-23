@@ -42,7 +42,7 @@ We provide a [Dockerfile](./Dockerfile) to easily build environments.
 We recommend using the [pre-built docker image](https://hub.docker.com/r/hiyouga/verl) in EasyR1.
 
 ```bash
-docker pull hiyouga/verl:ngc-th2.6.0-cu126-vllm0.8.3-flashinfer0.2.2-cxx11abi0
+docker pull hiyouga/verl:ngc-th2.6.0-cu126-vllm0.8.4-flashinfer0.2.2-cxx11abi0
 ```
 
 ### Hardware Requirements
@@ -138,7 +138,7 @@ We also reproduced the following two baselines of the [R1-V](https://github.com/
 
 ## Performance Baselines
 
-See [Baselines.md](assets/baselines.md).
+See [baselines.md](assets/baselines.md).
 
 ## Awesome Work using EasyR1
 

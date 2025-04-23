@@ -42,7 +42,11 @@ RUN pip config set global.index-url "${PIP_INDEX}" && \
 # Uninstall nv-pytorch fork
 RUN pip uninstall -y torch torchvision torchaudio \
     pytorch-quantization pytorch-triton torch-tensorrt \
-    xgboost transformer_engine flash_attn apex megatron-core
+    transformer_engine flash_attn apex megatron-core \
+    xgboost opencv grpcio
+
+# Fix cv2
+RUN rm -rf /usr/local/lib/python3.10/dist-packages/cv2
 
 # Install vllm-0.7.4-nightly
 RUN pip install --no-cache-dir vllm --pre --extra-index-url "https://wheels.vllm.ai/${VLLM_COMMIT}" && \
@@ -50,19 +54,18 @@ RUN pip install --no-cache-dir vllm --pre --extra-index-url "https://wheels.vllm
     cp -r vllm/vllm/ /usr/local/lib/python3.10/dist-packages/
 
 # Install torch-2.5.1
-RUN pip install --no-cache-dir torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 tensordict torchdata \
-    transformers>=4.49.0 accelerate datasets peft hf-transfer \
-    ray[default] codetiming hydra-core pandas pyarrow>=15.0.0 pylatexenc qwen-vl-utils wandb liger-kernel mathruler \
+RUN pip install --no-cache-dir "torch==2.5.1" "torchvision==0.20.1" "torchaudio==2.5.1" tensordict torchdata \
+    "transformers>=4.49.0" accelerate datasets peft hf-transfer \
+    ray[default] codetiming hydra-core pandas "pyarrow>=15.0.0" pylatexenc qwen-vl-utils wandb liger-kernel mathruler \
     pytest yapf py-spy pyext pre-commit ruff
 
 # Install flash_attn-2.7.4.post1
 RUN wget -nv https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.5cxx11abiFALSE-cp310-cp310-linux_x86_64.whl && \
     pip install --no-cache-dir flash_attn-2.7.4.post1+cu12torch2.5cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
 
-# Fix cv2
+# Fix packages
 RUN pip uninstall -y pynvml nvidia-ml-py && \
-    pip install --no-cache-dir nvidia-ml-py>=12.560.30 opencv-python-headless==4.8.0.74 fastapi==0.115.6 && \
-    pip install --no-cache-dir --upgrade optree>=0.13.0
+    pip install --no-cache-dir --upgrade "nvidia-ml-py>=12.560.30" "fastapi[standard]>=0.115.0" "optree>=0.13.0" "pydantic>=2.9" "grpcio>=1.62.1"
 
 # Reset pip config
 RUN pip config unset global.index-url && \

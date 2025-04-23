@@ -98,8 +98,7 @@ if __name__ == "__main__":
         total_shards = mesh.shape[-1]
         mesh_shape = (mesh.shape[-1],)
 
-    print(f"Processing model shards with {total_shards} in total.")
-
+    print(f"Processing {total_shards} model shards in total.")
     model_state_dict_lst = []
     model_state_dict_lst.append(state_dict)
     model_state_dict_lst.extend([""] * (total_shards - 1))
