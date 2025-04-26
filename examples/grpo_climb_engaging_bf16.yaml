@@ -42,6 +42,7 @@ worker:
       enable_full_shard: true
       enable_cpu_offload: false
       enable_rank0_init: true
+      torch_dtype: bf16
     offload:
       offload_params: false  # true: more CPU memory; false: more GPU memory
       offload_optimizer: false  # true: more CPU memory; false: more GPU memory

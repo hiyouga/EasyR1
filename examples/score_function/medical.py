@@ -2,6 +2,7 @@ import re
 import json
 from typing import Dict
 
+import numpy
 import torch
 import numpy as np
 from mathruler.grader import extract_boxed_content
@@ -128,6 +129,9 @@ def calculate_bbox_iou(pred_bboxes, seg_mask=None, gt_bbox=None):
     if not isinstance(pred_bboxes[0], list):
         pred_bboxes = [pred_bboxes]
 
+    if seg_mask is not None and isinstance(seg_mask, numpy.ndarray):
+        seg_mask = torch.from_numpy(seg_mask)
+
     # Not none and not all zero
     if seg_mask is not None and torch.sum(seg_mask) > 0:
         # Get mask dimensions
@@ -141,8 +145,13 @@ def calculate_bbox_iou(pred_bboxes, seg_mask=None, gt_bbox=None):
 
         total_iou = 0.0
         for bbox in pred_bboxes:
+            if len(bbox) < 4:
+                continue
             # Convert bbox to mask
-            bbox_mask = bbox_to_mask(bbox, height, width)
+            try:
+                bbox_mask = bbox_to_mask(bbox, height, width)
+            except:
+                continue
 
             # Calculate intersection and union
             intersection = torch.sum(bbox_mask * binary_seg_mask)
@@ -159,7 +168,12 @@ def calculate_bbox_iou(pred_bboxes, seg_mask=None, gt_bbox=None):
         # Calculate IoU directly between bounding boxes
         total_iou = 0.0
         for pred_bbox in pred_bboxes:
+            if len(pred_bbox) < 4:
+                continue
             # Calculate intersection
+            gt_bbox = gt_bbox.tolist()
+            # print("pred_bbox: ", pred_bbox.__class__)
+            # print("gt_bbox: ", gt_bbox.__class__)
             x1 = max(pred_bbox[0], gt_bbox[0])
             y1 = max(pred_bbox[1], gt_bbox[1])
             x2 = min(pred_bbox[2], gt_bbox[2])
@@ -334,6 +348,7 @@ def medical_compute_score(predict_str: str, ground_truth: str, segmentation_mask
                 iou_score = calculate_bbox_iou(pred_bboxes, segmentation_mask, bbox)
         except:
             pass
+            # traceback.print_exc()
 
     scores = {
         "overall": 0.5 * standard_score + 0.3 * iou_score + 0.2 * format_score,

@@ -456,6 +456,7 @@ class RayPPOTrainer:
         reward_score = torch.cat(reward_tensor_lst, dim=0).sum(-1).mean().item()
         val_reward_metrics = {f"val/{key}_reward": value for key, value in reduce_metrics(reward_metrics_lst).items()}
         return {"val/reward_score": reward_score, **val_reward_metrics}
+
     def init_workers(self) -> None:
         """Init resource pool and worker group"""
         self.resource_pool_manager.create_resource_pool()
@@ -612,9 +613,6 @@ class RayPPOTrainer:
                 self.global_step += 1
                 if self.global_step > self.training_steps:
                     break
-                # FIXME: debug; skip 139 steps
-                if self.global_step < 139:
-                    continue
 
                 metrics, timing_raw = {}, {}
                 # print key, value type
@@ -625,8 +623,7 @@ class RayPPOTrainer:
                 # pop those keys for generation
                 if "multi_modal_data" in batch.non_tensor_batch.keys():
                     gen_batch = batch.pop(
-                        batch_keys=["input_ids", "attention_mask", "position_ids",
-                                               "bbox"],
+                        batch_keys=["input_ids", "attention_mask", "position_ids", "bbox"],
                         non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data", "segmentation_mask"],
                     )
                 else:
@@ -662,6 +659,10 @@ class RayPPOTrainer:
                     batch = batch.repeat(repeat_times=self.config.worker.rollout.n, interleave=True)
                     batch = batch.union(gen_batch_output)
                     batch.non_tensor_batch.pop("multi_modal_data", None)
+
+                    # with _timer("classify", timing_raw):
+                    #     classification_metrics = self.actor_rollout_wg.classification_task(batch)
+                    #     metrics.update(classification_metrics)
 
                     # compute reward
                     with _timer("reward", timing_raw):

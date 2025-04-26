@@ -84,13 +84,14 @@ def collate_fn(features: List[Dict[str, Any]]) -> Dict[str, Any]:
                 # Pad the mask using numpy padding
                 padded_mask = np.pad(mask, ((0, pad_bottom), (0, pad_right)),
                                    mode='constant', constant_values=0)
+                padded_mask = padded_mask[np.newaxis, :, :]  # Add channel dimension
                 padded_masks.append(padded_mask)
             else:
                 # Handle unexpected shapes
                 padded_masks.append(np.zeros((1, max_height, max_width), dtype=np.float32))
 
     # Add padded segmentation masks to non_tensors
-    non_tensors["segmentation_mask"] = np.array(padded_masks, dtype=object)
+    non_tensors["segmentation_mask"] = np.stack(padded_masks, axis=0)
 
     # Stack other tensors
     for key, value in tensors.items():
@@ -280,6 +281,30 @@ class RLHFDataset(Dataset, ImageProcessMixin):
             self.dataset = load_dataset(data_path, split=data_split)
         self.data_dir = os.path.dirname(data_path)
 
+        # Create label mapping
+        self.label_vocab = self._create_label_vocab()
+        print(f"Label vocab has size {self.label_vocab.__len__()}")
+
+    def _create_label_vocab(self):
+        """
+        Create a mapping between string labels and indices.
+        Returns a dictionary mapping labels to indices.
+        """
+        # Extract all unique labels
+        all_labels = set()
+        for row in self.dataset:
+            if self.answer_key in row:
+                all_labels.add(row[self.answer_key])
+
+        # Sort labels alphabetically for consistency
+        sorted_labels = sorted(list(all_labels))
+
+        # Create mapping
+        label_to_idx = {label: idx for idx, label in enumerate(sorted_labels)}
+        logger.info(f"Created label vocabulary with {len(label_to_idx)} classes")
+
+        return label_to_idx
+
     def __len__(self):
         return len(self.dataset)
 
@@ -288,6 +313,15 @@ class RLHFDataset(Dataset, ImageProcessMixin):
         prompt_str: str = row_dict[self.prompt_key]
         if self.format_prompt:
             prompt_str = prompt_str + " " + self.format_prompt.strip()
+
+        # Add label index for classification task
+        label_str = row_dict[self.answer_key]
+        if label_str in self.label_vocab:
+            row_dict["label_idx"] = self.label_vocab[label_str]
+        else:
+            # Handle unseen labels
+            logger.warning(f"Worker {self.worker_id}: Unknown label {label_str} for item {index}")
+            row_dict["label_idx"] = -1  # Use -1 to indicate unknown label
 
         processed_images = []
         original_dimensions = []  # Store original image dimensions
