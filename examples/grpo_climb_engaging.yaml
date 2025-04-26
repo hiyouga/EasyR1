@@ -7,11 +7,13 @@ data:
   max_prompt_length: 4000
   max_response_length: 4000
   rollout_batch_size: 512
-  val_batch_size: 512
+  val_batch_size: 1024
+  format_prompt: ./examples/format_prompt/medical_format.jinja
   shuffle: true
   seed: 1
   max_pixels: 524288
   min_pixels: 65536
+  filter_overlong_prompts: false
 
 algorithm:
   adv_estimator: grpo
@@ -43,8 +45,8 @@ worker:
       enable_cpu_offload: false
       enable_rank0_init: true
     offload:
-      offload_params: false  # true: more CPU memory; false: more GPU memory
-      offload_optimizer: false  # true: more CPU memory; false: more GPU memory
+      offload_params: true  # true: more CPU memory; false: more GPU memory
+      offload_optimizer: true  # true: more CPU memory; false: more GPU memory
 
   rollout:
     n: 5
@@ -62,24 +64,23 @@ worker:
   ref:
     fsdp:
       enable_full_shard: true
-      enable_cpu_offload: false  # true: more CPU memory; false: more GPU memory
+      enable_cpu_offload: true  # true: more CPU memory; false: more GPU memory
       enable_rank0_init: true
     offload:
       offload_params: false
 
   reward:
     reward_type: function
-    score_function: ./examples/score_function/medical.py:medical_compute_score
-    skip_special_tokens: true
+    reward_function: ./examples/reward_function/medical.py:medical_compute_score
 
 trainer:
   total_episodes: 3
   logger: ["console", "wandb"]
   project_name: easy_r1
   experiment_name: qwen2_5_7b_math_grpo
-  n_gpus_per_node: 4
+  n_gpus_per_node: 8
   nnodes: 1
-  val_freq: 5
+  val_freq: 5  # -1 to disable
   val_before_train: false
   val_only: false
   val_generations_to_log: 3

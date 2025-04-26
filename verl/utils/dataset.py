@@ -263,10 +263,10 @@ class RLHFDataset(Dataset, ImageProcessMixin):
         max_prompt_length: int = 1024,
         truncation: str = "error",
         format_prompt: Optional[str] = None,
-        max_pixels: Optional[int] = None,
-        min_pixels: Optional[int] = None,
-        video_frames=2,
-        filter_overlong_prompts: bool = True,
+            max_pixels: Optional[int] = None,
+            min_pixels: Optional[int] = None,
+            video_frames=2,
+            filter_overlong_prompts: bool = True,
     ):
         self.tokenizer = tokenizer
         self.processor = processor
