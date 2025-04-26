@@ -16,7 +16,6 @@ import importlib.util
 import os
 import sys
 from collections import defaultdict
-from dataclasses import dataclass
 from functools import partial
 from typing import Callable, Dict, List, Optional, Tuple, TypedDict
 
@@ -34,42 +33,38 @@ class RewardScore(TypedDict):
     accuracy: Optional[float]
 
 
-ScoreFunction = Callable[[str, str], RewardScore]
+RewardFunction = Callable[[str, str], RewardScore]
 
 
-@dataclass
 class FunctionRewardManager:
-    config: RewardConfig
-    tokenizer: PreTrainedTokenizer
+    """Reward manager for rule-based reward."""
 
-    def __post_init__(self):
-        """Load score function."""
-        if ":" not in self.config.score_function:
-            file_path = self.config.score_function
-            function_name = "main"
-        else:
-            file_path, function_name = self.config.score_function.split(":", maxsplit=1)
+    def __init__(self, config: RewardConfig, tokenizer: PreTrainedTokenizer):
+        if config.reward_function is None:
+            raise ValueError("Reward function is not provided.")
 
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"Score function file {file_path} not found.")
+        if not os.path.exists(config.reward_function):
+            raise FileNotFoundError(f"Reward function file {config.reward_function} not found.")
 
-        spec = importlib.util.spec_from_file_location("custom_score_fn", file_path)
+        spec = importlib.util.spec_from_file_location("custom_reward_fn", config.reward_function)
         module = importlib.util.module_from_spec(spec)
         try:
-            sys.modules["custom_score_fn"] = module
+            sys.modules["custom_reward_fn"] = module
             spec.loader.exec_module(module)
         except Exception as e:
-            raise RuntimeError(f"Failed to load score function: {e}")
+            raise RuntimeError(f"Failed to load reward function: {e}")
 
-        if not hasattr(module, function_name):
-            raise AttributeError(f"Module {module} does not have function {function_name}.")
+        if not hasattr(module, config.reward_function_name):
+            raise AttributeError(f"Module {module} does not have function {config.reward_function_name}.")
 
-        score_fn: ScoreFunction = getattr(module, function_name)
-        print(f"Using score function `{function_name}` from `{file_path}`.")
-        self.score_function_name = self.config.score_function
-        self.score_fn = partial(score_fn, **self.config.score_function_kwargs)
+        reward_fn: RewardFunction = getattr(module, config.reward_function_name)
+        print(f"Using reward function `{config.reward_function_name}` from `{config.reward_function}`.")
+        self.reward_fn = partial(reward_fn, **config.reward_function_kwargs)
+        self.reward_function_name = config.reward_function_name
+        self.config = config
+        self.tokenizer = tokenizer
 
-    def __call__(self, data: DataProto) -> Tuple[torch.Tensor, Dict[str, List[float]]]:
+    def compute_reward(self, data: DataProto) -> Tuple[torch.Tensor, Dict[str, List[float]]]:
         reward_tensor = torch.zeros_like(data.batch["responses"], dtype=torch.float32)
         reward_metrics = defaultdict(list)
         for i in range(len(data)):
@@ -87,13 +82,11 @@ class FunctionRewardManager:
             if "medical" in self.score_function_name:
                 segmentation_mask = data_item.batch["segmentation_mask"]
                 bounding_box = data_item.batch["bbox"]
-                score = self.score_fn(response_str, ground_truth, segmentation_mask, bounding_box)
+                score = self.reward_fn(response_str, ground_truth, segmentation_mask, bounding_box)
             else:
-                score = self.score_fn(response_str, ground_truth)
+                score = self.reward_fn(response_str, ground_truth)
             reward_tensor[i, valid_response_length - 1] = score["overall"]
             for key, value in score.items():
                 reward_metrics[key].append(value)
 
-        # mean_metrics = {key: sum(value) / len(value) for key, value in reward_metrics.items()}
-        # wandb.log(mean_metrics)
         return reward_tensor, reward_metrics

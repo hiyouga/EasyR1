@@ -1,4 +1,17 @@
-import copy
+# Copyright 2024 Bytedance Ltd. and/or its affiliates
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import math
 import os
 import logging
@@ -10,6 +23,7 @@ from typing import Any, Dict, List, Optional, Union
 import numpy as np
 import torch
 from datasets import load_dataset
+from jinja2 import Template
 from PIL import Image
 from PIL.Image import Image as ImageObject
 from torch.utils.data import Dataset
@@ -239,32 +253,31 @@ class RLHFDataset(Dataset, ImageProcessMixin):
     """
 
     def __init__(
-            self,
-            data_path: str,
-            tokenizer: PreTrainedTokenizer,
-            processor: Optional[ProcessorMixin],
-            prompt_key: str = "prompt",
-            answer_key: str = "answer",
-            image_key: str = "images",
-            max_prompt_length: int = 1024,
-            truncation: str = "error",
-            format_prompt: str = None,
-            max_pixels: int = None,
-            min_pixels: int = None,
-            video_frames=2
+        self,
+        data_path: str,
+        tokenizer: PreTrainedTokenizer,
+        processor: Optional[ProcessorMixin],
+        prompt_key: str = "prompt",
+        answer_key: str = "answer",
+        image_key: str = "images",
+        max_prompt_length: int = 1024,
+        truncation: str = "error",
+        format_prompt: Optional[str] = None,
+        max_pixels: Optional[int] = None,
+        min_pixels: Optional[int] = None,
+        video_frames=2,
+        filter_overlong_prompts: bool = True,
     ):
         self.tokenizer = tokenizer
         self.processor = processor
-        print(f"Dataset processor has class {self.processor.__class__.__name__}, "
-              f"image processor has class {self.processor.image_processor.__class__.__name__}")
         self.prompt_key = prompt_key
         self.answer_key = answer_key
         self.image_key = image_key
         self.max_prompt_length = max_prompt_length
         self.truncation = truncation
-        self.format_prompt = format_prompt
         self.max_pixels = max_pixels
         self.min_pixels = min_pixels
+        self.filter_overlong_prompts = filter_overlong_prompts
         self.video_frames = video_frames
         self.worker_id = 0
 
@@ -284,6 +297,14 @@ class RLHFDataset(Dataset, ImageProcessMixin):
         # Create label mapping
         self.label_vocab = self._create_label_vocab()
         print(f"Label vocab has size {self.label_vocab.__len__()}")
+
+        self.format_prompt = None
+        if format_prompt:
+            with open(format_prompt, encoding="utf-8") as f:
+                self.format_prompt = f.read()
+
+        if self.filter_overlong_prompts:
+            self.dataset = self.dataset.filter(self._filter_overlong_prompts, desc="Filtering overlong prompts")
 
     def _create_label_vocab(self):
         """
@@ -305,14 +326,39 @@ class RLHFDataset(Dataset, ImageProcessMixin):
 
         return label_to_idx
 
+    def _build_messages(self, example: Dict[str, Any]) -> List[Dict[str, Any]]:
+        prompt_str: str = example[self.prompt_key]
+        if self.format_prompt:
+            format_prompt = Template(self.format_prompt.strip())
+            prompt_str = format_prompt.render(content=prompt_str)
+
+        if self.image_key in example:
+            # https://huggingface.co/docs/transformers/en/tasks/image_text_to_text
+            content_list = []
+            for i, content in enumerate(prompt_str.split("<image>")):
+                if i != 0:
+                    content_list.append({"type": "image"})
+
+                if content:
+                    content_list.append({"type": "text", "text": content})
+
+            return [{"role": "user", "content": content_list}]
+        else:
+            return [{"role": "user", "content": prompt_str}]
+
+    def _filter_overlong_prompts(self, example: Dict[str, Any]) -> bool:
+        messages = self._build_messages(example)
+        processing_class = self.processor if self.processor is not None else self.tokenizer
+        return (
+            len(processing_class.apply_chat_template(messages, add_generation_prompt=True)) <= self.max_prompt_length
+        )
+
     def __len__(self):
         return len(self.dataset)
 
     def __getitem__(self, index):
         row_dict: dict = copy.deepcopy(self.dataset[index])
         prompt_str: str = row_dict[self.prompt_key]
-        if self.format_prompt:
-            prompt_str = prompt_str + " " + self.format_prompt.strip()
 
         # Add label index for classification task
         label_str = row_dict[self.answer_key]
@@ -444,14 +490,8 @@ class RLHFDataset(Dataset, ImageProcessMixin):
             prompt_str = prompt_str.replace("<image>", "<image> " * (missing_count + 1), 1)
         image_count_in_prompt = prompt_str.count("<image>")
         assert image_count == image_count_in_prompt, f"Image count mismatch: {image_count} != {image_count_in_prompt}"
-        content_list = []
-        for i, content in enumerate(prompt_str.split("<image>")):
-            if i != 0:
-                content_list.append({"type": "image"})
-
-            if content:
-                content_list.append({"type": "text", "text": content})
-        messages = [{"role": "user", "content": content_list}]
+        row_dict[self.prompt_key] = prompt_str
+        messages = self._build_messages(row_dict)
         prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
         try:
             model_inputs = self.processor(row_dict["multi_modal_data"]["image"], [prompt], return_tensors="pt")
@@ -562,5 +602,12 @@ class RLHFDataset(Dataset, ImageProcessMixin):
         row_dict["position_ids"] = position_ids
         row_dict["ground_truth"] = row_dict[self.answer_key]
         row_dict["raw_prompt_ids"] = self.tokenizer.encode(prompt, add_special_tokens=False)
+        if len(raw_prompt_ids) > self.max_prompt_length:
+            if self.truncation == "left":
+                raw_prompt_ids = raw_prompt_ids[-self.max_prompt_length :]
+            elif self.truncation == "right":
+                raw_prompt_ids = raw_prompt_ids[: self.max_prompt_length]
+            elif self.truncation == "error":
+                raise RuntimeError(f"Prompt length {len(raw_prompt_ids)} is longer than {self.max_prompt_length}.")
         row_dict.pop("segmentation_path", None)
         return row_dict

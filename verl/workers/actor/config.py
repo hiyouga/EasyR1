@@ -33,7 +33,7 @@ class ModelConfig:
         if self.tokenizer_path is None:
             self.tokenizer_path = self.model_path
 
-        if self.model_path is not None and os.path.exists(self.model_path):
+        if self.model_path is not None and os.path.exists(self.model_path):  # ray job uses absolute path
             self.model_path = os.path.abspath(self.model_path)
 
         if self.tokenizer_path is not None and os.path.exists(self.tokenizer_path):

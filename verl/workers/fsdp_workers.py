@@ -127,7 +127,6 @@ class FSDPWorker(Worker):
 
         self._use_param_offload = False
         self._use_optimizer_offload = False
-        # tracemalloc.start()
         if self._is_actor:
             self._use_param_offload = self.config.actor.offload.offload_params
             self._use_optimizer_offload = self.config.actor.offload.offload_optimizer
@@ -187,10 +186,6 @@ class FSDPWorker(Worker):
             and config.global_batch_size_per_device != config.micro_batch_size_per_device_for_update
         ):
             raise ValueError(f"{role} cannot use FSDP's CPU offload when gradient accumulation is enabled.")
-
-        if role == "actor":
-            self.label_vocab = None
-            self.vision_classifier = None
 
     def _build_model_optimizer(
         self,
@@ -327,12 +322,9 @@ class FSDPWorker(Worker):
         print_gpu_memory_usage("After FSDP module init")
 
         if self._is_actor or self._is_critic:
-            trainable_parameters = self.fsdp_module.parameters()
-            # if self.vision_classifier is not None:
-            #     trainable_parameters = list(trainable_parameters) + list(self.vision_classifier.parameters())
             if optim_config.strategy == "adamw":
                 self.optimizer = torch.optim.AdamW(
-                    trainable_parameters,
+                    filter(lambda p: p.requires_grad, self.fsdp_module.parameters()),
                     lr=optim_config.lr,
                     betas=optim_config.betas,
                     weight_decay=optim_config.weight_decay,
@@ -340,7 +332,7 @@ class FSDPWorker(Worker):
                 )
             elif optim_config.strategy == "adamw_bf16":
                 self.optimizer = AnyPrecisionAdamW(
-                    trainable_parameters,
+                    filter(lambda p: p.requires_grad, self.fsdp_module.parameters()),
                     lr=optim_config.lr,
                     betas=optim_config.betas,
                     weight_decay=optim_config.weight_decay,
@@ -389,22 +381,6 @@ class FSDPWorker(Worker):
             optim_config = self.config.actor.optim
             padding_free = self.config.actor.padding_free
             role = "actor"
-            #
-            # config = AutoConfig.from_pretrained(
-            #     model_config.model_path,
-            #     trust_remote_code=model_config.trust_remote_code,
-            #     **model_config.override_config,
-            # )
-            #
-            # hidden_size = config.hidden_size
-            # self.vision_classifier = VisionClassifier(hidden_size)
-            #
-            # # Move to the right device and dtype
-            # self.vision_classifier = self.vision_classifier.to(
-            #     device=torch.cuda.current_device(),
-            #     dtype=PrecisionType.to_dtype(self.config.actor.fsdp.mp_param_dtype)
-            # )
-            # self.vision_classifier.train()
         elif self._is_ref:
             model_config = self.config.actor.model
             fsdp_config = self.config.ref.fsdp
@@ -412,7 +388,7 @@ class FSDPWorker(Worker):
             padding_free = self.config.ref.padding_free
             role = "ref"
         else:
-            raise ValueError(f"Unknown role.")
+            raise ValueError(f"Unknown role {role}.")
 
         if self._is_actor or self._is_critic or self._is_ref:
             self._build_model_optimizer(
@@ -474,17 +450,6 @@ class FSDPWorker(Worker):
             load_fsdp_model(self.fsdp_module)
 
         self.checkpoint_manager.save_checkpoint(path)
-
-        # Save the vision classifier separately
-        # if self._is_actor and self.vision_classifier is not None:
-        #     classifier_path = os.path.join(path, "vision_classifier.pt")
-        #     if self.rank == 0:  # Only save from rank 0 to avoid conflicts
-        #         torch.save({
-        #             'model_state_dict': self.vision_classifier.state_dict(),
-        #             'label_vocab': self.label_vocab,
-        #             'num_classes': len(self.label_vocab)
-        #         }, classifier_path)
-
         dist.barrier()
         if self._use_param_offload:
             offload_fsdp_model(self.fsdp_module)
@@ -495,84 +460,12 @@ class FSDPWorker(Worker):
             load_fsdp_model(self.fsdp_module)
 
         self.checkpoint_manager.load_checkpoint(path)
-
-        # Load the vision classifier
-        # if self._is_actor:
-        #     classifier_path = os.path.join(path, "vision_classifier.pt")
-        #     if os.path.exists(classifier_path):
-        #         checkpoint = torch.load(classifier_path, map_location=torch.cuda.current_device())
-        #
-        #         # Update label vocabulary
-        #         if 'label_vocab' in checkpoint:
-        #             self.label_vocab = checkpoint['label_vocab']
-        #
-        #         # Resize classifier if needed
-        #         if 'num_classes' in checkpoint and checkpoint[
-        #             'num_classes'] != self.vision_classifier.classifier.out_features:
-        #             self.vision_classifier.resize_classifier(checkpoint['num_classes'])
-        #
-        #         # Load model weights
-        #         self.vision_classifier.load_state_dict(checkpoint['model_state_dict'])
-
         dist.barrier()
         if self._use_param_offload:
             offload_fsdp_model(self.fsdp_module)
 
         if self._use_optimizer_offload:  # avoid OOM in resuming
             offload_fsdp_optimizer(self.optimizer)
-
-    @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
-    def classification_task(self, data: DataProto):
-        # Extract vision data and labels for classification
-        classification_metrics = {}
-        print("Non tensor batch:")
-        print_structure(data.non_tensor_batch)
-        print("Tensor batch:")
-        print_structure(data.batch)
-        # Get pixel values and grid information
-        mm_inputs = data.non_tensor_batch['multi_modal_inputs']
-        predictions, labels = [], []
-
-        with self.rollout_sharding_manager:
-            self.optimizer.zero_grad()
-            for index in range(mm_inputs.shape[0]):
-                pixel_values: torch.Tensor = mm_inputs[index]["pixel_values"]
-                image_grid_thw: torch.Tensor = mm_inputs[index]["image_grid_thw"]
-                label_index = data.non_tensor_batch["label_idx"][index]
-                labels.append(label_index)
-
-                if label_index > self.vision_classifier.classifier.out_features:
-                    raise ValueError("Label index exceeds the number of classes in the classifier.")
-
-                pixel_values = pixel_values.to(torch.cuda.current_device())
-                image_grid_thw = image_grid_thw.to(torch.cuda.current_device())
-
-
-                image_embeds = self.fsdp_module.visual(pixel_values, grid_thw=image_grid_thw)
-                image_embeds = image_embeds.to(torch.cuda.current_device())
-                logits = self.vision_classifier(image_embeds)
-
-                predictions.append(logits)
-            predictions = torch.stack(predictions)
-            labels = torch.tensor(labels).to(predictions.device)
-            # Compute classification loss
-            classification_loss = F.cross_entropy(predictions, labels)
-            # Backward and optimize
-            classification_loss.backward()
-            self.optimizer.step()
-
-        # Compute accuracy
-        predicted = torch.argmax(predictions, dim=1)
-        correct = (predicted == labels).sum().item()
-        accuracy = correct / len(labels)
-        classification_metrics = {
-            "classification/loss": classification_loss.item(),
-            "classification/accuracy": accuracy,
-            "classification/num_classes": len(self.label_vocab)
-        }
-        print(classification_metrics)
-
-        return classification_metrics
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def update_actor(self, data: DataProto):
@@ -594,15 +487,15 @@ class FSDPWorker(Worker):
             global_num_tokens = data.meta_info["global_token_num"]
             estimated_flops, promised_flops = self.flops_counter.estimate_flops(global_num_tokens, delta_time)
             metrics["perf/mfu_actor"] = (
-                    estimated_flops * self.config.actor.ppo_epochs / (promised_flops * self.world_size)
+                estimated_flops * self.config.actor.ppo_epochs / (promised_flops * self.world_size)
             )
             metrics["perf/max_memory_allocated_gb"] = (
-                                                              torch.cuda.max_memory_allocated() - self.rollout_sharding_manager.freed_bytes
-                                                      ) / (1024 ** 3)
+                torch.cuda.max_memory_allocated() - self.rollout_sharding_manager.freed_bytes
+            ) / (1024**3)
             metrics["perf/max_memory_reserved_gb"] = (
-                                                             torch.cuda.max_memory_reserved() - self.rollout_sharding_manager.freed_bytes
-                                                     ) / (1024 ** 3)
-            metrics["perf/cpu_memory_used_gb"] = psutil.virtual_memory().used / (1024 ** 3)
+                torch.cuda.max_memory_reserved() - self.rollout_sharding_manager.freed_bytes
+            ) / (1024**3)
+            metrics["perf/cpu_memory_used_gb"] = psutil.virtual_memory().used / (1024**3)
 
             self.lr_scheduler.step()
             lr = self.lr_scheduler.get_last_lr()[0]

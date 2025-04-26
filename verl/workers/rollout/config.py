@@ -16,7 +16,7 @@ Rollout config
 """
 
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 
 @dataclass
@@ -34,13 +34,14 @@ class RolloutConfig:
     enforce_eager: bool = False
     enable_chunked_prefill: bool = False  # only for v0 engine
     tensor_parallel_size: int = 2
+    max_model_len: Optional[int] = None
     max_num_batched_tokens: int = 8192
-    max_num_seqs: int = 1024
     disable_log_stats: bool = True
     val_override_config: Dict[str, Any] = field(default_factory=dict)
     """auto keys"""
     prompt_length: int = field(default=-1, init=False)
     response_length: int = field(default=-1, init=False)
+    trust_remote_code: bool = field(default=False, init=False)
 
     def to_dict(self):
         return asdict(self)

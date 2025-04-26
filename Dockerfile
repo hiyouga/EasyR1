@@ -41,13 +41,17 @@ RUN pip config set global.index-url "${PIP_INDEX}" && \
 # Uninstall nv-pytorch fork
 RUN pip uninstall -y torch torchvision torchaudio \
     pytorch-quantization pytorch-triton torch-tensorrt \
-    xgboost transformer_engine flash_attn apex megatron-core grpcio
+    transformer_engine flash_attn apex megatron-core \
+    xgboost opencv grpcio
 
-# Install torch-2.6.0+cu124 + vllm-0.8.3
+# Fix cv2
+RUN rm -rf /usr/local/lib/python3.10/dist-packages/cv2
+
+# Install torch-2.6.0+cu124 + vllm-0.8.4
 # torch-2.6.0+cu124: cxx11abi=False
 # torch-2.6.0+cu126: cxx11abi=True
 # see https://github.com/flashinfer-ai/flashinfer/issues/911
-RUN pip install --no-cache-dir "vllm==0.8.3" "torch==2.6.0" "torchvision==0.21.0" "torchaudio==2.6.0" tensordict torchdata \
+RUN pip install --no-cache-dir "vllm==0.8.4" "torch==2.6.0" "torchvision==0.21.0" "torchaudio==2.6.0" tensordict torchdata \
     "transformers[hf_xet]>=4.51.0" accelerate datasets peft hf-transfer \
     "numpy<2.0.0" "pyarrow>=15.0.0" pandas \
     ray[default] codetiming hydra-core pylatexenc qwen-vl-utils wandb liger-kernel mathruler \

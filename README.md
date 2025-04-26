@@ -42,7 +42,7 @@ We provide a [Dockerfile](./Dockerfile) to easily build environments.
 We recommend using the [pre-built docker image](https://hub.docker.com/r/hiyouga/verl) in EasyR1.
 
 ```bash
-docker pull hiyouga/verl:ngc-th2.6.0-cu126-vllm0.8.3-flashinfer0.2.2-cxx11abi0
+docker pull hiyouga/verl:ngc-th2.6.0-cu126-vllm0.8.4-flashinfer0.2.2-cxx11abi0
 ```
 
 ### Hardware Requirements
@@ -93,20 +93,42 @@ python3 scripts/model_merger.py --local_dir checkpoints/easy_r1/exp_name/global_
 Please refer to the example datasets to prepare your own dataset.
 
 - Text dataset: https://huggingface.co/datasets/hiyouga/math12k
-- Vision-text dataset: https://huggingface.co/datasets/hiyouga/geometry3k
-
-> [!TIP]
-> EasyR1 already supports multi-image dataset.
+- Image-text dataset: https://huggingface.co/datasets/hiyouga/geometry3k
+- Multi-image-text dataset: https://huggingface.co/datasets/hiyouga/journeybench-multi-image-vqa
 
 ## How to Understand GRPO in EasyR1
 
 ![image](assets/easyr1_grpo.png)
 
-- To learn about the GRPO algorithm, you can refer to [Hugging Face's blog](https://huggingface.co/docs/trl/v0.15.2/en/grpo_trainer).
+- To learn about the GRPO algorithm, you can refer to [Hugging Face's blog](https://huggingface.co/docs/trl/v0.16.1/en/grpo_trainer).
 
 ## How to Run 70B+ Model in Multi-node Environment
 
-Please see the **[veRL's official doc](https://verl.readthedocs.io/en/latest/start/multinode.html)** for multi-node training and Ray debugger.
+1. Start the Ray head node.
+
+```bash
+ray start --head --port=6379 --dashboard-host=0.0.0.0
+```
+
+2. Start the Ray worker node and connect to the head node.
+
+```bash
+ray start --address=<head_node_ip>:6379
+```
+
+3. Check the Ray resource pool.
+
+```bash
+ray status
+```
+
+4. Run training script on the Ray head node only.
+
+```bash
+bash examples/qwen2_5_vl_7b_geo3k_grpo.sh
+```
+
+See the **[veRL's official doc](https://verl.readthedocs.io/en/latest/start/multinode.html)** for more details about multi-node training and Ray debugger.
 
 ## Other Baselines
 
@@ -114,14 +136,20 @@ We also reproduced the following two baselines of the [R1-V](https://github.com/
 - [CLEVR-70k-Counting](examples/baselines/qwen2_5_vl_3b_clevr.sh): Train the Qwen2.5-VL-3B-Instruct model on counting problem.
 - [GeoQA-8k](examples/baselines/qwen2_5_vl_3b_geoqa8k.sh): Train the Qwen2.5-VL-3B-Instruct model on GeoQA problem.
 
+## Performance Baselines
+
+See [baselines.md](assets/baselines.md).
+
 ## Awesome Work using EasyR1
 
 - **MMR1**: Advancing the Frontiers of Multimodal Reasoning. [![[code]](https://img.shields.io/github/stars/LengSicong/MMR1)](https://github.com/LengSicong/MMR1)
 - **Vision-R1**: Incentivizing Reasoning Capability in Multimodal Large Language Models. [![[code]](https://img.shields.io/github/stars/Osilly/Vision-R1)](https://github.com/Osilly/Vision-R1) [![[arxiv]](https://img.shields.io/badge/arxiv-2503.06749-blue)](https://arxiv.org/abs/2503.06749)
 - **Seg-Zero**: Reasoning-Chain Guided Segmentation via Cognitive Reinforcement. [![[code]](https://img.shields.io/github/stars/dvlab-research/Seg-Zero)](https://github.com/dvlab-research/Seg-Zero) [![[arxiv]](https://img.shields.io/badge/arxiv-2503.06520-blue)](https://arxiv.org/abs/2503.06520)
 - **MetaSpatial**: Reinforcing 3D Spatial Reasoning in VLMs for the Metaverse. [![[code]](https://img.shields.io/github/stars/PzySeere/MetaSpatial)](https://github.com/PzySeere/MetaSpatial) [![[arxiv]](https://img.shields.io/badge/arxiv-2503.18470-blue)](https://arxiv.org/abs/2503.18470)
-- **Temporal-R1**: Envolving Temporal Reasoning Capability into LMMs via Temporal Consistent Reward
- [![[code]](https://img.shields.io/github/stars/appletea233/Temporal-R1)](https://github.com/appletea233/Temporal-R1)
+- **Temporal-R1**: Envolving Temporal Reasoning Capability into LMMs via Temporal Consistent Reward. [![[code]](https://img.shields.io/github/stars/appletea233/Temporal-R1)](https://github.com/appletea233/Temporal-R1)
+- **NoisyRollout**: Reinforcing Visual Reasoning with Data Augmentation. [![[code]](https://img.shields.io/github/stars/John-AI-Lab/NoisyRollout)](https://github.com/John-AI-Lab/NoisyRollout) [![[arxiv]](https://img.shields.io/badge/arxiv-2504.13055-blue)](https://arxiv.org/pdf/2504.13055)
+- **GUI-R1**: A Generalist R1-Style Vision-Language Action Model For GUI Agents. [![[code]](https://img.shields.io/github/stars/ritzz-ai/GUI-R1)](https://github.com/ritzz-ai/GUI-R1) [![[arxiv]](https://img.shields.io/badge/arxiv-2504.10458-blue)](https://arxiv.org/abs/2504.10458)
+
 ## TODO
 
 - Support LoRA (high priority).
@@ -143,9 +171,17 @@ These features are temporarily disabled for now, we plan to fix them one-by-one 
 
 ## FAQs
 
+> ValueError: Image features and image tokens do not match: tokens: 8192, features 9800
+
+Increase the `data.max_prompt_length` or reduce the `data.max_pixels`.
+
 > RuntimeError: CUDA Error: out of memory at /workspace/csrc/cumem_allocator.cpp:62
 
-Reduce the `worker.rollout.gpu_memory_utilization`.
+Reduce the `worker.rollout.gpu_memory_utilization` and enable `worker.actor.offload.offload_params`.
+
+> RuntimeError: 0 active drivers ([]). There should only be one.
+
+Uninstall `deepspeed` from the current python environment.
 
 ## Citation
 
