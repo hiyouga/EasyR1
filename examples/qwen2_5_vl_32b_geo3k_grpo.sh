@@ -1,4 +1,8 @@
+#!/bin/bash
+
 set -x
+
+export PYTHONUNBUFFERED=1
 
 MODEL_PATH=Qwen/Qwen2.5-VL-32B-Instruct  # replace it with your local file path
 

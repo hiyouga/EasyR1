@@ -1,6 +1,9 @@
+#!/bin/bash
 # REMINDER: this script uses test data split and should ONLY be used for debugging. DO NOT use for training.
 
 set -x
+
+export PYTHONUNBUFFERED=1
 
 MODEL_PATH=Qwen/Qwen2.5-VL-7B-Instruct  # replace it with your local file path
 
