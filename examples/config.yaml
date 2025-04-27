@@ -9,6 +9,7 @@ data:
   rollout_batch_size: 512
   val_batch_size: 1024
   format_prompt: ./examples/format_prompt/math_format.jinja
+  override_chat_template: null
   shuffle: true
   seed: 1
   max_pixels: 4194304
@@ -74,12 +75,13 @@ worker:
     reward_function: ./examples/reward_function/math.py:compute_score
 
 trainer:
-  total_episodes: 15
-  logger: ["console", "wandb"]
+  total_epochs: 15
+  max_steps: null
   project_name: easy_r1
   experiment_name: qwen2_5_7b_math_grpo
-  n_gpus_per_node: 8
+  logger: ["console", "wandb"]
   nnodes: 1
+  n_gpus_per_node: 8
   val_freq: 5  # -1 to disable
   val_before_train: true
   val_only: false

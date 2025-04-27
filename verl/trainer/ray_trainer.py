@@ -247,7 +247,7 @@ class RayPPOTrainer:
         if config.trainer.max_steps is not None:
             self.training_steps = config.trainer.max_steps
         else:
-            self.training_steps = len(train_dataloader) * config.trainer.total_episodes
+            self.training_steps = len(train_dataloader) * config.trainer.total_epochs
 
         config.worker.actor.optim.training_steps = self.training_steps
         config.worker.critic.optim.training_steps = self.training_steps
@@ -473,7 +473,7 @@ class RayPPOTrainer:
             if self.config.trainer.val_only:
                 return
 
-        for _ in tqdm(range(self.config.trainer.total_episodes), desc="Episode", position=0):
+        for _ in tqdm(range(self.config.trainer.total_epochs), desc="Epoch", position=0):
             for batch_dict in tqdm(self.train_dataloader, desc="Running step", position=1):
                 self.global_step += 1
                 if self.global_step > self.training_steps:

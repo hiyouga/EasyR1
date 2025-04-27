@@ -55,11 +55,13 @@ class FSDPCheckpointManager(BaseCheckpointManager):
         # every rank download its own checkpoint
         model_path = os.path.join(path, f"model_world_size_{self.world_size}_rank_{self.rank}.pt")
         optim_path = os.path.join(path, f"optim_world_size_{self.world_size}_rank_{self.rank}.pt")
-        extra_state_path = os.path.join(path, f"extra_state_world_size_{self.world_size}_rank_{self.rank}.pt")
-        print(f"[rank-{self.rank}]: Loading from {model_path} and {optim_path} and {extra_state_path}.")
+        extra_path = os.path.join(path, f"extra_state_world_size_{self.world_size}_rank_{self.rank}.pt")
+        print(f"[rank-{self.rank}]: Loading model from {os.path.abspath(model_path)}.")
+        print(f"[rank-{self.rank}]: Loading optimizer from {os.path.abspath(optim_path)}.")
+        print(f"[rank-{self.rank}]: Loading extra_state from {os.path.abspath(extra_path)}.")
         model_state_dict = torch.load(model_path, weights_only=False)
         optim_state_dict = torch.load(optim_path, weights_only=False)
-        extra_state_dict = torch.load(extra_state_path, weights_only=False)
+        extra_state_dict = torch.load(extra_path, weights_only=False)
 
         state_dict_options = StateDictOptions(cpu_offload=True)
         set_state_dict(
@@ -91,7 +93,7 @@ class FSDPCheckpointManager(BaseCheckpointManager):
         extra_path = os.path.join(path, f"extra_state_world_size_{self.world_size}_rank_{self.rank}.pt")
 
         print(f"[rank-{self.rank}]: Saving model to {os.path.abspath(model_path)}.")
-        print(f"[rank-{self.rank}]: Saving checkpoint to {os.path.abspath(model_path)}.")
+        print(f"[rank-{self.rank}]: Saving optimizer to {os.path.abspath(optim_path)}.")
         print(f"[rank-{self.rank}]: Saving extra_state to {os.path.abspath(extra_path)}.")
         torch.save(model_state_dict, model_path)
         torch.save(optim_state_dict, optim_path)

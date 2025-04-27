@@ -18,9 +18,11 @@ from typing import Optional
 from transformers import AutoProcessor, AutoTokenizer, PreTrainedTokenizer, ProcessorMixin
 
 
-def get_tokenizer(model_path: str, **kwargs) -> PreTrainedTokenizer:
+def get_tokenizer(model_path: str, override_chat_template: Optional[str] = None, **kwargs) -> PreTrainedTokenizer:
     """Create a huggingface pretrained tokenizer."""
     tokenizer = AutoTokenizer.from_pretrained(model_path, **kwargs)
+    if override_chat_template is not None:
+        tokenizer.chat_template = override_chat_template
 
     if tokenizer.bos_token == "<bos>" and tokenizer.eos_token == "<eos>":
         # the EOS token in gemma2 & gemma3 is ambiguious, which may worsen RL performance.
@@ -35,12 +37,11 @@ def get_tokenizer(model_path: str, **kwargs) -> PreTrainedTokenizer:
     return tokenizer
 
 
-def get_processor(model_path: str, **kwargs) -> Optional[ProcessorMixin]:
+def get_processor(model_path: str, override_chat_template: Optional[str] = None, **kwargs) -> Optional[ProcessorMixin]:
     """Create a huggingface pretrained processor."""
-    try:
-        processor = AutoProcessor.from_pretrained(model_path, **kwargs)
-    except Exception:
-        processor = None
+    processor = AutoProcessor.from_pretrained(model_path, **kwargs)
+    if override_chat_template is not None:
+        processor.chat_template = override_chat_template
 
     # Avoid load tokenizer, see:
     # https://github.com/huggingface/transformers/blob/v4.49.0/src/transformers/models/auto/processing_auto.py#L344

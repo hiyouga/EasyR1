@@ -43,6 +43,7 @@ class DataConfig:
     rollout_batch_size: int = 512
     val_batch_size: int = -1
     format_prompt: Optional[str] = None
+    override_chat_template: Optional[str] = None
     shuffle: bool = True
     seed: int = 1
     max_pixels: int = 4194304
@@ -73,7 +74,7 @@ class AlgorithmConfig:
 
 @dataclass
 class TrainerConfig:
-    total_episodes: int = 10
+    total_epochs: int = 10
     max_steps: Optional[int] = None
     project_name: str = "easy_r1"
     experiment_name: str = "demo"
