@@ -22,7 +22,7 @@ from typing import Optional
 
 @dataclass
 class RewardConfig:
-    reward_type: str = "function"
+    reward_type: str = "batch"
     reward_function: Optional[str] = None
     reward_function_kwargs: dict = field(default_factory=dict)
     skip_special_tokens: bool = True

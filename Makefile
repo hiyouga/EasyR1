@@ -1,6 +1,6 @@
 .PHONY: build commit quality style
 
-check_dirs := scripts verl setup.py
+check_dirs := examples scripts verl setup.py
 
 build:
 	python3 setup.py sdist bdist_wheel

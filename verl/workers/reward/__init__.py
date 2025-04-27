@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from .config import RewardConfig
-from .function import FunctionRewardManager
+from .function import BatchFunctionRewardManager, FunctionRewardManager, SequentialFunctionRewardManager
 
 
-__all__ = ["FunctionRewardManager", "RewardConfig"]
+__all__ = ["BatchFunctionRewardManager", "FunctionRewardManager", "RewardConfig", "SequentialFunctionRewardManager"]
