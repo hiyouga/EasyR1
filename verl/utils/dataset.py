@@ -31,6 +31,7 @@ from transformers import PreTrainedTokenizer, ProcessorMixin
 
 from ..models.transformers.qwen2_vl import get_rope_index
 from . import torch_functional as VF
+import copy
 
 # For video processing
 import cv2
@@ -601,7 +602,7 @@ class RLHFDataset(Dataset, ImageProcessMixin):
         row_dict["attention_mask"] = attention_mask
         row_dict["position_ids"] = position_ids
         row_dict["ground_truth"] = row_dict[self.answer_key]
-        row_dict["raw_prompt_ids"] = self.tokenizer.encode(prompt, add_special_tokens=False)
+        raw_prompt_ids = self.tokenizer.encode(prompt, add_special_tokens=False)
         if len(raw_prompt_ids) > self.max_prompt_length:
             if self.truncation == "left":
                 raw_prompt_ids = raw_prompt_ids[-self.max_prompt_length :]
@@ -609,5 +610,6 @@ class RLHFDataset(Dataset, ImageProcessMixin):
                 raw_prompt_ids = raw_prompt_ids[: self.max_prompt_length]
             elif self.truncation == "error":
                 raise RuntimeError(f"Prompt length {len(raw_prompt_ids)} is longer than {self.max_prompt_length}.")
+        row_dict["raw_prompt_ids"] = raw_prompt_ids
         row_dict.pop("segmentation_path", None)
         return row_dict

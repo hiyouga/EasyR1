@@ -59,8 +59,7 @@ from .config import ActorConfig, CriticConfig, FSDPConfig, ModelConfig, OptimCon
 from .rollout import vLLMRollout
 from .sharding_manager import FSDPVLLMShardingManager
 from .sharding_manager.fsdp_ulysses import FSDPUlyssesShardingManager
-from .classifier import VisionClassifier
-from ..utils.dataset import RLHFDataset
+from heavyball import ForeachMuon, PrecondScheduleForeachSOAP
 
 
 def print_structure(data, indent=0):
@@ -332,6 +331,20 @@ class FSDPWorker(Worker):
                 )
             elif optim_config.strategy == "adamw_bf16":
                 self.optimizer = AnyPrecisionAdamW(
+                    filter(lambda p: p.requires_grad, self.fsdp_module.parameters()),
+                    lr=optim_config.lr,
+                    betas=optim_config.betas,
+                    weight_decay=optim_config.weight_decay,
+                )
+            elif optim_config.strategy == "muon":
+                self.optimizer = ForeachMuon(
+                    filter(lambda p: p.requires_grad, self.fsdp_module.parameters()),
+                    lr=optim_config.lr,
+                    betas=optim_config.betas,
+                    weight_decay=optim_config.weight_decay,
+                )
+            elif optim_config.strategy == "soap":
+                self.optimizer = PrecondScheduleForeachSOAP(
                     filter(lambda p: p.requires_grad, self.fsdp_module.parameters()),
                     lr=optim_config.lr,
                     betas=optim_config.betas,

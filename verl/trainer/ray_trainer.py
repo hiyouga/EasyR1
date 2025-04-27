@@ -47,7 +47,8 @@ from ..workers.reward import FunctionRewardManager
 from . import core_algos
 from .config import PPOConfig
 from .metrics import compute_data_metrics, compute_throughout_metrics, compute_timing_metrics, reduce_metrics
-from examples.score_function.evaluation import compute_metrics_by_data_source
+from examples.reward_function.evaluation import compute_metrics_by_data_source
+
 
 
 class Role(IntEnum):
@@ -75,7 +76,6 @@ class AdvantageEstimator(str, Enum):
     REMAX = "remax"
     RLOO = "rloo"
     DRPO = "drpo"
-    SDRPO = "sdrpo"
 
 
 @dataclass
@@ -166,11 +166,6 @@ def compute_advantage(data: DataProto, adv_estimator: AdvantageEstimator, gamma:
     elif adv_estimator == AdvantageEstimator.DRPO:
         domain_info = data.non_tensor_batch["dataset"]
         advantages, returns = core_algos.compute_drpo_outcome_advantage(
-            token_level_rewards, response_mask, index, domain_info
-        )
-    elif adv_estimator == AdvantageEstimator.SDRPO:
-        domain_info = data.non_tensor_batch["dataset"]
-        advantages, returns = core_algos.compute_drpo_outcome_advantage_soft_group(
             token_level_rewards, response_mask, index, domain_info
         )
     else:

@@ -79,7 +79,7 @@ class FunctionRewardManager:
             )
             ground_truth = data_item.non_tensor_batch["ground_truth"]
 
-            if "medical" in self.score_function_name:
+            if "medical" in self.reward_function_name:
                 segmentation_mask = data_item.batch["segmentation_mask"]
                 bounding_box = data_item.batch["bbox"]
                 score = self.reward_fn(response_str, ground_truth, segmentation_mask, bounding_box)
