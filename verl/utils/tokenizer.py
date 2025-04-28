@@ -38,14 +38,16 @@ def get_tokenizer(model_path: str, **kwargs) -> PreTrainedTokenizer:
 def get_processor(model_path: str, **kwargs) -> Optional[ProcessorMixin]:
     """Create a huggingface pretrained processor."""
     try:
-        if "qwen2" in model_path.lower():
+        if "qwen2" in model_path.lower() and "time_series" not in model_path.lower(): # temporary patch for time_series_qwen2_5_vl
             image_processor = Qwen2VLImageProcessorFast.from_pretrained(model_path, **kwargs)
             processor = AutoProcessor.from_pretrained(model_path, image_processor=image_processor,
                                                       **kwargs)
         else:
             processor = AutoProcessor.from_pretrained(model_path, **kwargs)
+            
     except Exception:
         processor = None
+        print(f"Failed to load processor for {model_path}.")
 
     # Avoid load tokenizer, see:
     # https://github.com/huggingface/transformers/blob/v4.49.0/src/transformers/models/auto/processing_auto.py#L344

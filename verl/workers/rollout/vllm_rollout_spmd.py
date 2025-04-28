@@ -36,8 +36,16 @@ from ...utils.torch_dtypes import PrecisionType
 from .base import BaseRollout
 from .config import RolloutConfig
 
-# from vllm import ModelRegistry
-# from ...models.transformers.time_series import Qwen2_5_VTLForConditionalGeneration
+# from vllm.model_executor.models.registry import ModelRegistry
+# from verl.models.transformers.vllm_qwen import TimeSeriesQwen2_5_VLForConditionalGeneration
+
+# ModelRegistry.register_model(
+#     "TimeSeriesQwen2_5_VLForConditionalGeneration",
+#     TimeSeriesQwen2_5_VLForConditionalGeneration
+# )
+
+from ...models.monkey_patch import time_series_vllm_patch
+time_series_vllm_patch()
 
 def _repeat_interleave(value: Union[torch.Tensor, np.ndarray], repeats: int) -> Union[torch.Tensor, List[Any]]:
     if isinstance(value, torch.Tensor):
@@ -74,10 +82,6 @@ class vLLMRollout(BaseRollout):
         if config.max_num_batched_tokens < config.prompt_length + config.response_length:
             raise ValueError("max_num_batched_tokens should be greater than prompt_length + response_length.")
 
-        vllm_init_kwargs = {
-            "seed": 42,
-            "trust_remote_code": True,
-        }
         if config.limit_images > 0:
             vllm_init_kwargs = {"limit_mm_per_prompt": {"image": config.limit_images}}
 

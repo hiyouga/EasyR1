@@ -1,0 +1,7 @@
+{
+  "tokenizer_class": "TimeSeriesQwen2TokenizerFast",
+  "auto_map": {
+    "AutoTokenizer": ["", "tokenization_time_series_qwen2.TimeSeriesQwen2TokenizerFast"]
+  }
+}
+  
