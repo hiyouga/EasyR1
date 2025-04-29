@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from transformers.models.llama.configuration_llama import LlamaConfig
 
 
-VALID_MODLE_TYPE = {"llama", "qwen2", "qwen2_vl", "qwen2_5_vl"}
+VALID_MODLE_TYPE = {"llama", "qwen2", "qwen2_vl", "qwen2_5_vl", "qwen3"}
 
 
 def get_device_flops(unit: str = "T") -> float:
