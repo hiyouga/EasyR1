@@ -20,7 +20,7 @@ algorithm:
   disable_kl: false
   use_kl_loss: true
   kl_penalty: low_var_kl
-  kl_coef: 1.0e-2
+  kl_coef: 1.0e-4
 
 worker:
   actor:

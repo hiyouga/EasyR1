@@ -48,6 +48,7 @@ from . import core_algos
 from .config import PPOConfig
 from .metrics import compute_data_metrics, compute_throughout_metrics, compute_timing_metrics, reduce_metrics
 from examples.reward_function.evaluation import compute_metrics_by_data_source
+# from .domain_scaler import DomainScaler
 
 
 
@@ -165,8 +166,15 @@ def compute_advantage(data: DataProto, adv_estimator: AdvantageEstimator, gamma:
         )
     elif adv_estimator == AdvantageEstimator.DRPO:
         domain_info = data.non_tensor_batch["dataset"]
+        log_probs = data.batch["old_log_probs"]  # log πθ  at rollout
+        ref_log_probs = data.batch["ref_log_probs"]  # log πref
         advantages, returns = core_algos.compute_drpo_outcome_advantage(
-            token_level_rewards, response_mask, index, domain_info
+            token_level_rewards,
+            response_mask,
+            index,
+            domain_info,
+            log_probs,
+            ref_log_probs,
         )
     else:
         raise NotImplementedError(f"Unknown advantage estimator: {adv_estimator}")
@@ -267,6 +275,8 @@ class RayPPOTrainer:
         config.worker.actor.optim.training_steps = self.training_steps
         config.worker.critic.optim.training_steps = self.training_steps
         print(f"Total training steps: {self.training_steps}")
+
+        # self.scaler = DomainScaler()
 
     def _maybe_log_val_generations(
         self, inputs: List[str], outputs: List[str], labels: List[str], scores: List[float]
