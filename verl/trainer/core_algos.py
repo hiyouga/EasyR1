@@ -303,17 +303,36 @@ def compute_drpo_outcome_advantage(
         mu, sd = id2mean[index[i]], id2std[index[i]]
         scores[i] = (scores[i] - mu) / (sd + eps)
 
+    before_scale_score = scores.clone()
+
     # ------------------------------------------------------------------ #
     # 4) domain temperature scaling
     # ------------------------------------------------------------------ #
     N_total  = float(global_running_stats["count"])
     mu_total = float(global_running_stats["mean"]) if abs(global_running_stats["mean"]) > eps else eps
 
+    print(global_running_stats)
+    print(domain_running_stats)
+
     for i in range(B):
         d_stats       = domain_running_stats[domain_info[i]]
         N_d, mu_d     = float(d_stats["count"]), float(d_stats["mean"])
         T_d           = max((N_d / N_total) * (mu_d / mu_total), eps)
+        # assert T_d > 0.0
+        assert T_d > 0.0, f"T_d = {T_d}  (N_d = {N_d}, mu_d = {mu_d})"
         scores[i]     = scores[i] / T_d                               # (B,)
+
+    print("--------------Before KL damping--------------")
+
+    scale_factor = scores / (before_scale_score + eps)  # (B,)
+
+    dom2scale = defaultdict(list)
+    for i in range(B):
+        dom2scale[domain_info[i]].append(scale_factor[i])
+
+    for dom, lst in dom2scale.items():
+        avg_sf = torch.mean(torch.stack(lst)).item()
+        print(f"[DRPO]  domain = {dom:<15} | mean overall scale = {avg_sf:6.3f}")
 
     # ------------------------------------------------------------------ #
     # 5)  KL-aware inverse-linear damping  (new)
@@ -323,17 +342,29 @@ def compute_drpo_outcome_advantage(
     kl_tok      = kl_tok * response_mask
     kl_rollout  = kl_tok.sum(dim=-1)                                  # (B,)
 
-    # 5.2  "push-away mass"
-    z = torch.relu(scores * kl_rollout)                               # (B,)
+    print("--------------After KL damping--------------")
 
-    # 5.3  scale t = 75-th percentile of z
-    t = _quantile_safe(z, kl_q, eps)                                  # scalar
+    z_abs = scores.abs() * kl_rollout  # (B,)  ≥ 0
+    t = _quantile_safe(z_abs, kl_q, eps)  # scalar > 0
+    m = t / (z_abs + t)  # (B,)  in (0,1]
+    # assert m is all positive
+    assert torch.all(m > 0.0), f"m = {m}  (t = {t})"
 
-    # 5.4  inverse-linear multiplier  m = t / (z + t)
-    m = t / (z + t)                                                   # (B,)
+    scores = m * scores  # sign kept
 
-    # 5.5  apply damping to the *reward* part only
-    scores = m * scores                                               # (B,)
+    # ------------------------------------------------------------------ #
+    # 6) overall scaling factor  (final / raw)  &  per-domain logging
+    # ------------------------------------------------------------------ #
+
+    scale_factor = scores / (before_scale_score + eps)  # (B,)
+
+    dom2scale = defaultdict(list)
+    for i in range(B):
+        dom2scale[domain_info[i]].append(scale_factor[i])
+
+    for dom, lst in dom2scale.items():
+        avg_sf = torch.mean(torch.stack(lst)).item()
+        print(f"[DRPO]  domain = {dom:<15} | mean overall scale = {avg_sf:6.3f}")
 
     # ------------------------------------------------------------------ #
     # 6) broadcast back to token level
