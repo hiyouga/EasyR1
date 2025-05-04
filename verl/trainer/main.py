@@ -101,8 +101,6 @@ def main():
     ppo_config.deep_post_init()
 
     if not ray.is_initialized():
-        print("ray not initialized")
-        
         runtime_env = {
             "env_vars": {
                 "TOKENIZERS_PARALLELISM": "true",

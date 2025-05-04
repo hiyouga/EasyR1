@@ -12,6 +12,7 @@ data:
   seed: 1
   max_pixels: 524288
   min_pixels: 65536
+  filter_overlong_prompts: false
 
 algorithm:
   adv_estimator: grpo
@@ -52,8 +53,8 @@ worker:
     gpu_memory_utilization: 0.6
     enforce_eager: false
     enable_chunked_prefill: false
-    # tensor_parallel_size: 2
-    tensor_parallel_size: 1
+    tensor_parallel_size: 2
+    # tensor_parallel_size: 1
     limit_images: 16
     val_override_config:
       temperature: 0.5
@@ -70,8 +71,7 @@ worker:
 
   reward:
     reward_type: function
-    score_function: ./examples/score_function/medical.py:medical_compute_score
-    skip_special_tokens: true
+    reward_function: ./examples/reward_function/medical.py:medical_compute_score
 
 # trainer:
 #   total_episodes: 3
