@@ -9,7 +9,7 @@ from transformers.modeling_outputs import ModelOutput
 
 from .configuration_time_series_qwen2_5_vl import TimeSeriesQwen2_5_VLConfig
 
-from ECG_JEPA.ecg_jepa import ecg_jepa
+from ecg_jepa import ecg_jepa
 
 @dataclass
 class Qwen2_5_VLCausalLMOutputWithPast(ModelOutput):

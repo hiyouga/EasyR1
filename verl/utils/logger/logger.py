@@ -83,6 +83,9 @@ class TensorBoardLogger(Logger):
 
 class WandbLogger(Logger):
     def __init__(self, config: Dict[str, Any]) -> None:
+        if "WANDB_API_KEY" in os.environ:
+            wandb.login(key=os.environ["WANDB_API_KEY"])
+
         wandb.init(
             project=config["trainer"]["project_name"],
             name=config["trainer"]["experiment_name"],

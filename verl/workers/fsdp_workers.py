@@ -26,6 +26,7 @@ from codetiming import Timer
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import CPUOffload, MixedPrecision, ShardingStrategy
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+import torch.nn.functional as F
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
@@ -58,7 +59,47 @@ from .config import ActorConfig, CriticConfig, FSDPConfig, ModelConfig, OptimCon
 from .rollout import vLLMRollout
 from .sharding_manager import FSDPVLLMShardingManager
 from .sharding_manager.fsdp_ulysses import FSDPUlyssesShardingManager
-import tracemalloc
+from heavyball import ForeachMuon, PrecondScheduleForeachSOAP
+
+
+def print_structure(data, indent=0):
+    """
+    Print the structure of a Python dictionary recursively, handling nested dictionaries,
+    lists, NumPy arrays, and tensors.
+
+    Args:
+        data: The data structure to print (dict, list, numpy array, tensor, or other)
+        indent: The current indentation level (used for formatting)
+    """
+    prefix = "  " * indent
+
+    if isinstance(data, dict):
+        print(f"{prefix}dict with {len(data)} keys")
+        for key, value in data.items():
+            print(f"{prefix}- {key}:")
+            print_structure(value, indent + 1)
+
+    elif isinstance(data, list):
+        print(f"{prefix}list with length {len(data)}")
+        if data:  # Only check the first element if the list is not empty
+            print(f"{prefix}- First element:")
+            print_structure(data[0], indent + 1)
+
+    elif 'numpy' in str(type(data)):  # Check if it's a numpy array
+        print(f"{prefix}numpy array with shape {data.shape}, dtype {data.dtype}")
+
+        # If it's a numpy array with dtype object, check if first element is a dict
+        if data.dtype == 'object' and data.size > 0:
+            print(f"{prefix}- First element:")
+            print_structure(data[0], indent + 1)
+
+    elif 'torch' in str(type(data)) or 'tensorflow' in str(type(data)):  # Check if it's a tensor
+        # For both PyTorch and TensorFlow tensors, shape should be accessible
+        print(f"{prefix}tensor with shape {data.shape}, dtype {data.dtype}")
+
+    else:
+        # For any other type, just print the type
+        print(f"{prefix}other type: {type(data).__name__}")
 
 
 class FSDPWorker(Worker):
@@ -85,7 +126,6 @@ class FSDPWorker(Worker):
 
         self._use_param_offload = False
         self._use_optimizer_offload = False
-        # tracemalloc.start()
         if self._is_actor:
             self._use_param_offload = self.config.actor.offload.offload_params
             self._use_optimizer_offload = self.config.actor.offload.offload_optimizer
@@ -283,7 +323,7 @@ class FSDPWorker(Worker):
         if self._is_actor or self._is_critic:
             if optim_config.strategy == "adamw":
                 self.optimizer = torch.optim.AdamW(
-                    self.fsdp_module.parameters(),
+                    filter(lambda p: p.requires_grad, self.fsdp_module.parameters()),
                     lr=optim_config.lr,
                     betas=optim_config.betas,
                     weight_decay=optim_config.weight_decay,
@@ -291,7 +331,21 @@ class FSDPWorker(Worker):
                 )
             elif optim_config.strategy == "adamw_bf16":
                 self.optimizer = AnyPrecisionAdamW(
-                    self.fsdp_module.parameters(),
+                    filter(lambda p: p.requires_grad, self.fsdp_module.parameters()),
+                    lr=optim_config.lr,
+                    betas=optim_config.betas,
+                    weight_decay=optim_config.weight_decay,
+                )
+            elif optim_config.strategy == "muon":
+                self.optimizer = ForeachMuon(
+                    filter(lambda p: p.requires_grad, self.fsdp_module.parameters()),
+                    lr=optim_config.lr,
+                    betas=optim_config.betas,
+                    weight_decay=optim_config.weight_decay,
+                )
+            elif optim_config.strategy == "soap":
+                self.optimizer = PrecondScheduleForeachSOAP(
+                    filter(lambda p: p.requires_grad, self.fsdp_module.parameters()),
                     lr=optim_config.lr,
                     betas=optim_config.betas,
                     weight_decay=optim_config.weight_decay,
@@ -474,11 +528,6 @@ class FSDPWorker(Worker):
             offload_fsdp_optimizer(optimizer=self.optimizer)
 
         output = output.to("cpu")
-        # snapshot = tracemalloc.take_snapshot()
-        # top_stats = snapshot.statistics('lineno')
-        # print("[ Top 10 memory users ]")
-        # for stat in top_stats[:10]:
-        #     print(stat)
         return output
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)

@@ -39,7 +39,7 @@
   "tie_word_embeddings": false,
   "time_series_token_id": 151665,
   "torch_dtype": "bfloat16",
-  "transformers_version": "4.51.1",
+  "transformers_version": "4.51.3",
   "use_cache": true,
   "use_sliding_window": false,
   "video_token_id": 151656,

@@ -44,7 +44,7 @@ class TimeSeriesQwen2_5_VLForConditionalGeneration(Qwen2_5_VLForConditionalGener
     
     def __init__(self, *, vllm_config, prefix):
         super().__init__(vllm_config=vllm_config, prefix=prefix)
-        self.time_series_embedding = TimeSeriesEmbedding(2048, torch.bfloat16)
+        self.time_series_embedding = TimeSeriesEmbedding(3584, torch.bfloat16)
 
     def _validate_and_reshape_mm_tensor(self, mm_input, name):
         if name == 'time series data': # patch for time series data

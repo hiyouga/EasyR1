@@ -219,148 +219,159 @@ def get_domain_mean_std(domain: str, eps=1e-6):
     return mean, std
 
 
+def _quantile_safe(x: torch.Tensor, q: float, eps: float) -> torch.Tensor:
+    """Robust percentile that never returns 0 (to avoid divide-by-zero)."""
+    if torch.allclose(x, torch.zeros_like(x)):
+        return torch.tensor(eps, dtype=x.dtype, device=x.device)
+    return torch.quantile(x, q).detach().clamp_min(eps)
+
+
+import torch
+import torch.nn.functional as F
+from collections import defaultdict
+from typing import Tuple
+import numpy as np
+
+
+# ----  helper --------------------------------------------------------------
+def _quantile_safe(x: torch.Tensor, q: float, eps: float) -> torch.Tensor:
+    """Robust percentile that never returns 0 (to avoid divide-by-zero)."""
+    if torch.allclose(x, torch.zeros_like(x)):
+        return torch.tensor(eps, dtype=x.dtype, device=x.device)
+    return torch.quantile(x, q).detach().clamp_min(eps)
+
+
+# ----  main ----------------------------------------------------------------
 @torch.no_grad()
-def compute_drpo_outcome_advantage(          # <-- overwrite the old version
-    token_level_rewards: torch.Tensor,       # (bs, seq_len)
-    response_mask: torch.Tensor,             # (bs, seq_len)
-    index: np.ndarray,                       # (bs,)  question UUIDs
-    domain_info: np.ndarray,                 # (bs,)  domain strings
+def compute_drpo_outcome_advantage(
+    token_level_rewards: torch.Tensor,       # (bs, seq_len)  —  reward **before** KL penalty
+    response_mask:      torch.Tensor,        # (bs, seq_len)
+    index:              np.ndarray,          # (bs,)          —  question UUIDs
+    domain_info:        np.ndarray,          # (bs,)          —  domain strings
+    log_probs:          torch.Tensor,        # (bs, seq_len)  —  log πθ
+    ref_log_probs:      torch.Tensor,        # (bs, seq_len)  —  log πref
     eps: float = 1e-6,
+    kl_q: float = 0.75,                      # percentile for the “soft” damper
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
-    1. Sum token rewards → outcome scores.
-    2. Keep running (mean, var, count) for each domain **and** globally.
-    3. **GRPO**: question‑wise mean / std normalization (exactly as provided).
-    4. Divide the GRPO‑normalized score by a temperature
-           T_d = (N_d / N_total) · (μ_d / μ_total)
-       so that rare or hard domains receive larger advantages.
-    5. Broadcast back to token level and return (advantages, returns).
+    DRPO outcome-advantage with inverse-linear KL-aware damping.
+
+    Steps
+    -----
+    1.   Sum token rewards → per-rollout raw score.
+    2.   Update running mean/var per domain & global.
+    3.   GRPO question-wise normalisation.
+    4.   Domain temperature scaling.
+    5.   **NEW**  KL-based inverse-linear damping
+         m =  t / (z + t)  where  z = max(score * KL , 0),
+         t = 75-th percentile of z in the current mini-batch.
+    6.   Broadcast back to token level and return (advantages, returns).
+
+    The function purposely *does not* subtract β·KL; that will be done
+    later by `apply_kl_penalty`.
     """
-    # ------------------------------------------------------------------ #
-    # 1) Outcome score per sample (raw)
-    # ------------------------------------------------------------------ #
-    raw_scores = token_level_rewards.sum(dim=-1)   # shape (bs,)
-    bsz = raw_scores.shape[0]
+    B, L = token_level_rewards.shape
+    device = token_level_rewards.device
 
     # ------------------------------------------------------------------ #
-    # 2) Update running stats (domain & global) with **raw** scores
+    # 1) outcome score per rollout (raw reward, summed over tokens)
     # ------------------------------------------------------------------ #
-    for i in range(bsz):
+    raw_scores = token_level_rewards.sum(dim=-1)                     # (B,)
+
+    # ------------------------------------------------------------------ #
+    # 2) update running stats (domain / global)            – unchanged –
+    # ------------------------------------------------------------------ #
+    for i in range(B):
         r = raw_scores[i].item()
         d = domain_info[i]
-
-        update_domain_stats(d, r)   # already defined elsewhere
+        update_domain_stats(d, r)
         update_global_stats(r)
 
     # ------------------------------------------------------------------ #
-    # 3) GRPO question‑wise normalization  (exact code as requested)
+    # 3) GRPO question-wise normalisation                – unchanged –
     # ------------------------------------------------------------------ #
-    scores = raw_scores.clone()             # will be modified in‑place
+    scores = raw_scores.clone()                                      # (B,)
     id2score = defaultdict(list)
-    id2mean, id2std = {}, {}
 
-    for i in range(bsz):
+    for i in range(B):
         id2score[index[i]].append(scores[i])
 
-    for idx in id2score:
-        assert len(id2score[idx]) > 1, "GRPO needs rollout.n > 1."
-        id2mean[idx] = torch.mean(torch.tensor(id2score[idx]))
-        id2std[idx]  = torch.std(torch.tensor(id2score[idx]))
+    id2mean = {k: torch.mean(torch.stack(v)) for k, v in id2score.items()}
+    id2std  = {k: torch.std (torch.stack(v)) for k, v in id2score.items()}
 
-    for i in range(bsz):
-        scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + eps)
+    for i in range(B):
+        mu, sd = id2mean[index[i]], id2std[index[i]]
+        scores[i] = (scores[i] - mu) / (sd + eps)
+
+    before_scale_score = scores.clone()
 
     # ------------------------------------------------------------------ #
-    # 4) Domain temperature scaling
+    # 4) domain temperature scaling
     # ------------------------------------------------------------------ #
     N_total  = float(global_running_stats["count"])
     mu_total = float(global_running_stats["mean"]) if abs(global_running_stats["mean"]) > eps else eps
 
-    for i in range(bsz):
-        d_stats = domain_running_stats[domain_info[i]]
-        N_d, mu_d = float(d_stats["count"]), float(d_stats["mean"])
-        T_d = max((N_d / N_total) * (mu_d / mu_total), eps)   # avoid zero
-        scores[i] = scores[i] / T_d
+    print(global_running_stats)
+    print(domain_running_stats)
+
+    for i in range(B):
+        d_stats       = domain_running_stats[domain_info[i]]
+        N_d, mu_d     = float(d_stats["count"]), float(d_stats["mean"])
+        T_d           = max((N_d / N_total) * (mu_d / mu_total), eps)
+        # assert T_d > 0.0
+        assert T_d > 0.0, f"T_d = {T_d}  (N_d = {N_d}, mu_d = {mu_d})"
+        scores[i]     = scores[i] / T_d                               # (B,)
+
+    print("--------------Before KL damping--------------")
+
+    scale_factor = scores / (before_scale_score + eps)  # (B,)
+
+    dom2scale = defaultdict(list)
+    for i in range(B):
+        dom2scale[domain_info[i]].append(scale_factor[i])
+
+    for dom, lst in dom2scale.items():
+        avg_sf = torch.mean(torch.stack(lst)).item()
+        print(f"[DRPO]  domain = {dom:<15} | mean overall scale = {avg_sf:6.3f}")
 
     # ------------------------------------------------------------------ #
-    # 5) Broadcast back to token level
+    # 5)  KL-aware inverse-linear damping  (new)
     # ------------------------------------------------------------------ #
-    returns = scores.unsqueeze(-1) * response_mask
+    # 5.1  rollout-level KL  (low-variance surrogate)
+    kl_tok      = compute_kl(log_probs, ref_log_probs, "low_var_kl")  # (B,L)
+    kl_tok      = kl_tok * response_mask
+    kl_rollout  = kl_tok.sum(dim=-1)                                  # (B,)
+
+    print("--------------After KL damping--------------")
+
+    z_abs = scores.abs() * kl_rollout  # (B,)  ≥ 0
+    t = _quantile_safe(z_abs, kl_q, eps)  # scalar > 0
+    m = t / (z_abs + t)  # (B,)  in (0,1]
+    # assert m is all positive
+    assert torch.all(m > 0.0), f"m = {m}  (t = {t})"
+
+    scores = m * scores  # sign kept
+
+    # ------------------------------------------------------------------ #
+    # 6) overall scaling factor  (final / raw)  &  per-domain logging
+    # ------------------------------------------------------------------ #
+
+    scale_factor = scores / (before_scale_score + eps)  # (B,)
+
+    dom2scale = defaultdict(list)
+    for i in range(B):
+        dom2scale[domain_info[i]].append(scale_factor[i])
+
+    for dom, lst in dom2scale.items():
+        avg_sf = torch.mean(torch.stack(lst)).item()
+        print(f"[DRPO]  domain = {dom:<15} | mean overall scale = {avg_sf:6.3f}")
+
+    # ------------------------------------------------------------------ #
+    # 6) broadcast back to token level
+    # ------------------------------------------------------------------ #
+    returns = scores.unsqueeze(-1) * response_mask                    # (B,L)
     return returns, returns
 
-
-###############################################################################
-# Helper: a logistic/sigmoid
-###############################################################################
-def logistic(x: float) -> float:
-    """Returns a standard logistic(sigmoid) of x in (0,1)."""
-    return 1.0 / (1.0 + math.exp(-x))
-
-@torch.no_grad()
-def compute_drpo_outcome_advantage_soft_group(
-    token_level_rewards: torch.Tensor,  # shape (bs, seq_len)
-    response_mask: torch.Tensor,        # shape (bs, seq_len)
-    index: np.ndarray,                  # shape (bs,); question IDs for grouping
-    domain_info: np.ndarray,            # shape (bs,); domain label for each sample
-    eps: float = 1e-6
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    DRPO with domain-based normalization + a logistic domain boost + partial group re-centering,
-    now also normalizing by group std (like GRPO).
-    """
-
-    global GLOBAL_TRAIN_STEP
-
-    # 0) Summation for outcome-based reward
-    scores = token_level_rewards.sum(dim=-1)  # shape: (bs,)
-    bsz = scores.shape[0]
-    scaled_scores = torch.zeros_like(scores)
-
-    for i in range(bsz):
-        domain: str = domain_info[i]
-        raw_score = scores[i].item()
-
-        # Update domain stats
-        update_domain_stats(domain, raw_score)
-        domain_mean, domain_std = get_domain_mean_std(domain, eps=eps)
-        scaled_scores[i] = (raw_score - domain_mean) / domain_std
-
-    # 2) Soft partial group-based re-centering + now also dividing by group std
-    current_step = GLOBAL_TRAIN_STEP
-    GLOBAL_TRAIN_STEP += 1
-    print("GLOBAL_TRAIN_STEP:", GLOBAL_TRAIN_STEP)
-
-    alpha = 1.0 - min(1.0, current_step / float(FADE_STEPS)) / 2
-
-    # Gather samples by question ID
-    qid2vals = defaultdict(list)
-    for i in range(bsz):
-        qid2vals[index[i]].append(i)
-
-    # Compute group means + stds
-    qid2mean = {}
-    qid2std = {}
-    for qid, idxs in qid2vals.items():
-        group_vals = scaled_scores[idxs]
-        group_mean = group_vals.mean()
-        group_std = group_vals.std()         # we will scale by group_std
-        qid2mean[qid] = group_mean
-        qid2std[qid] = group_std
-
-    # Apply partial group offset (like GRPO) + fade-out
-    combined_scores = scaled_scores.clone()
-    for qid, idxs in qid2vals.items():
-        g_mean = qid2mean[qid]
-        g_std = qid2std[qid]
-        for i in idxs:
-            val = scaled_scores[i]
-            combined_scores[i] = ((1.0 - alpha) * val + alpha * (val - g_mean)) / (g_std + eps)
-
-    print("combined_scores: ", combined_scores)
-
-    # 3) Broadcast to token level
-    returns = combined_scores.unsqueeze(-1) * response_mask
-    return returns, returns
 
 
 @torch.no_grad()

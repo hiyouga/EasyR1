@@ -1,8 +1,6 @@
 data:
-  # train_files: /scratch/high_modality/geom_train.jsonl
-  # val_files: /scratch/high_modality/geom_valid_mini.jsonl
-  train_files: /mnt/8T/high_modality/geom_train.jsonl
-  val_files: /mnt/8T/high_modality/geom_valid_mini.jsonl
+  train_files: /scratch/high_modality/geom_train.jsonl
+  val_files: /scratch/high_modality/geom_valid_mini.jsonl
   prompt_key: problem
   answer_key: answer
   image_key: images
@@ -22,13 +20,13 @@ algorithm:
   disable_kl: false
   use_kl_loss: true
   kl_penalty: low_var_kl
-  kl_coef: 1.0e-4
+  kl_coef: 1.0e-2
 
 worker:
   actor:
     global_batch_size: 128
-    micro_batch_size_per_device_for_update: 4
-    micro_batch_size_per_device_for_experience: 16
+    micro_batch_size_per_device_for_update: 1
+    micro_batch_size_per_device_for_experience: 8
     max_grad_norm: 1.0
     padding_free: true
     ulysses_sequence_parallel_size: 1
@@ -40,7 +38,7 @@ worker:
     optim:
       lr: 1.0e-6
       weight_decay: 1.0e-2
-      strategy: adamw  # {adamw, adamw_bf16}
+      strategy: adamw_bf16  # {adamw, adamw_bf16, muon}
       lr_warmup_ratio: 0.0
     fsdp:
       enable_full_shard: true
@@ -54,10 +52,10 @@ worker:
     n: 5
     temperature: 1.0
     top_p: 0.99
-    gpu_memory_utilization: 0.6
+    gpu_memory_utilization: 0.4
     enforce_eager: false
     enable_chunked_prefill: false
-    tensor_parallel_size: 2
+    tensor_parallel_size: 4
     limit_images: 4
     val_override_config:
       temperature: 0.5
@@ -68,6 +66,7 @@ worker:
       enable_full_shard: true
       enable_cpu_offload: true  # true: more CPU memory; false: more GPU memory
       enable_rank0_init: true
+      torch_dtype: bf16
     offload:
       offload_params: false
 

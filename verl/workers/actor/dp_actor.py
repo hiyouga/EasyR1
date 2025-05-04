@@ -74,6 +74,11 @@ class DataParallelPPOActor(BasePPOActor):
         multi_modal_inputs = {}
         if "multi_modal_inputs" in micro_batch:
             for key in micro_batch["multi_modal_inputs"][0].keys():
+                if key == "time_series_data":
+                    multi_modal_inputs[key] = torch.stack(
+                        [inputs[key][0] for inputs in micro_batch["multi_modal_inputs"]], dim=0
+                    )
+                    continue
                 multi_modal_inputs[key] = torch.cat(
                     [inputs[key] for inputs in micro_batch["multi_modal_inputs"]], dim=0
                 )

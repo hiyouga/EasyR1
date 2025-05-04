@@ -1,6 +1,6 @@
 data:
-  train_files: /home/peili/EasyR1/CPSC_train.jsonl
-  val_files: /home/peili/EasyR1/CPSC_valid.jsonl
+  train_files: /scratch/ecg/ChapmanShaoxing_train.json
+  val_files: /scratch/ecg/ChapmanShaoxing_valid.json
   prompt_key: problem
   answer_key: answer
   image_key: images
@@ -23,8 +23,8 @@ algorithm:
 worker:
   actor:
     global_batch_size: 128
-    micro_batch_size_per_device_for_update: 1
-    micro_batch_size_per_device_for_experience: 4
+    micro_batch_size_per_device_for_update: 4
+    micro_batch_size_per_device_for_experience: 16
     max_grad_norm: 10.0
     padding_free: true
     ulysses_sequence_parallel_size: 1
@@ -49,7 +49,7 @@ worker:
   rollout:
     temperature: 1.0
     n: 5
-    gpu_memory_utilization: 0.3
+    gpu_memory_utilization: 0.6
     enforce_eager: false
     enable_chunked_prefill: false
     # tensor_parallel_size: 2
@@ -64,6 +64,7 @@ worker:
       enable_full_shard: true
       enable_cpu_offload: true  # true: more CPU memory; false: more GPU memory
       enable_rank0_init: true
+      torch_dtype: bf16
     offload:
       offload_params: false
 
@@ -72,16 +73,32 @@ worker:
     score_function: ./examples/score_function/medical.py:medical_compute_score
     skip_special_tokens: true
 
+# trainer:
+#   total_episodes: 3
+#   logger: ["console", "wandb"]
+#   project_name: easy_r1
+#   experiment_name: debug
+#   n_gpus_per_node: 4
+#   nnodes: 1
+#   val_freq: 200
+#   val_before_train: true
+#   val_only: false
+#   val_generations_to_log: 3
+#   save_freq: 200  # -1 to disable
+#   save_limit: 3  # -1 to disable
+#   save_checkpoint_path: null
+#   load_checkpoint_path: null
+
 trainer:
-  total_episodes: 3
+  total_episodes: 1
   logger: ["console", "wandb"]
   project_name: easy_r1
-  experiment_name: debug
+  experiment_name: qwen2_5_7b_chapmanshaoxing
   n_gpus_per_node: 4
   nnodes: 1
-  val_freq: 200
+  val_freq: 30
   val_before_train: true
-  val_only: true
+  val_only: false
   val_generations_to_log: 3
   save_freq: 200  # -1 to disable
   save_limit: 3  # -1 to disable
