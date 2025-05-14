@@ -11,5 +11,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+import os
 __version__ = "0.3.0"
+
+if os.getenv("EasyR1_USE_MODELSCOPE", "False").lower() == "true":
+    import importlib
+
+    if importlib.util.find_spec("modelscope") is None:
+        raise ImportError("You are using the modelscope hub, please install modelscope by `pip install modelscope -U`")
+    # Patch hub to download models from modelscope to speed up.
+    from modelscope.utils.hf_util import patch_hub
+
+    patch_hub()
