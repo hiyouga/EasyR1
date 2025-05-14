@@ -12,4 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+
+from .utils.py_functional import is_package_available
+
+
 __version__ = "0.3.0"
+
+
+if os.getenv("USE_MODELSCOPE_HUB", "0").lower() in ["true", "y", "1"]:
+    if not is_package_available("modelscope"):
+        raise ImportError("You are using the modelscope hub, please install modelscope by `pip install modelscope -U`")
+
+    # Patch hub to download models from modelscope to speed up.
+    from modelscope.utils.hf_util import patch_hub
+
+    patch_hub()
