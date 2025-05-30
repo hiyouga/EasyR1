@@ -198,4 +198,8 @@ class vLLMRollout(BaseRollout):
         if self.rank == 0:
             print("[Rollout] Finish generating sequences.")
 
-        return DataProto(batch=batch, non_tensor_batch=non_tensor_batch)
+        return DataProto(
+            batch=batch,
+            non_tensor_batch=non_tensor_batch,
+            meta_info=prompts.meta_info.copy(),
+        )

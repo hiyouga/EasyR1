@@ -50,33 +50,32 @@ def collate_fn(features: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {**tensors, **non_tensors}
 
 
-class ImageProcessMixin:
-    max_pixels: int
-    min_pixels: int
 
-    def process_image(self, image: Union[Dict[str, Any], ImageObject]) -> ImageObject:
-        if isinstance(image, dict):
-            image = Image.open(BytesIO(image["bytes"]))
-        elif isinstance(image, bytes):
-            image = Image.open(BytesIO(image))
+def process_image(image: Union[Dict[str, Any], ImageObject, str], min_pixels: int, max_pixels: int) -> ImageObject:
+    if isinstance(image, str):
+        image = Image.open(image)
+    elif isinstance(image, dict):
+        image = Image.open(BytesIO(image["bytes"]))
+    elif isinstance(image, bytes):
+        image = Image.open(BytesIO(image))
 
-        if (image.width * image.height) > self.max_pixels:
-            resize_factor = math.sqrt(self.max_pixels / (image.width * image.height))
-            width, height = int(image.width * resize_factor), int(image.height * resize_factor)
-            image = image.resize((width, height))
+    if (image.width * image.height) > max_pixels:
+        resize_factor = math.sqrt(max_pixels / (image.width * image.height))
+        width, height = int(image.width * resize_factor), int(image.height * resize_factor)
+        image = image.resize((width, height))
 
-        if (image.width * image.height) < self.min_pixels:
-            resize_factor = math.sqrt(self.min_pixels / (image.width * image.height))
-            width, height = int(image.width * resize_factor), int(image.height * resize_factor)
-            image = image.resize((width, height))
+    if (image.width * image.height) < min_pixels:
+        resize_factor = math.sqrt(min_pixels / (image.width * image.height))
+        width, height = int(image.width * resize_factor), int(image.height * resize_factor)
+        image = image.resize((width, height))
 
-        if image.mode != "RGB":
-            image = image.convert("RGB")
+    if image.mode != "RGB":
+        image = image.convert("RGB")
 
-        return image
+    return image
 
 
-class RLHFDataset(Dataset, ImageProcessMixin):
+class RLHFDataset(Dataset):
     """
     We assume the dataset contains a column that contains prompts and other information
     """
@@ -165,12 +164,15 @@ class RLHFDataset(Dataset, ImageProcessMixin):
 
         if self.image_key in example:
             prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
-            images = [self.process_image(image) for image in example.pop(self.image_key)]
+            raw_image_data = example.pop(self.image_key)
+            images = [
+                process_image(image, min_pixels=self.min_pixels, max_pixels=self.max_pixels)
+                for image in raw_image_data
+            ]
             model_inputs = self.processor(images, [prompt], add_special_tokens=False, return_tensors="pt")
             input_ids = model_inputs.pop("input_ids")[0]
             attention_mask = model_inputs.pop("attention_mask")[0]
-            example["multi_modal_data"] = {"image": images}
-            example["multi_modal_inputs"] = dict(model_inputs)
+            example["multi_modal_data"] = {"image": raw_image_data}
         else:
             prompt = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
             model_inputs = self.tokenizer([prompt], add_special_tokens=False, return_tensors="pt")

@@ -295,6 +295,10 @@ class RayPPOTrainer:
                 )
 
             test_gen_batch.meta_info = self.config.worker.rollout.val_override_config
+            test_gen_batch.meta_info.update({
+                "min_pixels": self.config.data.min_pixels,
+                "max_pixels": self.config.data.max_pixels,
+            })
             test_gen_batch, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_wg.world_size)
             test_output_gen_batch = self.actor_rollout_wg.generate_sequences(test_gen_batch)
             test_output_gen_batch = unpad_dataproto(test_output_gen_batch, pad_size=pad_size)
@@ -488,6 +492,10 @@ class RayPPOTrainer:
                         batch_keys=["input_ids", "attention_mask", "position_ids"],
                         non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
                     )
+                    gen_batch.meta_info.update({
+                        "min_pixels": self.config.data.min_pixels,
+                        "max_pixels": self.config.data.max_pixels,
+                    })
                 else:
                     gen_batch = batch.pop(
                         batch_keys=["input_ids", "attention_mask", "position_ids"],
