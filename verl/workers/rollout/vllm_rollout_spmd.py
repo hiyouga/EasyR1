@@ -188,4 +188,8 @@ class vLLMRollout(BaseRollout):
             },
             batch_size=batch_size,
         )
-        return DataProto(batch=batch, non_tensor_batch=non_tensor_batch)
+        return DataProto(
+            batch=batch,
+            non_tensor_batch=non_tensor_batch,
+            meta_info=prompts.meta_info.copy(),
+        )
