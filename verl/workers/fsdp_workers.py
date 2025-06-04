@@ -437,7 +437,7 @@ class FSDPWorker(Worker):
             for j, image in enumerate(per_query_images):
                 images[i][j] = process_image(image, min_pixels=min_pixels, max_pixels=max_pixels)
         multi_modal_inputs = np.array([
-            dict(self.processor.image_processor(images=per_query_images), videos=None)
+            dict(self.processor.image_processor(images=per_query_images, videos=None))
             for per_query_images in images
         ], dtype=object)
         data.non_tensor_batch["multi_modal_inputs"] = multi_modal_inputs
@@ -445,9 +445,9 @@ class FSDPWorker(Worker):
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def update_actor(self, data: DataProto):
         assert self._is_actor
-        if "multi_modal_data" in self._cache:
-            data.non_tensor_batch['multi_modal_data'] = deepcopy(self._cache['multi_modal_data'])
-        elif "multi_modal_data" not in data.non_tensor_batch:
+        if "multi_modal_inputs" in self._cache:
+            data.non_tensor_batch['multi_modal_inputs'] = deepcopy(self._cache['multi_modal_inputs'])
+        elif "multi_modal_data" in data.non_tensor_batch:
             self.preprocess_multi_modal_data(data)
 
         data = data.to(torch.cuda.current_device())
@@ -556,10 +556,10 @@ class FSDPWorker(Worker):
     def compute_log_probs(self, data: DataProto):
         assert self._is_actor
         self._cache.clear()
-        if "multi_modal_data" not in data.non_tensor_batch:
+        if "multi_modal_data" in data.non_tensor_batch:
             self.preprocess_multi_modal_data(data)
-            # create cache for multi_modal_data
-            self._cache['multi_modal_data'] = deepcopy(data.non_tensor_batch['multi_modal_data'])
+            # create cache for multi_modal_inputs
+            self._cache['multi_modal_inputs'] = deepcopy(data.non_tensor_batch['multi_modal_inputs'])
 
         data = data.to(torch.cuda.current_device())
         if self._use_param_offload:
@@ -590,9 +590,9 @@ class FSDPWorker(Worker):
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def compute_ref_log_probs(self, data: DataProto):
         assert self._is_ref
-        if "multi_modal_data" in self._cache:
-            data.non_tensor_batch['multi_modal_data'] = deepcopy(self._cache['multi_modal_data'])
-        elif "multi_modal_data" not in data.non_tensor_batch:
+        if "multi_modal_inputs" in self._cache:
+            data.non_tensor_batch['multi_modal_inputs'] = deepcopy(self._cache['multi_modal_inputs'])
+        elif "multi_modal_data" in data.non_tensor_batch:
             self.preprocess_multi_modal_data(data)
 
         data = data.to(torch.cuda.current_device())
@@ -620,9 +620,9 @@ class FSDPWorker(Worker):
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def compute_values(self, data: DataProto):
         assert self._is_critic
-        if "multi_modal_data" in self._cache:
-            data.non_tensor_batch['multi_modal_data'] = deepcopy(self._cache['multi_modal_data'])
-        elif "multi_modal_data" not in data.non_tensor_batch:
+        if "multi_modal_inputs" in self._cache:
+            data.non_tensor_batch['multi_modal_inputs'] = deepcopy(self._cache['multi_modal_inputs'])
+        elif "multi_modal_data" in data.non_tensor_batch:
             self.preprocess_multi_modal_data(data)
 
         data = data.to(torch.cuda.current_device())
@@ -643,8 +643,8 @@ class FSDPWorker(Worker):
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def update_critic(self, data: DataProto):
-        if "multi_modal_data" in self._cache:
-            data.non_tensor_batch['multi_modal_data'] = deepcopy(self._cache['multi_modal_data'])
+        if "multi_modal_inputs" in self._cache:
+            data.non_tensor_batch['multi_modal_inputs'] = deepcopy(self._cache['multi_modal_inputs'])
         elif "multi_modal_data" not in data.non_tensor_batch:
             self.preprocess_multi_modal_data(data)
 
