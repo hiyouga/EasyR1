@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import inspect
+import re
 from typing import Dict, Iterable, Tuple, Union
 
 import torch
@@ -21,6 +22,7 @@ from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint.state_dict import get_model_state_dict
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataParallel as FSDP
+from transformers import PreTrainedModel
 from vllm import LLM
 from vllm.distributed import parallel_state as vllm_ps
 
@@ -57,6 +59,26 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         self.gen_random_states = torch.cuda.get_rng_state()
         torch.cuda.set_rng_state(self.torch_random_states)
 
+    def _rename_weight_keys(self, actor_weights: Dict[str, Union[torch.Tensor, DTensor]], model: PreTrainedModel):
+        # convert state dict keys: https://github.com/huggingface/transformers/pull/38385
+        if not hasattr(model, "_checkpoint_conversion_mapping"):
+            return actor_weights
+
+        reverse_key_mapping = {v: k for k, v in model._checkpoint_conversion_mapping.items()}
+        original_weights = {}
+        for key, value in actor_weights.items():
+            for pattern, replacement in reverse_key_mapping.items():
+                replacement = replacement.lstrip("^")  # strip off un-needed chars and patterns
+                replacement = re.sub(r"\(.*\)", "", replacement)
+                key, n_replace = re.subn(pattern, replacement, key)
+                # Early exit of the loop
+                if n_replace > 0:
+                    break
+
+            original_weights[key] = value
+
+        return original_weights
+
     def _make_weight_iterator(
         self, actor_weights: Dict[str, Union[torch.Tensor, DTensor]]
     ) -> Iterable[Tuple[str, torch.Tensor]]:
@@ -74,6 +96,7 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         torch.cuda.empty_cache()
         print_gpu_memory_usage("Before state_dict() in sharding manager")
         actor_weights = get_model_state_dict(self.module)
+        actor_weights = self._rename_weight_keys(actor_weights, self.module._fsdp_wrapped_module)
         print_gpu_memory_usage("After state_dict() in sharding manager")
 
         if "tags" in inspect.signature(self.inference_engine.wake_up).parameters:

@@ -66,6 +66,10 @@ class vLLMRollout(BaseRollout):
         if config.max_num_batched_tokens < config.prompt_length + config.response_length:
             raise ValueError("max_num_batched_tokens should be greater than prompt_length + response_length.")
 
+        engine_kwargs = {}
+        if config.limit_images:
+            engine_kwargs["limit_mm_per_prompt"] = {"image": config.limit_images}
+
         self.inference_engine = LLM(
             model=model_path,
             skip_tokenizer_init=False,
@@ -81,10 +85,10 @@ class vLLMRollout(BaseRollout):
             disable_log_stats=config.disable_log_stats,
             enforce_eager=config.enforce_eager,
             disable_custom_all_reduce=True,
-            limit_mm_per_prompt={"image": config.limit_images} if config.limit_images > 0 else None,
             disable_mm_preprocessor_cache=True,
             enable_chunked_prefill=config.enable_chunked_prefill,
             enable_sleep_mode=True,
+            **engine_kwargs,
         )
 
         # Offload vllm model to reduce peak memory usage
@@ -121,6 +125,9 @@ class vLLMRollout(BaseRollout):
 
     @torch.no_grad()
     def generate_sequences(self, prompts: DataProto) -> DataProto:
+        if self.rank == 0:
+            print("[Rollout] Start generating sequences.")
+
         # left-padded attention_mask
         input_ids: torch.Tensor = prompts.batch["input_ids"]  # (bs, prompt_length)
         attention_mask: torch.Tensor = prompts.batch["attention_mask"]
@@ -188,4 +195,7 @@ class vLLMRollout(BaseRollout):
             },
             batch_size=batch_size,
         )
+        if self.rank == 0:
+            print("[Rollout] Finish generating sequences.")
+
         return DataProto(batch=batch, non_tensor_batch=non_tensor_batch)
