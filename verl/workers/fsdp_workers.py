@@ -432,13 +432,31 @@ class FSDPWorker(Worker):
         min_pixels = data.meta_info["min_pixels"]
         max_pixels = data.meta_info["max_pixels"]
         multi_modal_data_copy = deepcopy(data.non_tensor_batch["multi_modal_data"])
-        images = [multi_modal_data['image'] for multi_modal_data in multi_modal_data_copy]
-        for i, per_query_images in enumerate(images):
-            for j, image in enumerate(per_query_images):
-                images[i][j] = process_image(image, min_pixels=min_pixels, max_pixels=max_pixels)
+
+        processed_images = []
+        for multi_modal_data in multi_modal_data_copy:
+            processed_per_query_images = []
+            for image in multi_modal_data['image']:
+                processed_per_query_images.append(
+                    process_image(image, min_pixels=min_pixels, max_pixels=max_pixels)
+                )
+            processed_images.append(processed_per_query_images)
+
+        # Note: Using the alternative (commented) code below to process images can lead to subtle resize issues:
+        # For example: an image with size (656, 369) should be resized to (682, 383) with `min_pixels=512 ** 2`,
+        # however, it will produce an image with size (683, 383) when using the following for loop.
+        # (But it works normally when directly applying `process_image` to this image).
+        # This behavior is unexpected and difficult to explain.
+        # The code above works normally.
+
+        # images = [multi_modal_data['image'] for multi_modal_data in multi_modal_data_copy]
+        # for i, per_query_images in enumerate(images):
+        #     for j, image in enumerate(per_query_images):
+        #         images[i][j] = process_image(image, min_pixels=min_pixels, max_pixels=max_pixels)
+
         multi_modal_inputs = np.array([
             dict(self.processor.image_processor(images=per_query_images, videos=None))
-            for per_query_images in images
+            for per_query_images in processed_images
         ], dtype=object)
         data.non_tensor_batch["multi_modal_inputs"] = multi_modal_inputs
 
@@ -589,6 +607,8 @@ class FSDPWorker(Worker):
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def compute_ref_log_probs(self, data: DataProto):
+        # The `self._cache` is empty here since cached `multi_modal_inputs` is only saved in the actor's _cache,
+        # not in the ref_policy's or critic's caches.
         assert self._is_ref
         if "multi_modal_inputs" in self._cache:
             data.non_tensor_batch['multi_modal_inputs'] = deepcopy(self._cache['multi_modal_inputs'])
@@ -620,6 +640,8 @@ class FSDPWorker(Worker):
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def compute_values(self, data: DataProto):
         assert self._is_critic
+        # The `self._cache` is empty here since cached `multi_modal_inputs` is only saved in the actor's _cache,
+        # not in the ref_policy's or critic's caches.
         if "multi_modal_inputs" in self._cache:
             data.non_tensor_batch['multi_modal_inputs'] = deepcopy(self._cache['multi_modal_inputs'])
         elif "multi_modal_data" in data.non_tensor_batch:
@@ -643,6 +665,8 @@ class FSDPWorker(Worker):
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def update_critic(self, data: DataProto):
+        # The `self._cache` is empty here since cached `multi_modal_inputs` is only saved in the actor's _cache,
+        # not in the ref_policy's or critic's caches.
         if "multi_modal_inputs" in self._cache:
             data.non_tensor_batch['multi_modal_inputs'] = deepcopy(self._cache['multi_modal_inputs'])
         elif "multi_modal_data" not in data.non_tensor_batch:
