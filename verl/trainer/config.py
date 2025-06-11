@@ -38,6 +38,7 @@ class DataConfig:
     prompt_key: str = "prompt"
     answer_key: str = "answer"
     image_key: str = "images"
+    image_dir: Optional[str] = None
     max_prompt_length: int = 512
     max_response_length: int = 512
     rollout_batch_size: int = 512
@@ -51,10 +52,18 @@ class DataConfig:
     filter_overlong_prompts: bool = True
 
     def post_init(self):
+        if self.image_dir is not None:
+            if os.path.exists(self.image_dir):  # ray job uses absolute path
+                self.image_dir = os.path.abspath(self.image_dir)
+            else:
+                print(f"Image directory {self.image_dir} is not found.")
+                self.image_dir = None
+
         if self.format_prompt is not None:
             if os.path.exists(self.format_prompt):  # ray job uses absolute path
                 self.format_prompt = os.path.abspath(self.format_prompt)
             else:
+                print(f"Format prompt file {self.format_prompt} is not found.")
                 self.format_prompt = None
 
 
@@ -97,7 +106,11 @@ class TrainerConfig:
 
         self.save_checkpoint_path = os.path.abspath(self.save_checkpoint_path)  # ray job uses absolute path
         if self.load_checkpoint_path is not None:
-            self.load_checkpoint_path = os.path.abspath(self.load_checkpoint_path)
+            if os.path.exists(self.load_checkpoint_path):  # ray job uses absolute path
+                self.load_checkpoint_path = os.path.abspath(self.load_checkpoint_path)
+            else:
+                print(f"Model checkpoint {self.load_checkpoint_path} is not found.")
+                self.load_checkpoint_path = None
 
 
 @dataclass

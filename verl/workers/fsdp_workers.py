@@ -15,13 +15,13 @@
 The main entry point to run the PPO algorithm
 """
 
+from copy import deepcopy
 from typing import Literal, Optional, Union
 
 import numpy as np
 import psutil
 import torch
 import torch.distributed as dist
-from copy import deepcopy
 from accelerate import init_empty_weights
 from codetiming import Timer
 from torch.distributed.device_mesh import init_device_mesh
@@ -42,6 +42,7 @@ from ..protocol import DataProto
 from ..single_controller.base import Worker
 from ..single_controller.base.decorator import Dispatch, register
 from ..utils.checkpoint.fsdp_checkpoint_manager import FSDPCheckpointManager
+from ..utils.dataset import process_image
 from ..utils.flops_counter import FlopsCounter
 from ..utils.fsdp_utils import (
     get_fsdp_wrap_policy,
@@ -51,7 +52,6 @@ from ..utils.fsdp_utils import (
     offload_fsdp_model,
     offload_fsdp_optimizer,
 )
-from ..utils.dataset import process_image
 from ..utils.model_utils import print_gpu_memory_usage, print_model_size
 from ..utils.tokenizer import get_processor, get_tokenizer
 from ..utils.torch_dtypes import PrecisionType
@@ -436,10 +436,9 @@ class FSDPWorker(Worker):
         processed_images = []
         for multi_modal_data in multi_modal_data_copy:
             processed_per_query_images = []
-            for image in multi_modal_data['image']:
-                processed_per_query_images.append(
-                    process_image(image, min_pixels=min_pixels, max_pixels=max_pixels)
-                )
+            for image in multi_modal_data["image"]:
+                processed_per_query_images.append(process_image(image, min_pixels=min_pixels, max_pixels=max_pixels))
+
             processed_images.append(processed_per_query_images)
 
         # Note: Using the alternative (commented) code below to process images can lead to subtle resize issues:
@@ -454,17 +453,20 @@ class FSDPWorker(Worker):
         #     for j, image in enumerate(per_query_images):
         #         images[i][j] = process_image(image, min_pixels=min_pixels, max_pixels=max_pixels)
 
-        multi_modal_inputs = np.array([
-            dict(self.processor.image_processor(images=per_query_images, videos=None))
-            for per_query_images in processed_images
-        ], dtype=object)
+        multi_modal_inputs = np.array(
+            [
+                dict(self.processor.image_processor(images=per_query_images, videos=None))
+                for per_query_images in processed_images
+            ],
+            dtype=object,
+        )
         data.non_tensor_batch["multi_modal_inputs"] = multi_modal_inputs
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def update_actor(self, data: DataProto):
         assert self._is_actor
         if "multi_modal_inputs" in self._cache:
-            data.non_tensor_batch['multi_modal_inputs'] = deepcopy(self._cache['multi_modal_inputs'])
+            data.non_tensor_batch["multi_modal_inputs"] = deepcopy(self._cache["multi_modal_inputs"])
         elif "multi_modal_data" in data.non_tensor_batch:
             self.preprocess_multi_modal_data(data)
 
@@ -545,12 +547,14 @@ class FSDPWorker(Worker):
             cached_multi_modal_data = None
             if "multi_modal_data" in prompts.non_tensor_batch:
                 cached_multi_modal_data = deepcopy(prompts.non_tensor_batch["multi_modal_data"])
-                min_pixels = prompts.meta_info['min_pixels']
-                max_pixels = prompts.meta_info['max_pixels']
+                min_pixels = prompts.meta_info["min_pixels"]
+                max_pixels = prompts.meta_info["max_pixels"]
                 processed_images = []
                 for i, multi_modal_data in enumerate(prompts.non_tensor_batch["multi_modal_data"]):
                     for j, image in enumerate(multi_modal_data["image"]):
-                        multi_modal_data['image'][j] = process_image(image, min_pixels=min_pixels, max_pixels=max_pixels)
+                        multi_modal_data["image"][j] = process_image(
+                            image, min_pixels=min_pixels, max_pixels=max_pixels
+                        )
                     processed_images.append(multi_modal_data)
                 prompts.non_tensor_batch["multi_modal_data"] = processed_images
 
@@ -562,7 +566,9 @@ class FSDPWorker(Worker):
                 output.non_tensor_batch["multi_modal_data"] = cached_multi_modal_data
                 if sampling_n > 1:
                     output.non_tensor_batch["multi_modal_data"] = np.repeat(
-                        output.non_tensor_batch["multi_modal_data"], repeats=sampling_n, axis=0,
+                        output.non_tensor_batch["multi_modal_data"],
+                        repeats=sampling_n,
+                        axis=0,
                     )
 
             output = self.rollout_sharding_manager.postprocess_data(output)
@@ -577,7 +583,7 @@ class FSDPWorker(Worker):
         if "multi_modal_data" in data.non_tensor_batch:
             self.preprocess_multi_modal_data(data)
             # create cache for multi_modal_inputs
-            self._cache['multi_modal_inputs'] = deepcopy(data.non_tensor_batch['multi_modal_inputs'])
+            self._cache["multi_modal_inputs"] = deepcopy(data.non_tensor_batch["multi_modal_inputs"])
 
         data = data.to(torch.cuda.current_device())
         if self._use_param_offload:
@@ -611,7 +617,7 @@ class FSDPWorker(Worker):
         # not in the ref_policy's or critic's caches.
         assert self._is_ref
         if "multi_modal_inputs" in self._cache:
-            data.non_tensor_batch['multi_modal_inputs'] = deepcopy(self._cache['multi_modal_inputs'])
+            data.non_tensor_batch["multi_modal_inputs"] = deepcopy(self._cache["multi_modal_inputs"])
         elif "multi_modal_data" in data.non_tensor_batch:
             self.preprocess_multi_modal_data(data)
 
@@ -643,7 +649,7 @@ class FSDPWorker(Worker):
         # The `self._cache` is empty here since cached `multi_modal_inputs` is only saved in the actor's _cache,
         # not in the ref_policy's or critic's caches.
         if "multi_modal_inputs" in self._cache:
-            data.non_tensor_batch['multi_modal_inputs'] = deepcopy(self._cache['multi_modal_inputs'])
+            data.non_tensor_batch["multi_modal_inputs"] = deepcopy(self._cache["multi_modal_inputs"])
         elif "multi_modal_data" in data.non_tensor_batch:
             self.preprocess_multi_modal_data(data)
 
@@ -668,7 +674,7 @@ class FSDPWorker(Worker):
         # The `self._cache` is empty here since cached `multi_modal_inputs` is only saved in the actor's _cache,
         # not in the ref_policy's or critic's caches.
         if "multi_modal_inputs" in self._cache:
-            data.non_tensor_batch['multi_modal_inputs'] = deepcopy(self._cache['multi_modal_inputs'])
+            data.non_tensor_batch["multi_modal_inputs"] = deepcopy(self._cache["multi_modal_inputs"])
         elif "multi_modal_data" not in data.non_tensor_batch:
             self.preprocess_multi_modal_data(data)
 

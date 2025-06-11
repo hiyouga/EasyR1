@@ -50,7 +50,6 @@ def collate_fn(features: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {**tensors, **non_tensors}
 
 
-
 def process_image(image: Union[Dict[str, Any], ImageObject, str], min_pixels: int, max_pixels: int) -> ImageObject:
     if isinstance(image, str):
         image = Image.open(image)
@@ -59,6 +58,7 @@ def process_image(image: Union[Dict[str, Any], ImageObject, str], min_pixels: in
     elif isinstance(image, bytes):
         image = Image.open(BytesIO(image))
 
+    image.load()  # avoid "Too many open files" errors
     if (image.width * image.height) > max_pixels:
         resize_factor = math.sqrt(max_pixels / (image.width * image.height))
         width, height = int(image.width * resize_factor), int(image.height * resize_factor)
@@ -88,6 +88,7 @@ class RLHFDataset(Dataset):
         prompt_key: str = "prompt",
         answer_key: str = "answer",
         image_key: str = "images",
+        image_dir: Optional[str] = None,
         max_prompt_length: int = 1024,
         truncation: str = "error",
         format_prompt: Optional[str] = None,
@@ -100,6 +101,7 @@ class RLHFDataset(Dataset):
         self.prompt_key = prompt_key
         self.answer_key = answer_key
         self.image_key = image_key
+        self.image_dir = image_dir
         self.max_prompt_length = max_prompt_length
         self.truncation = truncation
         self.max_pixels = max_pixels
@@ -113,9 +115,11 @@ class RLHFDataset(Dataset):
 
         if os.path.isdir(data_path):
             # when we use dataset builder, we should always refer to the train split
-            self.dataset = load_dataset("parquet", data_dir=data_path, split="train")
+            file_type = os.path.splitext(os.listdir("images/train")[0])[-1][1:].replace("jsonl", "json")
+            self.dataset = load_dataset(file_type, data_dir=data_path, split=data_split)
         elif os.path.isfile(data_path):
-            self.dataset = load_dataset("parquet", data_files=data_path, split="train")
+            file_type = os.path.splitext(data_path)[-1][1:].replace("jsonl", "json")
+            self.dataset = load_dataset(file_type, data_files=data_path, split=data_split)
         else:
             # load remote dataset from huggingface hub
             self.dataset = load_dataset(data_path, split=data_split)
@@ -164,22 +168,25 @@ class RLHFDataset(Dataset):
 
         if self.image_key in example:
             prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
-            raw_image_data = example.pop(self.image_key)
-            images = [
+            images = example.pop(self.image_key)
+            if self.image_dir is not None and len(images) != 0 and isinstance(images[0], str): # image paths
+                images = [os.path.join(self.image_dir, image) for image in images]
+
+            resized_images = [
                 process_image(image, min_pixels=self.min_pixels, max_pixels=self.max_pixels)
-                for image in raw_image_data
+                for image in images
             ]
-            model_inputs = self.processor(images, [prompt], add_special_tokens=False, return_tensors="pt")
+            model_inputs = self.processor(resized_images, [prompt], add_special_tokens=False, return_tensors="pt")
             input_ids = model_inputs.pop("input_ids")[0]
             attention_mask = model_inputs.pop("attention_mask")[0]
-            example["multi_modal_data"] = {"image": raw_image_data}
+            example["multi_modal_inputs"] = {"images": images}
         else:
             prompt = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
             model_inputs = self.tokenizer([prompt], add_special_tokens=False, return_tensors="pt")
             input_ids = model_inputs.pop("input_ids")[0]
             attention_mask = model_inputs.pop("attention_mask")[0]
 
-        if self.processor is not None and self.processor.image_processor.__class__.__name__ == "Qwen2VLImageProcessor":
+        if self.processor is not None and "Qwen2VLImageProcessor" in self.processor.image_processor.__class__.__name__:
             # qwen2vl mrope
             position_ids = get_rope_index(
                 self.processor,

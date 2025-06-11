@@ -283,22 +283,13 @@ class RayPPOTrainer:
             input_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in input_ids]
             sample_inputs.extend(input_texts)
 
-            if "multi_modal_data" in test_batch.non_tensor_batch.keys():
-                test_gen_batch = test_batch.pop(
-                    batch_keys=["input_ids", "attention_mask", "position_ids"],
-                    non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
-                )
-            else:
-                test_gen_batch = test_batch.pop(
-                    batch_keys=["input_ids", "attention_mask", "position_ids"],
-                    non_tensor_batch_keys=["raw_prompt_ids"],
-                )
-
+            test_gen_batch = test_batch.pop(
+                batch_keys=["input_ids", "attention_mask", "position_ids"],
+                non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
+            )
             test_gen_batch.meta_info = self.config.worker.rollout.val_override_config
-            test_gen_batch.meta_info.update({
-                "min_pixels": self.config.data.min_pixels,
-                "max_pixels": self.config.data.max_pixels,
-            })
+            test_gen_batch.meta_info["min_pixels"] = self.config.data.min_pixels
+            test_gen_batch.meta_info["max_pixels"] = self.config.data.max_pixels
             test_gen_batch, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_wg.world_size)
             test_output_gen_batch = self.actor_rollout_wg.generate_sequences(test_gen_batch)
             test_output_gen_batch = unpad_dataproto(test_output_gen_batch, pad_size=pad_size)
@@ -485,23 +476,16 @@ class RayPPOTrainer:
 
                 metrics, timing_raw = {}, {}
                 batch: DataProto = DataProto.from_single_dict(batch_dict)
+                batch.meta_info = {
+                    "min_pixels": self.config.data.min_pixels,
+                    "max_pixels": self.config.data.max_pixels,
+                }
 
                 # pop those keys for generation
-                if "multi_modal_data" in batch.non_tensor_batch.keys():
-                    gen_batch = batch.pop(
-                        batch_keys=["input_ids", "attention_mask", "position_ids"],
-                        non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
-                    )
-                    gen_batch.meta_info.update({
-                        "min_pixels": self.config.data.min_pixels,
-                        "max_pixels": self.config.data.max_pixels,
-                    })
-                else:
-                    gen_batch = batch.pop(
-                        batch_keys=["input_ids", "attention_mask", "position_ids"],
-                        non_tensor_batch_keys=["raw_prompt_ids"],
-                    )
-
+                gen_batch = batch.pop(
+                    batch_keys=["input_ids", "attention_mask", "position_ids"],
+                    non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
+                )
                 with timer("step", timing_raw):
                     # generate a batch
                     with timer("gen", timing_raw):  # wg: worker group

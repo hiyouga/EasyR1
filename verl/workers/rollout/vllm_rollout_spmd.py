@@ -201,5 +201,5 @@ class vLLMRollout(BaseRollout):
         return DataProto(
             batch=batch,
             non_tensor_batch=non_tensor_batch,
-            meta_info=prompts.meta_info.copy(),
+            meta_info=prompts.meta_info.copy()
         )
