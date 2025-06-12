@@ -475,16 +475,14 @@ class RayPPOTrainer:
                     break
 
                 metrics, timing_raw = {}, {}
-                batch: DataProto = DataProto.from_single_dict(batch_dict)
-                batch.meta_info = {
-                    "min_pixels": self.config.data.min_pixels,
-                    "max_pixels": self.config.data.max_pixels,
-                }
+                meta_info = {"min_pixels": self.config.data.min_pixels, "max_pixels": self.config.data.max_pixels}
+                batch: DataProto = DataProto.from_single_dict(batch_dict, meta_info=meta_info)
 
                 # pop those keys for generation
                 gen_batch = batch.pop(
                     batch_keys=["input_ids", "attention_mask", "position_ids"],
                     non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
+                    meta_info_keys=["min_pixels", "max_pixels"],
                 )
                 with timer("step", timing_raw):
                     # generate a batch

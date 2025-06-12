@@ -47,8 +47,8 @@ class DataConfig:
     override_chat_template: Optional[str] = None
     shuffle: bool = True
     seed: int = 1
-    max_pixels: int = 4194304
-    min_pixels: int = 262144
+    min_pixels: Optional[int] = 262144
+    max_pixels: Optional[int] = 4194304
     filter_overlong_prompts: bool = True
 
     def post_init(self):

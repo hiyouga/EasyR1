@@ -50,7 +50,9 @@ def collate_fn(features: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {**tensors, **non_tensors}
 
 
-def process_image(image: Union[Dict[str, Any], ImageObject, str], min_pixels: int, max_pixels: int) -> ImageObject:
+def process_image(
+    image: Union[Dict[str, Any], ImageObject, str], min_pixels: Optional[int], max_pixels: Optional[int]
+) -> ImageObject:
     if isinstance(image, str):
         image = Image.open(image)
     elif isinstance(image, dict):
@@ -59,12 +61,12 @@ def process_image(image: Union[Dict[str, Any], ImageObject, str], min_pixels: in
         image = Image.open(BytesIO(image))
 
     image.load()  # avoid "Too many open files" errors
-    if (image.width * image.height) > max_pixels:
+    if max_pixels is not None and (image.width * image.height) > max_pixels:
         resize_factor = math.sqrt(max_pixels / (image.width * image.height))
         width, height = int(image.width * resize_factor), int(image.height * resize_factor)
         image = image.resize((width, height))
 
-    if (image.width * image.height) < min_pixels:
+    if min_pixels is not None and (image.width * image.height) < min_pixels:
         resize_factor = math.sqrt(min_pixels / (image.width * image.height))
         width, height = int(image.width * resize_factor), int(image.height * resize_factor)
         image = image.resize((width, height))
@@ -92,8 +94,8 @@ class RLHFDataset(Dataset):
         max_prompt_length: int = 1024,
         truncation: str = "error",
         format_prompt: Optional[str] = None,
-        max_pixels: Optional[int] = None,
         min_pixels: Optional[int] = None,
+        max_pixels: Optional[int] = None,
         filter_overlong_prompts: bool = True,
     ):
         self.tokenizer = tokenizer
@@ -104,8 +106,8 @@ class RLHFDataset(Dataset):
         self.image_dir = image_dir
         self.max_prompt_length = max_prompt_length
         self.truncation = truncation
-        self.max_pixels = max_pixels
         self.min_pixels = min_pixels
+        self.max_pixels = max_pixels
         self.filter_overlong_prompts = filter_overlong_prompts
 
         if "@" in data_path:
@@ -169,17 +171,16 @@ class RLHFDataset(Dataset):
         if self.image_key in example:
             prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
             images = example.pop(self.image_key)
-            if self.image_dir is not None and len(images) != 0 and isinstance(images[0], str): # image paths
+            if self.image_dir is not None and len(images) != 0 and isinstance(images[0], str):  # image paths
                 images = [os.path.join(self.image_dir, image) for image in images]
 
             resized_images = [
-                process_image(image, min_pixels=self.min_pixels, max_pixels=self.max_pixels)
-                for image in images
+                process_image(image, min_pixels=self.min_pixels, max_pixels=self.max_pixels) for image in images
             ]
             model_inputs = self.processor(resized_images, [prompt], add_special_tokens=False, return_tensors="pt")
             input_ids = model_inputs.pop("input_ids")[0]
             attention_mask = model_inputs.pop("attention_mask")[0]
-            example["multi_modal_inputs"] = {"images": images}
+            example["multi_modal_data"] = {"images": images}
         else:
             prompt = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
             model_inputs = self.tokenizer([prompt], add_special_tokens=False, return_tensors="pt")

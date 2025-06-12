@@ -384,11 +384,11 @@ class DataProto:
         meta_info_keys = meta_info_keys or []
 
         tensors = {}
-        for key in batch_keys and key in self.batch:
+        for key in filter(lambda k: k in self.batch, batch_keys):
             tensors[key] = self.batch.pop(key)
 
         non_tensors = {}
-        for key in non_tensor_batch_keys and key in self.non_tensor_batch:
+        for key in filter(lambda k: k in self.non_tensor_batch, non_tensor_batch_keys):
             non_tensors[key] = self.non_tensor_batch.pop(key)
 
         meta_info = {}
