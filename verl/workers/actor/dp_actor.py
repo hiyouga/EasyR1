@@ -185,10 +185,7 @@ class DataParallelPPOActor(BasePPOActor):
 
         temperature = data.meta_info["temperature"]
         select_keys = ["responses", "input_ids", "attention_mask", "position_ids"]
-        if "multi_modal_inputs" in data.non_tensor_batch.keys():
-            non_tensor_select_keys = ["multi_modal_inputs"]
-        else:
-            non_tensor_select_keys = []
+        non_tensor_select_keys = ["multi_modal_inputs"]
 
         micro_batches = data.select(select_keys, non_tensor_select_keys).split(
             self.config.micro_batch_size_per_device_for_experience
@@ -209,14 +206,9 @@ class DataParallelPPOActor(BasePPOActor):
         self.actor_module.train()
 
         temperature = data.meta_info["temperature"]  # temperature must be in the data.meta_info to avoid slient error
-        select_keys = ["responses", "input_ids", "attention_mask", "position_ids", "old_log_probs", "advantages"]
-        if self.config.use_kl_loss and not self.config.disable_kl:
-            select_keys.append("ref_log_probs")
-
-        if "multi_modal_inputs" in data.non_tensor_batch.keys():
-            non_tensor_select_keys = ["multi_modal_inputs"]
-        else:
-            non_tensor_select_keys = []
+        select_keys = ["responses", "input_ids", "attention_mask", "position_ids"]
+        select_keys.extend(["old_log_probs", "ref_log_probs", "advantages"])
+        non_tensor_select_keys = ["multi_modal_inputs"]
 
         # Split to make minibatch iterator for updating the actor
         # See PPO paper for details. https://arxiv.org/abs/1707.06347
@@ -257,7 +249,7 @@ class DataParallelPPOActor(BasePPOActor):
                         clip_ratio_high=self.config.clip_ratio_high,
                         clip_ratio_dual=self.config.clip_ratio_dual,
                     )
-                    if "ref_log_probs" in model_inputs:
+                    if self.config.use_kl_loss and "ref_log_probs" in model_inputs:
                         ref_log_probs = model_inputs["ref_log_probs"]
                         # compute kl loss
                         kld = core_algos.compute_kl(

@@ -150,15 +150,15 @@ class vLLMRollout(BaseRollout):
         batch_size = input_ids.size(0)
 
         non_tensor_batch = prompts.non_tensor_batch
-        if batch_size != len(non_tensor_batch["raw_prompt_ids"]):
+        batch_raw_prompt_ids = non_tensor_batch.pop("raw_prompt_ids")
+        batch_multi_modal_data = non_tensor_batch.get("multi_modal_data")  # do not pop it
+        if batch_size != len(batch_raw_prompt_ids):
             raise RuntimeError("vllm sharding manager is not work properly.")
 
-        if "multi_modal_data" in non_tensor_batch:
+        if batch_multi_modal_data is not None:
             min_pixels, max_pixels = prompts.meta_info["min_pixels"], prompts.meta_info["max_pixels"]
             vllm_inputs = []
-            for raw_prompt_ids, multi_modal_data in zip(
-                non_tensor_batch.pop("raw_prompt_ids"), non_tensor_batch.pop("multi_modal_data")
-            ):
+            for raw_prompt_ids, multi_modal_data in zip(batch_raw_prompt_ids, batch_multi_modal_data):
                 vllm_inputs.append(
                     {
                         "prompt_token_ids": list(raw_prompt_ids),
@@ -185,6 +185,10 @@ class vLLMRollout(BaseRollout):
                 input_ids = _repeat_interleave(input_ids, self.sampling_params.n)
                 attention_mask = _repeat_interleave(attention_mask, self.sampling_params.n)
                 position_ids = _repeat_interleave(position_ids, self.sampling_params.n)
+                if "multi_modal_data" in non_tensor_batch:
+                    non_tensor_batch["multi_modal_data"] = _repeat_interleave(
+                        non_tensor_batch["multi_modal_data"], self.sampling_params.n
+                    )
 
         sequence_ids = torch.cat([input_ids, response_ids], dim=-1)
         response_length = response_ids.size(1)
@@ -218,4 +222,4 @@ class vLLMRollout(BaseRollout):
         if self.rank == 0:
             print("[Rollout] Finish generating sequences.")
 
-        return DataProto(batch=batch, non_tensor_batch=non_tensor_batch)
+        return DataProto(batch=batch, non_tensor_batch=non_tensor_batch, meta_info=prompts.meta_info)

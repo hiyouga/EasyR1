@@ -142,10 +142,7 @@ class DataParallelPPOCritic(BasePPOCritic):
         self.critic_module.eval()
 
         select_keys = ["responses", "input_ids", "attention_mask", "position_ids"]
-        if "multi_modal_inputs" in data.non_tensor_batch.keys():
-            non_tensor_select_keys = ["multi_modal_inputs"]
-        else:
-            non_tensor_select_keys = []
+        non_tensor_select_keys = ["multi_modal_inputs"]
 
         micro_batches = data.select(select_keys, non_tensor_select_keys).split(
             self.config.micro_batch_size_per_device_for_experience
@@ -170,10 +167,7 @@ class DataParallelPPOCritic(BasePPOCritic):
         self.critic_module.train()
 
         select_keys = ["input_ids", "responses", "attention_mask", "position_ids", "values", "returns"]
-        if "multi_modal_inputs" in data.non_tensor_batch.keys():
-            non_tensor_select_keys = ["multi_modal_inputs"]
-        else:
-            non_tensor_select_keys = []
+        non_tensor_select_keys = ["multi_modal_inputs"]
 
         # Split to make minibatch iterator for updating the actor
         # See PPO paper for details. https://arxiv.org/abs/1707.06347

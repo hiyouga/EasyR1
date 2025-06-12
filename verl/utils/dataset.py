@@ -117,7 +117,7 @@ class RLHFDataset(Dataset):
 
         if os.path.isdir(data_path):
             # when we use dataset builder, we should always refer to the train split
-            file_type = os.path.splitext(os.listdir("images/train")[0])[-1][1:].replace("jsonl", "json")
+            file_type = os.path.splitext(os.listdir(data_path)[0])[-1][1:].replace("jsonl", "json")
             self.dataset = load_dataset(file_type, data_dir=data_path, split=data_split)
         elif os.path.isfile(data_path):
             file_type = os.path.splitext(data_path)[-1][1:].replace("jsonl", "json")

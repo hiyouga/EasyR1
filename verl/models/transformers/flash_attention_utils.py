@@ -36,7 +36,7 @@ if is_flash_attn_2_available():
 
     _flash_supports_window_size = "window_size" in inspect.signature(flash_attn_func).parameters
     _flash_supports_deterministic = "deterministic" in inspect.signature(flash_attn_func).parameters
-    _flash_deterministic_enabled = os.environ.get("FLASH_ATTENTION_DETERMINISTIC", "0") == "1"
+    _flash_deterministic_enabled = os.getenv("FLASH_ATTENTION_DETERMINISTIC", "0") == "1"
     _flash_use_top_left_mask = not is_flash_attn_greater_or_equal_2_10()
 
 
@@ -74,11 +74,6 @@ def _custom_flash_attention_forward(
     """
     Patches flash attention forward to handle 3D position ids in mrope. (3, batch_size, seq_length)
     """
-    if not use_top_left_mask:
-        causal = is_causal
-    else:
-        causal = is_causal and query_length != 1
-
     # Assuming 4D tensors, key_states.shape[1] is the key/value sequence length (source length).
     use_sliding_windows = (
         _flash_supports_window_size and sliding_window is not None and key_states.shape[1] > sliding_window
@@ -105,9 +100,6 @@ def _custom_flash_attention_forward(
         position_ids = dist.all_gather(position_ids_lst, position_ids, group=get_ulysses_sequence_parallel_group())
         position_ids = torch.cat(position_ids_lst, dim=-1)  # (..., batch_size, seq_length)
 
-    if position_ids is not None and position_ids.dim() == 3:  # qwen2vl mrope
-        position_ids = position_ids[0]
-
     if position_ids is not None and query_length != 1 and not (torch.diff(position_ids, dim=-1) >= 0).all():
         batch_size = query_states.size(0)
         query_states, key_states, value_states, _, cu_seq_lens, max_seq_lens = prepare_fa2_from_position_ids(
@@ -125,7 +117,7 @@ def _custom_flash_attention_forward(
             max_seqlen_k=max_seqlen_in_batch_k,
             dropout_p=kwargs.pop("dropout", 0.0),
             softmax_scale=kwargs.pop("softmax_scale", None),
-            causal=causal,
+            causal=is_causal,
             **flash_kwargs,
         )
         attn_output = attn_output.view(batch_size, -1, attn_output.size(-2), attn_output.size(-1))

@@ -154,11 +154,7 @@ def qwen2_vl_attn_forward(
     value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
 
     # Because the input can be padded, the absolute sequence length depends on the max position id.
-    if position_embeddings is None:
-        cos, sin = self.rotary_emb(value_states, position_ids)
-    else:
-        cos, sin = position_embeddings
-
+    cos, sin = position_embeddings
     query_states, key_states = apply_multimodal_rotary_pos_emb(
         query_states, key_states, cos, sin, self.rope_scaling["mrope_section"]
     )
@@ -182,7 +178,7 @@ def qwen2_vl_attn_forward(
         attention_mask,
         dropout=dropout_rate,
         sliding_window=sliding_window,
-        position_ids=position_ids,  # important: pass position ids
+        position_ids=position_ids[0],  # important: pass position ids
     )  # (batch_size, seq_length, num_head / sp_size, head_size)
     attn_output = attn_output.reshape(bsz, q_len, self.hidden_size).contiguous()
     attn_output = self.o_proj(attn_output)

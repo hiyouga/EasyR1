@@ -341,12 +341,13 @@ class DataProto:
         """
         # TODO (zhangchi.usc1992) whether to copy
         if batch_keys is not None:
-            batch_keys = tuple(batch_keys)
+            batch_keys = tuple(filter(lambda k: k in self.batch, batch_keys))
             sub_batch = self.batch.select(*batch_keys)
         else:
             sub_batch = self.batch
 
         if non_tensor_batch_keys is not None:
+            non_tensor_batch_keys = filter(lambda k: k in self.non_tensor_batch, non_tensor_batch_keys)
             non_tensor_batch = {k: v for k, v in self.non_tensor_batch.items() if k in non_tensor_batch_keys}
         else:
             non_tensor_batch = self.non_tensor_batch

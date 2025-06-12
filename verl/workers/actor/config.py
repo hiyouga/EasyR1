@@ -57,7 +57,7 @@ class OptimConfig:
 class FSDPConfig:
     enable_full_shard: bool = True
     enable_cpu_offload: bool = False
-    enable_rank0_init: bool = False
+    enable_rank0_init: bool = True
     use_orig_params: bool = False
     torch_dtype: Optional[str] = None
     fsdp_size: int = -1
@@ -83,7 +83,7 @@ class ActorConfig:
     clip_ratio_high: float = 0.3
     clip_ratio_dual: float = 3.0
     ppo_epochs: int = 1
-    padding_free: bool = False
+    padding_free: bool = True
     ulysses_sequence_parallel_size: int = 1
     use_torch_compile: bool = True
     model: ModelConfig = field(default_factory=ModelConfig)
