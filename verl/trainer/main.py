@@ -52,18 +52,16 @@ class Runner:
         # define worker classes
         ray_worker_group_cls = RayWorkerGroup
         role_worker_mapping = {
-            Role.ActorRollout: ray.remote(FSDPWorker),
+            Role.ActorRolloutRef: ray.remote(FSDPWorker),
             Role.Critic: ray.remote(FSDPWorker),
-            Role.RefPolicy: ray.remote(FSDPWorker),
         }
         global_pool_id = "global_pool"
         resource_pool_spec = {
             global_pool_id: [config.trainer.n_gpus_per_node] * config.trainer.nnodes,
         }
         mapping = {
-            Role.ActorRollout: global_pool_id,
+            Role.ActorRolloutRef: global_pool_id,
             Role.Critic: global_pool_id,
-            Role.RefPolicy: global_pool_id,
         }
         resource_pool_manager = ResourcePoolManager(resource_pool_spec=resource_pool_spec, mapping=mapping)
 

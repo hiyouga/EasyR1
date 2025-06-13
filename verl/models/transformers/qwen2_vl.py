@@ -44,7 +44,7 @@ def get_rope_index(
     """
     Gets the position ids for Qwen2-VL, it should be generated before sharding the sequence.
     The batch dim has been removed and the input_ids should be a 1D tensor representing a single example.
-    https://github.com/huggingface/transformers/blob/v4.49.0/src/transformers/models/qwen2_5_vl/modeling_qwen2_5_vl.py#L1546
+    https://github.com/huggingface/transformers/blob/v4.52.4/src/transformers/models/qwen2_5_vl/modeling_qwen2_5_vl.py#L1405
     """
     spatial_merge_size = processor.image_processor.merge_size
     tokens_per_second = 2

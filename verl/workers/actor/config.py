@@ -80,11 +80,19 @@ class ActorConfig:
     micro_batch_size_per_device_for_experience: int = 16
     max_grad_norm: float = 1.0
     clip_ratio_low: float = 0.2
+    """clip ratio in PPO & DAPO"""
     clip_ratio_high: float = 0.3
+    """clip ratio in PPO & DAPO"""
     clip_ratio_dual: float = 3.0
+    """constant C in dual-clip PPO, clips when advantage < -C"""
+    loss_avg_mode: str = "token"
+    """loss average mode: `token`, `seq`"""
     ppo_epochs: int = 1
+    """number of ppo epochs for each rollout batch"""
     padding_free: bool = True
-    ulysses_sequence_parallel_size: int = 1
+    """use padding-free training"""
+    ulysses_size: int = 1
+    """ulysses sequence parallel size"""
     use_torch_compile: bool = True
     model: ModelConfig = field(default_factory=ModelConfig)
     optim: OptimConfig = field(default_factory=OptimConfig)
@@ -106,5 +114,5 @@ class RefConfig:
     """auto keys"""
     micro_batch_size_per_device_for_experience: int = field(default=-1, init=False)
     padding_free: bool = field(default=False, init=False)
-    ulysses_sequence_parallel_size: int = field(default=1, init=False)
+    ulysses_size: int = field(default=1, init=False)
     use_torch_compile: bool = field(default=True, init=False)

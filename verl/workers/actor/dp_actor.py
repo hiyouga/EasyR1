@@ -100,12 +100,12 @@ class DataParallelPPOActor(BasePPOActor):
             input_ids_rmpad_rolled = torch.roll(input_ids_rmpad, shifts=-1, dims=1)  # (1, total_nnz)
 
             # pad and slice the inputs if sp > 1
-            if self.config.ulysses_sequence_parallel_size > 1:
+            if self.config.ulysses_size > 1:
                 input_ids_rmpad, position_ids_rmpad, pad_size = ulysses_pad_and_slice_inputs(
-                    input_ids_rmpad, position_ids_rmpad, sp_size=self.config.ulysses_sequence_parallel_size
+                    input_ids_rmpad, position_ids_rmpad, sp_size=self.config.ulysses_size
                 )
                 input_ids_rmpad_rolled, _, _ = ulysses_pad_and_slice_inputs(
-                    input_ids_rmpad_rolled, None, self.config.ulysses_sequence_parallel_size
+                    input_ids_rmpad_rolled, None, self.config.ulysses_size
                 )
 
             input_ids_rmpad_rolled = input_ids_rmpad_rolled.squeeze(0)  # ((total_nnz / sp) + pad)
@@ -124,7 +124,7 @@ class DataParallelPPOActor(BasePPOActor):
             log_probs = self.log_probs_from_logits(logits=logits_rmpad, labels=input_ids_rmpad_rolled)
 
             # gather log_prob if sp > 1
-            if self.config.ulysses_sequence_parallel_size > 1:
+            if self.config.ulysses_size > 1:
                 # gather and unpad for the ulysses sp
                 log_probs = gather_outputs_and_unpad(log_probs, gather_dim=0, unpad_dim=0, padding_size=pad_size)
 
@@ -238,9 +238,8 @@ class DataParallelPPOActor(BasePPOActor):
 
                     # all return: (bsz, response_length)
                     log_probs = self._forward_micro_batch(model_inputs, temperature=temperature)
-                    entropy_loss = -VF.masked_mean(log_probs, response_mask)  # estimator of entropy loss
 
-                    pg_loss, pg_clipfrac_higher, pg_clipfrac_lower, ppo_kl = core_algos.compute_policy_loss(
+                    pg_loss, pg_metrics = core_algos.compute_policy_loss(
                         old_log_probs=old_log_probs,
                         log_probs=log_probs,
                         advantages=advantages,
@@ -248,6 +247,7 @@ class DataParallelPPOActor(BasePPOActor):
                         clip_ratio_low=self.config.clip_ratio_low,
                         clip_ratio_high=self.config.clip_ratio_high,
                         clip_ratio_dual=self.config.clip_ratio_dual,
+                        loss_avg_mode=self.config.loss_avg_mode,
                     )
                     if self.config.use_kl_loss and "ref_log_probs" in model_inputs:
                         ref_log_probs = model_inputs["ref_log_probs"]
@@ -267,10 +267,10 @@ class DataParallelPPOActor(BasePPOActor):
 
                     batch_metrics = {
                         "actor/pg_loss": pg_loss.detach().item(),
-                        "actor/pg_clipfrac_higher": pg_clipfrac_higher.detach().item(),
-                        "actor/pg_clipfrac_lower": pg_clipfrac_lower.detach().item(),
-                        "actor/entropy_loss": entropy_loss.detach().item(),
-                        "actor/ppo_kl": ppo_kl.detach().item(),
+                        "actor/pg_clipfrac_higher": pg_metrics["pg_clipfrac_higher"],
+                        "actor/pg_clipfrac_lower": pg_metrics["pg_clipfrac_lower"],
+                        "actor/entropy_loss": pg_metrics["entropy_loss"],
+                        "actor/ppo_kl": pg_metrics["ppo_kl"],
                     }
                     append_to_dict(metrics, batch_metrics)
 

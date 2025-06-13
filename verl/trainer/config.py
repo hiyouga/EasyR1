@@ -70,15 +70,25 @@ class DataConfig:
 @dataclass
 class AlgorithmConfig:
     gamma: float = 1.0
+    """discount factor for ppo gae advantage estimator"""
     lam: float = 1.0
+    """lambda value for ppo gae advantage estimator"""
     adv_estimator: str = "grpo"
+    """advantage estimator, support `gae`, `grpo`, `reinforce_plus_plus`, `remax`, `rloo`"""
     disable_kl: bool = False
+    """disable reference model"""
     use_kl_loss: bool = False
+    """use kl loss instead of kl in reward"""
     kl_penalty: str = "kl"
+    """kl penalty type, support `kl`, `abs`, `mse`, `low_var_kl`, `full`"""
     kl_coef: float = 1e-3
+    """kl coefficient"""
     kl_type: str = "fixed"
-    kl_horizon: float = 0.0
-    kl_target: float = 0.0
+    """kl controller type, support `fixed`, `adaptive`"""
+    kl_horizon: float = 10000.0
+    """kl horizon for adaptive kl controller"""
+    kl_target: float = 0.1
+    """target kl for adaptive kl controller"""
 
 
 @dataclass

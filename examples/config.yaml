@@ -31,7 +31,7 @@ worker:
     micro_batch_size_per_device_for_experience: 16
     max_grad_norm: 1.0
     padding_free: true
-    ulysses_sequence_parallel_size: 1
+    ulysses_size: 1
     model:
       model_path: Qwen/Qwen2.5-7B-Instruct
       enable_gradient_checkpointing: true

@@ -23,8 +23,14 @@ def apply_ulysses_patch(model_type: str) -> None:
     if model_type in ("llama", "gemma", "gemma2", "mistral", "qwen2", "qwen3", "qwen3_moe"):
         ALL_ATTENTION_FUNCTIONS["flash_attention_2"] = flash_attention_forward
     elif model_type in ("qwen2_vl", "qwen2_5_vl"):
-        from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import Qwen2_5_VLFlashAttention2
-        from transformers.models.qwen2_vl.modeling_qwen2_vl import Qwen2VLFlashAttention2
+        try:
+            from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import Qwen2_5_VLFlashAttention2
+            from transformers.models.qwen2_vl.modeling_qwen2_vl import Qwen2VLFlashAttention2
+        except ImportError:  # transformers >= 4.52.4
+            from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import (
+                Qwen2_5_VLAttention as Qwen2_5_VLFlashAttention2,
+            )
+            from transformers.models.qwen2_vl.modeling_qwen2_vl import Qwen2VLAttention as Qwen2VLFlashAttention2
 
         Qwen2VLFlashAttention2.forward = qwen2_vl_attn_forward
         Qwen2_5_VLFlashAttention2.forward = qwen2_vl_attn_forward

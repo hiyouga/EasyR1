@@ -85,9 +85,9 @@ class DataParallelPPOCritic(BasePPOCritic):
                 ).transpose(0, 1)
 
             # pad and slice the inputs if sp > 1
-            if self.config.ulysses_sequence_parallel_size > 1:
+            if self.config.ulysses_size > 1:
                 input_ids_rmpad, position_ids_rmpad, pad_size = ulysses_pad_and_slice_inputs(
-                    input_ids_rmpad, position_ids_rmpad, sp_size=self.config.ulysses_sequence_parallel_size
+                    input_ids_rmpad, position_ids_rmpad, sp_size=self.config.ulysses_size
                 )
 
             # only pass input_ids and position_ids to enable flash_attn_varlen
@@ -102,7 +102,7 @@ class DataParallelPPOCritic(BasePPOCritic):
             values_rmpad = values_rmpad.squeeze(0)  # (total_nnz)
 
             # gather output if sp > 1
-            if self.config.ulysses_sequence_parallel_size > 1:
+            if self.config.ulysses_size > 1:
                 values_rmpad = gather_outputs_and_unpad(values_rmpad, gather_dim=0, unpad_dim=0, padding_size=pad_size)
 
             # pad it back
@@ -160,7 +160,7 @@ class DataParallelPPOCritic(BasePPOCritic):
         responses = data.batch["responses"]
         attention_mask = data.batch["attention_mask"]
         response_length = responses.size(1)
-        values = values * attention_mask[:, -response_length - 1 : -1]
+        values = values * attention_mask[:, -response_length:]
         return values
 
     def update_critic(self, data: DataProto) -> Dict[str, Any]:
@@ -189,19 +189,20 @@ class DataParallelPPOCritic(BasePPOCritic):
                 for micro_batch in micro_batches:
                     model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
                     responses = model_inputs["responses"]
+                    response_length = responses.size(1)
                     attention_mask = model_inputs["attention_mask"]
+                    response_mask = attention_mask[:, -response_length:]
                     values = model_inputs["values"]
                     returns = model_inputs["returns"]
-                    response_length = responses.size(1)
-                    action_mask = attention_mask[:, -response_length - 1 : -1]  # shift left for value computation
 
                     vpreds = self._forward_micro_batch(model_inputs)
                     vf_loss, vf_clipfrac = core_algos.compute_value_loss(
                         vpreds=vpreds,
                         returns=returns,
                         values=values,
-                        action_mask=action_mask,
+                        response_mask=response_mask,
                         cliprange_value=self.config.cliprange_value,
+                        loss_avg_mode=self.config.loss_avg_mode,
                     )
                     loss = vf_loss / gradient_accumulation
                     loss.backward()
@@ -209,7 +210,7 @@ class DataParallelPPOCritic(BasePPOCritic):
                     batch_metrics = {
                         "critic/vf_loss": vf_loss.detach().item(),
                         "critic/vf_clipfrac": vf_clipfrac.detach().item(),
-                        "critic/vpred_mean": VF.masked_mean(vpreds, action_mask).detach().item(),
+                        "critic/vpred_mean": VF.masked_mean(vpreds, response_mask).detach().item(),
                     }
                     append_to_dict(metrics, batch_metrics)
 

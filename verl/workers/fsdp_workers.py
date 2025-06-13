@@ -55,7 +55,7 @@ from ..utils.model_utils import print_gpu_memory_usage, print_model_size
 from ..utils.tokenizer import get_processor, get_tokenizer
 from ..utils.torch_dtypes import PrecisionType
 from ..utils.torch_functional import AnyPrecisionAdamW, get_constant_schedule_with_warmup
-from .config import ActorConfig, CriticConfig, FSDPConfig, ModelConfig, OptimConfig, RefConfig, WorkerConfig
+from .config import ActorConfig, CriticConfig, FSDPConfig, ModelConfig, OptimConfig, WorkerConfig
 from .rollout import vLLMRollout
 from .sharding_manager import FSDPVLLMShardingManager
 from .sharding_manager.fsdp_ulysses import FSDPUlyssesShardingManager
@@ -70,6 +70,7 @@ class FSDPWorker(Worker):
         super().__init__()
         self.config = config
         self.role = role
+        self._cache = {}
 
         if not dist.is_initialized():
             dist.init_process_group(backend="nccl")
@@ -78,30 +79,32 @@ class FSDPWorker(Worker):
         torch.backends.cuda.matmul.allow_tf32 = False
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
 
-        self._is_actor = self.role in ["actor", "actor_rollout", "actor_rollout_ref"]
-        self._is_critic = self.role == "critic"
-        self._is_rollout = self.role in ["rollout", "actor_rollout", "actor_rollout_ref"]
-        self._is_ref = self.role in ["ref", "actor_rollout_ref"]
-        self._cache = {}
+        self._has_actor = self.role in ["actor", "actor_rollout", "actor_rollout_ref"]
+        self._has_critic = self.role == "critic"
+        self._has_rollout = self.role in ["rollout", "actor_rollout", "actor_rollout_ref"]
+        self._has_ref = self.role in ["ref", "actor_rollout_ref"]
+        if self._has_actor and self._has_critic:
+            raise ValueError("Actor and critic cannot be both initialized.")
 
         self._use_param_offload = False
         self._use_optimizer_offload = False
-        if self._is_actor:
+        self._use_ref_param_offload = False
+        if self._has_actor:
             self._use_param_offload = self.config.actor.offload.offload_params
             self._use_optimizer_offload = self.config.actor.offload.offload_optimizer
-            self._init_config(self.config.actor, "actor")
-        elif self._is_critic:
+            self._init_dist_mesh(self.config.actor, "actor")
+
+        if self._has_critic:
             self._use_param_offload = self.config.critic.offload.offload_params
             self._use_optimizer_offload = self.config.critic.offload.offload_optimizer
-            self._init_config(self.config.critic, "critic")
-        elif self._is_ref:  # NOTE: it seems that manual offload is slower than FSDP offload
-            self._use_param_offload = self.config.ref.offload.offload_params
-            self._init_config(self.config.ref, "ref")
+            self._init_dist_mesh(self.config.critic, "critic")
 
-    def _init_config(
-        self, config: Union[ActorConfig, CriticConfig, RefConfig], role: Literal["actor", "critic", "ref"]
-    ):
+        if self._has_ref:  # NOTE: it seems that manual offload is slower than FSDP offload
+            self._use_ref_param_offload = self.config.ref.offload.offload_params
+
+    def _init_dist_mesh(self, config: Union[ActorConfig, CriticConfig], role: Literal["actor", "critic"]):
         world_size = dist.get_world_size()
+        # create main device mesh
         fsdp_size = config.fsdp.fsdp_size
         if fsdp_size <= 0 or fsdp_size >= world_size:
             self.device_mesh = init_device_mesh("cuda", mesh_shape=(world_size,), mesh_dim_names=("fsdp",))
@@ -110,13 +113,11 @@ class FSDPWorker(Worker):
                 "cuda", mesh_shape=(world_size // fsdp_size, fsdp_size), mesh_dim_names=("ddp", "fsdp")
             )
 
-        if config.ulysses_sequence_parallel_size > 1:
+        # create ulysses device mesh
+        if config.ulysses_size > 1:
             self.ulysses_device_mesh = init_device_mesh(
                 "cuda",
-                mesh_shape=(
-                    world_size // config.ulysses_sequence_parallel_size,
-                    config.ulysses_sequence_parallel_size,
-                ),
+                mesh_shape=(world_size // config.ulysses_size, config.ulysses_size),
                 mesh_dim_names=("dp", "sp"),
             )
         else:
@@ -124,15 +125,13 @@ class FSDPWorker(Worker):
 
         self.ulysses_sharding_manager = FSDPUlyssesShardingManager(self.ulysses_device_mesh)
 
-        if not hasattr(config, "global_batch_size"):  # ref model
-            return
-
+        # validate and normalize config
         if self.config.rollout.n > 1:
             config.global_batch_size *= self.config.rollout.n
             self.print_rank0(f"{role} will use global batch size {config.global_batch_size}.")
 
         config.global_batch_size_per_device = (
-            config.global_batch_size * config.ulysses_sequence_parallel_size
+            config.global_batch_size * config.ulysses_size
         ) // self.device_mesh.size()
         if config.global_batch_size_per_device == 0:
             raise ValueError(f"{role} global batch size * ulysses size must be larger than num gpus.")
@@ -151,44 +150,46 @@ class FSDPWorker(Worker):
         model_config: ModelConfig,
         fsdp_config: FSDPConfig,
         optim_config: Optional[OptimConfig],
-        padding_free: bool = False,
+        padding_free: bool,
+        role: Literal["actor", "critic", "ref"],
     ) -> None:
-        self.tokenizer = get_tokenizer(
-            model_config.tokenizer_path,
-            trust_remote_code=model_config.trust_remote_code,
-            use_fast=True,
-        )
-        self.processor = get_processor(
-            model_config.tokenizer_path,
-            trust_remote_code=model_config.trust_remote_code,
-            use_fast=True,
-        )
-        self.model_config = AutoConfig.from_pretrained(
-            model_config.model_path,
-            trust_remote_code=model_config.trust_remote_code,
-            bos_token_id=self.tokenizer.bos_token_id,
-            eos_token_id=self.tokenizer.eos_token_id,
-            pad_token_id=self.tokenizer.pad_token_id,
-            **model_config.override_config,
-        )
+        if role != "ref":  # ref model's tokenizer is same as actor
+            self.tokenizer = get_tokenizer(
+                model_config.tokenizer_path,
+                trust_remote_code=model_config.trust_remote_code,
+                use_fast=True,
+            )
+            self.processor = get_processor(
+                model_config.tokenizer_path,
+                trust_remote_code=model_config.trust_remote_code,
+                use_fast=True,
+            )
+            self.model_config = AutoConfig.from_pretrained(
+                model_config.model_path,
+                trust_remote_code=model_config.trust_remote_code,
+                bos_token_id=self.tokenizer.bos_token_id,
+                eos_token_id=self.tokenizer.eos_token_id,
+                pad_token_id=self.tokenizer.pad_token_id,
+                **model_config.override_config,
+            )
 
-        try:
-            self.generation_config = GenerationConfig.from_pretrained(model_config.model_path)
-        except Exception:
-            self.generation_config = GenerationConfig.from_model_config(self.model_config)
+            try:
+                self.generation_config = GenerationConfig.from_pretrained(model_config.model_path)
+            except Exception:
+                self.generation_config = GenerationConfig.from_model_config(self.model_config)
 
-        self.print_rank0(f"Model config: {self.model_config}")
+            self.print_rank0(f"Model config: {self.model_config}")
 
         if padding_free:
             apply_ulysses_patch(self.model_config.model_type)
             self.print_rank0("Ulysses patch applied!")
 
         if fsdp_config.torch_dtype is None:
-            torch_dtype = torch.float32 if self._is_actor or self._is_critic else torch.bfloat16
+            torch_dtype = torch.float32 if role != "ref" else torch.bfloat16
         else:
             torch_dtype = PrecisionType.to_dtype(fsdp_config.torch_dtype)
 
-        if self._is_critic:
+        if role == "critic":
             auto_class = AutoModelForTokenClassification
         elif type(self.model_config) in AutoModelForVision2Seq._model_mapping.keys():
             auto_class = AutoModelForVision2Seq
@@ -220,7 +221,7 @@ class FSDPWorker(Worker):
         if model_config.enable_gradient_checkpointing:
             model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
 
-        if not (self._is_actor or self._is_critic):
+        if role == "ref":
             model.requires_grad_(False)
 
         if model_config.freeze_vision_tower:
@@ -269,7 +270,7 @@ class FSDPWorker(Worker):
             sync_module_states = False
             param_init_fn = None
 
-        self.fsdp_module = FSDP(
+        fsdp_module = FSDP(
             model,
             sharding_strategy=sharding_strategy,
             cpu_offload=cpu_offload,
@@ -284,7 +285,8 @@ class FSDPWorker(Worker):
         )
         print_gpu_memory_usage("After FSDP module init")
 
-        if self._is_actor or self._is_critic:
+        if role in ["actor", "critic"]:
+            self.fsdp_module = fsdp_module
             if optim_config.strategy == "adamw":
                 self.optimizer = torch.optim.AdamW(
                     filter(lambda p: p.requires_grad, self.fsdp_module.parameters()),
@@ -308,8 +310,18 @@ class FSDPWorker(Worker):
                 optimizer=self.optimizer, num_warmup_steps=num_warmup_steps
             )
             print_gpu_memory_usage("After optimizer init")
+            if self._use_param_offload:
+                offload_fsdp_model(self.fsdp_module)
+                print_gpu_memory_usage(f"After offload {role} model during init")
+
+            if self._use_optimizer_offload:
+                offload_fsdp_optimizer(optimizer=self.optimizer)
+                print_gpu_memory_usage(f"After offload {role} optimizer during init")
         else:
-            self.optimizer, self.lr_scheduler = None, None
+            self.ref_fsdp_module = fsdp_module
+            if self._use_ref_param_offload:
+                offload_fsdp_model(self.ref_fsdp_module)
+                print_gpu_memory_usage(f"After offload {role} model during init")
 
     def _build_rollout(self) -> None:
         tp_size = self.config.rollout.tensor_parallel_size
@@ -332,43 +344,34 @@ class FSDPWorker(Worker):
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
     def init_model(self):
-        if self._is_critic:
-            model_config = self.config.critic.model
-            fsdp_config = self.config.critic.fsdp
-            optim_config = self.config.critic.optim
-            padding_free = self.config.critic.padding_free
-            role = "critic"
-        elif self._is_actor:
-            model_config = self.config.actor.model
-            fsdp_config = self.config.actor.fsdp
-            optim_config = self.config.actor.optim
-            padding_free = self.config.actor.padding_free
-            role = "actor"
-        elif self._is_ref:
-            model_config = self.config.actor.model
-            fsdp_config = self.config.ref.fsdp
-            optim_config = None
-            padding_free = self.config.ref.padding_free
-            role = "ref"
-        else:
-            raise ValueError(f"Unknown role {role}.")
-
-        if self._is_actor or self._is_critic or self._is_ref:
+        if self._has_critic:
             self._build_model_optimizer(
-                model_config=model_config,
-                fsdp_config=fsdp_config,
-                optim_config=optim_config,
-                padding_free=padding_free,
+                model_config=self.config.critic.model,
+                fsdp_config=self.config.critic.fsdp,
+                optim_config=self.config.critic.optim,
+                padding_free=self.config.critic.padding_free,
+                role="critic",
             )
-            if self._use_param_offload:
-                offload_fsdp_model(self.fsdp_module)
-                print_gpu_memory_usage(f"After offload {role} model during init")
 
-            if self._use_optimizer_offload:
-                offload_fsdp_optimizer(optimizer=self.optimizer)
-                print_gpu_memory_usage(f"After offload {role} optimizer during init")
+        if self._has_actor:
+            self._build_model_optimizer(
+                model_config=self.config.actor.model,
+                fsdp_config=self.config.actor.fsdp,
+                optim_config=self.config.actor.optim,
+                padding_free=self.config.actor.padding_free,
+                role="actor",
+            )
 
-        if self._is_actor:
+        if self._has_ref:
+            self._build_model_optimizer(
+                model_config=self.config.actor.model,
+                fsdp_config=self.config.ref.fsdp,
+                optim_config=None,
+                padding_free=self.config.ref.padding_free,
+                role="ref",
+            )
+
+        if self._has_actor:
             from .actor.dp_actor import DataParallelPPOActor  # lazy import
 
             self.actor = DataParallelPPOActor(
@@ -377,7 +380,7 @@ class FSDPWorker(Worker):
                 actor_optimizer=self.optimizer,
             )
 
-        if self._is_critic:
+        if self._has_critic:
             from .critic.dp_critic import DataParallelPPOCritic  # lazy import
 
             self.critic = DataParallelPPOCritic(
@@ -386,18 +389,18 @@ class FSDPWorker(Worker):
                 critic_optimizer=self.optimizer,
             )
 
-        if self._is_rollout:
+        if self._has_rollout:  # must after actor
             self._build_rollout()
 
-        if self._is_ref:
+        if self._has_ref:
             from .actor.dp_actor import DataParallelPPOActor  # lazy import
 
             self.ref_policy = DataParallelPPOActor(
                 config=self.config.ref,
-                actor_module=self.fsdp_module,
+                actor_module=self.ref_fsdp_module,
             )
 
-        if self._is_actor or self._is_critic:
+        if self._has_actor or self._has_critic:
             self.flops_counter = FlopsCounter(self.model_config)
             self.checkpoint_manager = FSDPCheckpointManager(
                 model=self.fsdp_module,
@@ -408,7 +411,7 @@ class FSDPWorker(Worker):
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
     def save_checkpoint(self, path: str):
-        assert self._is_actor or self._is_critic
+        assert self._has_actor or self._has_critic
         if self._use_param_offload:
             load_fsdp_model(self.fsdp_module)
 
@@ -419,6 +422,7 @@ class FSDPWorker(Worker):
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
     def load_checkpoint(self, path: str):
+        assert self._has_actor or self._has_critic
         if self._use_param_offload:
             load_fsdp_model(self.fsdp_module)
 
@@ -460,7 +464,7 @@ class FSDPWorker(Worker):
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def update_actor(self, data: DataProto):
-        assert self._is_actor
+        assert self._has_actor
 
         self._process_multi_modal_inputs(data)
         data = data.to(torch.cuda.current_device())
@@ -512,7 +516,7 @@ class FSDPWorker(Worker):
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def generate_sequences(self, prompts: DataProto):
-        assert self._is_rollout
+        assert self._has_rollout
 
         if self._use_param_offload:
             load_fsdp_model(self.fsdp_module)
@@ -543,7 +547,7 @@ class FSDPWorker(Worker):
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def compute_log_probs(self, data: DataProto):
-        assert self._is_actor
+        assert self._has_actor
 
         self._process_multi_modal_inputs(data)
         data = data.to(torch.cuda.current_device())
@@ -575,13 +579,13 @@ class FSDPWorker(Worker):
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def compute_ref_log_probs(self, data: DataProto):
-        assert self._is_ref
+        assert self._has_ref
 
         self._process_multi_modal_inputs(data)
         data = data.to(torch.cuda.current_device())
 
-        if self._use_param_offload:
-            load_fsdp_model(self.fsdp_module)
+        if self._use_ref_param_offload:
+            load_fsdp_model(self.ref_fsdp_module)
 
         data.meta_info["temperature"] = self.config.rollout.temperature
         with self.ulysses_sharding_manager:
@@ -593,17 +597,17 @@ class FSDPWorker(Worker):
         # https://pytorch.org/docs/stable/notes/fsdp.html#fsdp-notes
         # unshard the root FSDP module
         if self.world_size > 1:
-            self.fsdp_module._handle.reshard(True)
+            self.ref_fsdp_module._handle.reshard(True)
 
-        if self._use_param_offload:
-            offload_fsdp_model(self.fsdp_module)
+        if self._use_ref_param_offload:
+            offload_fsdp_model(self.ref_fsdp_module)
 
         output = output.to("cpu")
         return output
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def compute_values(self, data: DataProto):
-        assert self._is_critic
+        assert self._has_critic
 
         self._process_multi_modal_inputs(data)
         data = data.to(torch.cuda.current_device())
@@ -625,7 +629,7 @@ class FSDPWorker(Worker):
 
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def update_critic(self, data: DataProto):
-        assert self._is_critic
+        assert self._has_critic
 
         self._process_multi_modal_inputs(data)
         data = data.to(torch.cuda.current_device())
