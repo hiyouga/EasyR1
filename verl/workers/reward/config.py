@@ -40,4 +40,5 @@ class RewardConfig:
             if os.path.exists(self.reward_function):  # ray job uses absolute path
                 self.reward_function = os.path.abspath(self.reward_function)
             else:
+                print(f"Reward function {self.reward_function} not found.")
                 self.reward_function = None

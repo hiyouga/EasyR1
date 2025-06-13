@@ -15,7 +15,7 @@
 The main entry point to run the PPO algorithm
 """
 
-from typing import Literal, Optional, Union
+from typing import Literal, Optional, Union, cast
 
 import numpy as np
 import psutil
@@ -132,8 +132,8 @@ class FSDPWorker(Worker):
             self.print_rank0(f"{role} will use global batch size {config.global_batch_size}.")
 
         config.global_batch_size_per_device = (
-            config.global_batch_size // self.device_mesh.size() * config.ulysses_sequence_parallel_size
-        )
+            config.global_batch_size * config.ulysses_sequence_parallel_size
+        ) // self.device_mesh.size()
         if config.global_batch_size_per_device == 0:
             raise ValueError(f"{role} global batch size * ulysses size must be larger than num gpus.")
 
@@ -214,7 +214,7 @@ class FSDPWorker(Worker):
                     trust_remote_code=model_config.trust_remote_code,
                 )
 
-        assert isinstance(model, PreTrainedModel)  # lint
+        model = cast(PreTrainedModel, model)  # lint
         model.tie_weights()  # avoid hanging
         model = model.to(torch_dtype)
         if model_config.enable_gradient_checkpointing:
@@ -224,7 +224,11 @@ class FSDPWorker(Worker):
             model.requires_grad_(False)
 
         if model_config.freeze_vision_tower:
-            if hasattr(model, "visual"):
+            if hasattr(model, "model") and hasattr(model.model, "visual"):  # transformers >= 4.52.0
+                model.model.visual.requires_grad_(False)
+                fsdp_config.use_orig_params = True
+                self.print_rank0("Vision tower is set to not trainable.")
+            elif hasattr(model, "visual"):  # transformers < 4.52.0
                 model.visual.requires_grad_(False)
                 fsdp_config.use_orig_params = True
                 self.print_rank0("Vision tower is set to not trainable.")
@@ -310,9 +314,9 @@ class FSDPWorker(Worker):
     def _build_rollout(self) -> None:
         tp_size = self.config.rollout.tensor_parallel_size
         dp_size = self.world_size // tp_size
-        assert self.world_size % tp_size == 0, (
-            f"rollout world size: {self.world_size} is not divisible by tp size: {tp_size}"
-        )
+        if self.world_size % tp_size != 0:
+            raise ValueError(f"rollout world size {self.world_size} is not divisible by tp size {tp_size}.")
+
         rollout_device_mesh = init_device_mesh("cuda", mesh_shape=(dp_size, tp_size), mesh_dim_names=("dp", "tp"))
         self.rollout = vLLMRollout(
             model_path=self.config.actor.model.model_path,
@@ -399,7 +403,7 @@ class FSDPWorker(Worker):
                 model=self.fsdp_module,
                 optimizer=self.optimizer,
                 lr_scheduler=self.lr_scheduler,
-                processing_class=self.processor if self.processor is not None else self.tokenizer,
+                processing_class=self.processor or self.tokenizer,
             )
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
@@ -436,17 +440,21 @@ class FSDPWorker(Worker):
         if "multi_modal_inputs" not in self._cache:
             min_pixels = data.meta_info["min_pixels"]
             max_pixels = data.meta_info["max_pixels"]
-            multi_modal_inputs = []
+            batch_multi_modal_inputs = []
             for multi_modal_data in data.non_tensor_batch["multi_modal_data"]:
                 images = []
                 for image in multi_modal_data["images"]:
                     images.append(process_image(image, min_pixels=min_pixels, max_pixels=max_pixels))
 
-                multi_modal_inputs.append(self.processor.image_processor(images=images, return_tensors="pt"))
+                # it's necessary to add `dict` to properly convert batch features to dict
+                # otherwise the batch features will be converted to dict keys
+                # see https://github.com/hiyouga/EasyR1/pull/339
+                multi_modal_inputs = dict(self.processor.image_processor(images=images, return_tensors="pt"))
+                multi_modal_inputs = {k: v.to(torch.cuda.current_device()) for k, v in multi_modal_inputs.items()}
+                batch_multi_modal_inputs.append(multi_modal_inputs)
 
-            multi_modal_inputs = np.array(multi_modal_inputs, dtype=object)
             self._cache["uid"] = data.non_tensor_batch["uid"]
-            self._cache["multi_modal_inputs"] = multi_modal_inputs
+            self._cache["multi_modal_inputs"] = np.array(batch_multi_modal_inputs, dtype=object)
 
         data.non_tensor_batch["multi_modal_inputs"] = self._cache["multi_modal_inputs"]
 

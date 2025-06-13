@@ -56,14 +56,14 @@ class DataConfig:
             if os.path.exists(self.image_dir):  # ray job uses absolute path
                 self.image_dir = os.path.abspath(self.image_dir)
             else:
-                print(f"Image directory {self.image_dir} is not found.")
+                print(f"Image directory {self.image_dir} not found.")
                 self.image_dir = None
 
         if self.format_prompt is not None:
             if os.path.exists(self.format_prompt):  # ray job uses absolute path
                 self.format_prompt = os.path.abspath(self.format_prompt)
             else:
-                print(f"Format prompt file {self.format_prompt} is not found.")
+                print(f"Format prompt file {self.format_prompt} not found.")
                 self.format_prompt = None
 
 
@@ -109,7 +109,7 @@ class TrainerConfig:
             if os.path.exists(self.load_checkpoint_path):  # ray job uses absolute path
                 self.load_checkpoint_path = os.path.abspath(self.load_checkpoint_path)
             else:
-                print(f"Model checkpoint {self.load_checkpoint_path} is not found.")
+                print(f"Model checkpoint {self.load_checkpoint_path} not found.")
                 self.load_checkpoint_path = None
 
 

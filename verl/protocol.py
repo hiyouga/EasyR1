@@ -347,7 +347,8 @@ class DataProto:
             sub_batch = self.batch
 
         if non_tensor_batch_keys is not None:
-            non_tensor_batch_keys = filter(lambda k: k in self.non_tensor_batch, non_tensor_batch_keys)
+            # we must convert it to tuple to avoid the missing elements
+            non_tensor_batch_keys = tuple(filter(lambda k: k in self.non_tensor_batch, non_tensor_batch_keys))
             non_tensor_batch = {k: v for k, v in self.non_tensor_batch.items() if k in non_tensor_batch_keys}
         else:
             non_tensor_batch = self.non_tensor_batch
