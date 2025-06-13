@@ -378,7 +378,7 @@ class RayPPOTrainer:
         )
         folder_path = os.path.join(self.config.trainer.save_checkpoint_path, f"global_step_{self.global_step}")
         actor_path = os.path.join(folder_path, "actor")
-        self.actor_rollout_ref_wg.save_checkpoint(actor_path)
+        self.actor_rollout_ref_wg.save_checkpoint(actor_path, save_model_only=self.config.trainer.save_model_only)
 
         if self.use_critic:
             critic_path = os.path.join(folder_path, "critic")
