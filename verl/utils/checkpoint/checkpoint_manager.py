@@ -28,7 +28,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from transformers import PreTrainedTokenizer, ProcessorMixin
 
 
-CHECKPOINT_TRACKER = "latest_global_step.txt"
+CHECKPOINT_TRACKER = "checkpoint_tracker.json"
 
 
 class BaseCheckpointManager(ABC):
@@ -135,7 +135,9 @@ def get_checkpoint_tracker_filename(root_path: str) -> str:
     return os.path.join(root_path, CHECKPOINT_TRACKER)
 
 
-def remove_obsolete_ckpt(path: str, global_step: int, save_limit: int = -1, directory_format: str = "global_step_{}"):
+def remove_obsolete_ckpt(
+    path: str, global_step: int, best_global_step: int, save_limit: int = -1, directory_format: str = "global_step_{}"
+):
     """
     Remove the obsolete checkpoints that exceed the save_limit.
     """
@@ -146,15 +148,19 @@ def remove_obsolete_ckpt(path: str, global_step: int, save_limit: int = -1, dire
         return
 
     pattern = re.escape(directory_format).replace(r"\{\}", r"(\d+)")
-    ckpt_folders = []
+    ckpt_global_steps = []
     for folder in os.listdir(path):
         if match := re.match(pattern, folder):
             step = int(match.group(1))
             if step < global_step:
-                ckpt_folders.append((step, folder))
+                ckpt_global_steps.append(step)
 
-    ckpt_folders.sort(reverse=True)
-    for _, folder in ckpt_folders[save_limit - 1 :]:
-        folder_path = os.path.join(path, folder)
+    ckpt_global_steps.sort(reverse=True)
+    if best_global_step in ckpt_global_steps:
+        ckpt_global_steps.remove(best_global_step)
+        save_limit = max(save_limit - 1, 0)
+
+    for step in ckpt_global_steps[save_limit - 1 :]:
+        folder_path = os.path.join(path, directory_format.format(step))
         shutil.rmtree(folder_path, ignore_errors=True)
         print(f"Removed obsolete checkpoint: {folder_path}")

@@ -93,22 +93,40 @@ class AlgorithmConfig:
 
 @dataclass
 class TrainerConfig:
-    total_epochs: int = 10
+    total_epochs: int = 15
+    """total epochs for training"""
     max_steps: Optional[int] = None
+    """max steps for training, if specified, total_epochs is ignored"""
     project_name: str = "easy_r1"
+    """project name for logger"""
     experiment_name: str = "demo"
+    """experiment name for logger"""
     logger: Tuple[str] = ("console", "wandb")
+    """logger type, support `console`, `mlflow`, `swanlab`, `tensorboard`, `wandb`"""
     nnodes: int = 1
+    """number of nodes for training"""
     n_gpus_per_node: int = 8
+    """number of gpus per node for training"""
     critic_warmup: int = 0
+    """critic warmup steps"""
     val_freq: int = -1
+    """validation frequency, -1 means no validation"""
     val_before_train: bool = True
+    """validate before training"""
     val_only: bool = False
+    """validate only, skip training"""
     val_generations_to_log: int = 0
+    """number of generations to log for validation"""
     save_freq: int = -1
+    """save frequency, -1 means no saving"""
     save_limit: int = -1
+    """max number of checkpoints to save, -1 means no limit"""
+    save_model_only: bool = False
+    """save model only, no optimizer state dict"""
     save_checkpoint_path: Optional[str] = None
+    """save checkpoint path, if not specified, use `checkpoints/project_name/experiment_name`"""
     load_checkpoint_path: Optional[str] = None
+    """load checkpoint path"""
 
     def post_init(self):
         if self.save_checkpoint_path is None:

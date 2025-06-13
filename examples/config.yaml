@@ -89,5 +89,6 @@ trainer:
   val_generations_to_log: 3
   save_freq: 5  # -1 to disable
   save_limit: 3  # -1 to disable
+  save_model_only: false
   save_checkpoint_path: null
   load_checkpoint_path: null

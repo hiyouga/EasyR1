@@ -410,12 +410,12 @@ class FSDPWorker(Worker):
             )
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
-    def save_checkpoint(self, path: str):
+    def save_checkpoint(self, path: str, save_model_only: bool = False):
         assert self._has_actor or self._has_critic
         if self._use_param_offload:
             load_fsdp_model(self.fsdp_module)
 
-        self.checkpoint_manager.save_checkpoint(path)
+        self.checkpoint_manager.save_checkpoint(path, save_model_only)
         dist.barrier()
         if self._use_param_offload:
             offload_fsdp_model(self.fsdp_module)

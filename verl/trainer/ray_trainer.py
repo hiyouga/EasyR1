@@ -16,6 +16,7 @@ FSDP PPO Trainer with Ray-based single controller.
 This trainer supports model-agonistic model initialization with huggingface
 """
 
+import json
 import os
 import uuid
 from collections import defaultdict
@@ -176,6 +177,10 @@ class RayPPOTrainer:
         self.reward_fn = reward_fn
         self.val_reward_fn = val_reward_fn
 
+        self.val_reward_score = 0.0
+        self.best_val_reward_score = -1.0
+        self.best_global_step = None
+
         self.hybrid_engine = config.worker.hybrid_engine
         self.role_worker_mapping = role_worker_mapping
         self.resource_pool_manager = resource_pool_manager
@@ -258,6 +263,7 @@ class RayPPOTrainer:
         # Lists to collect samples for the table
         sample_inputs, sample_outputs, sample_labels, sample_scores = [], [], [], []
         reward_metrics_lst = defaultdict(list)
+        print("Start validation...")
         for batch_dict in self.val_dataloader:
             test_batch = DataProto.from_single_dict(batch_dict)
             # Store original inputs
@@ -295,9 +301,10 @@ class RayPPOTrainer:
                 reward_metrics_lst[key].extend(value)
 
         self._maybe_log_val_generations(sample_inputs, sample_outputs, sample_labels, sample_scores)
-        reward_score = torch.cat(reward_tensor_lst, dim=0).sum(-1).mean().item()
+        self.val_reward_score = torch.cat(reward_tensor_lst, dim=0).sum(-1).mean().item()
         val_reward_metrics = {f"val/{key}_reward": value for key, value in reduce_metrics(reward_metrics_lst).items()}
-        return {"val/reward_score": reward_score, **val_reward_metrics}
+        print("Finish validation.")
+        return {"val/reward_score": self.val_reward_score, **val_reward_metrics}
 
     def init_workers(self) -> None:
         """Init resource pool and worker group"""
@@ -359,8 +366,15 @@ class RayPPOTrainer:
 
     def _save_checkpoint(self) -> None:
         # path: {save_checkpoint_path}/global_step_{global_step}/{actor,critic}
+        if self.val_reward_score > self.best_val_reward_score:
+            self.best_val_reward_score = self.val_reward_score
+            self.best_global_step = self.global_step
+
         remove_obsolete_ckpt(
-            self.config.trainer.save_checkpoint_path, self.global_step, self.config.trainer.save_limit
+            self.config.trainer.save_checkpoint_path,
+            self.global_step,
+            self.best_global_step,
+            self.config.trainer.save_limit,
         )
         folder_path = os.path.join(self.config.trainer.save_checkpoint_path, f"global_step_{self.global_step}")
         actor_path = os.path.join(folder_path, "actor")
@@ -368,15 +382,21 @@ class RayPPOTrainer:
 
         if self.use_critic:
             critic_path = os.path.join(folder_path, "critic")
-            self.critic_wg.save_checkpoint(critic_path)
+            self.critic_wg.save_checkpoint(critic_path, save_model_only=self.config.trainer.save_model_only)
 
         dataloader_path = os.path.join(folder_path, "dataloader.pt")
         dataloader_state_dict = self.train_dataloader.state_dict()
         torch.save(dataloader_state_dict, dataloader_path)
 
-        last_global_step_path = os.path.join(self.config.trainer.save_checkpoint_path, CHECKPOINT_TRACKER)
-        with open(last_global_step_path, "w") as f:
-            f.write(str(self.global_step))
+        checkpointer_tracker_info = {
+            "best_global_step": self.best_global_step,
+            "best_val_reward_score": round(self.best_val_reward_score, 4),
+            "last_global_step": self.global_step,
+            "last_actor_path": os.path.abspath(actor_path),
+        }
+        checkpointer_tracker_path = os.path.join(self.config.trainer.save_checkpoint_path, CHECKPOINT_TRACKER)
+        with open(checkpointer_tracker_path, "w") as f:
+            json.dump(checkpointer_tracker_info, f, ensure_ascii=False, indent=2)
 
     def _load_checkpoint(self) -> None:
         if self.config.trainer.load_checkpoint_path is None:
