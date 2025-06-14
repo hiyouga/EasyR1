@@ -515,6 +515,14 @@ class FSDPWorker(Worker):
         output = output.to("cpu")
         return output
 
+    @register(dispatch_mode=Dispatch.ONE_TO_ALL)
+    def prepare_rollout_engine(self):
+        self.rollout_sharding_manager.load_vllm_and_sync_weights()
+
+    @register(dispatch_mode=Dispatch.ONE_TO_ALL)
+    def release_rollout_engine(self):
+        self.rollout_sharding_manager.offload_vllm()
+
     @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
     def generate_sequences(self, prompts: DataProto):
         assert self._has_rollout
@@ -528,11 +536,10 @@ class FSDPWorker(Worker):
             else self.tokenizer.pad_token_id,
         }
         prompts.meta_info.update(meta_info)
-        self.rollout_sharding_manager.skip_vllm_sync_once = prompts.meta_info.get("skip_vllm_sync_once", False)
-        with self.rollout_sharding_manager:
-            prompts = self.rollout_sharding_manager.preprocess_data(prompts)
-            output = self.rollout.generate_sequences(prompts=prompts)
-            output = self.rollout_sharding_manager.postprocess_data(output)
+
+        prompts = self.rollout_sharding_manager.preprocess_data(prompts)
+        output = self.rollout.generate_sequences(prompts=prompts)
+        output = self.rollout_sharding_manager.postprocess_data(output)
 
         output = output.to("cpu")
         return output

@@ -264,7 +264,8 @@ class RayPPOTrainer:
         sample_inputs, sample_outputs, sample_labels, sample_scores = [], [], [], []
         reward_metrics_lst = defaultdict(list)
         print("Start validation...")
-        for i, batch_dict in enumerate(self.val_dataloader):
+        self.actor_rollout_ref_wg.prepare_rollout_engine()
+        for batch_dict in self.val_dataloader:
             test_batch = DataProto.from_single_dict(batch_dict)
             # Store original inputs
             input_ids = test_batch.batch["input_ids"]
@@ -278,8 +279,6 @@ class RayPPOTrainer:
             test_gen_batch.meta_info = self.config.worker.rollout.val_override_config
             test_gen_batch.meta_info["min_pixels"] = self.config.data.min_pixels
             test_gen_batch.meta_info["max_pixels"] = self.config.data.max_pixels
-            if i != 0:
-                test_gen_batch.meta_info["skip_vllm_sync_once"] = True
 
             test_gen_batch, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_ref_wg.world_size)
             test_output_gen_batch = self.actor_rollout_ref_wg.generate_sequences(test_gen_batch)
@@ -303,6 +302,7 @@ class RayPPOTrainer:
             for key, value in reward_metrics.items():
                 reward_metrics_lst[key].extend(value)
 
+        self.actor_rollout_ref_wg.release_rollout_engine()
         self._maybe_log_val_generations(sample_inputs, sample_outputs, sample_labels, sample_scores)
         self.val_reward_score = torch.cat(reward_tensor_lst, dim=0).sum(-1).mean().item()
         val_reward_metrics = {f"val/{key}_reward": value for key, value in reduce_metrics(reward_metrics_lst).items()}
@@ -458,8 +458,6 @@ class RayPPOTrainer:
                 non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
                 meta_info_keys=["min_pixels", "max_pixels"],
             )
-            if batch is not None:
-                gen_batch.meta_info["skip_vllm_sync_once"] = True
 
             # generate a batch
             gen_batch_output = self.actor_rollout_ref_wg.generate_sequences(gen_batch)
@@ -468,7 +466,6 @@ class RayPPOTrainer:
                 gen_baseline_batch = deepcopy(gen_batch)
                 gen_baseline_batch.meta_info["temperature"] = 0
                 gen_baseline_batch.meta_info["n"] = 1
-                gen_baseline_batch.meta_info["skip_vllm_sync_once"] = True
                 gen_baseline_output = self.actor_rollout_ref_wg.generate_sequences(gen_baseline_batch)
 
                 new_batch = new_batch.union(gen_baseline_output)
@@ -526,7 +523,9 @@ class RayPPOTrainer:
             with timer("step", timing_raw):
                 # make a batch of data
                 with timer("gen", timing_raw):
+                    self.actor_rollout_ref_wg.prepare_rollout_engine()
                     batch = self._make_batch_data(metrics=metrics)
+                    self.actor_rollout_ref_wg.release_rollout_engine()
 
                 # balance the number of valid tokens on each dp rank.
                 # NOTE: this breaks the order of data inside the batch.
