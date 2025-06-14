@@ -7,7 +7,8 @@ data:
   image_dir: null
   max_prompt_length: 2048
   max_response_length: 2048
-  rollout_batch_size: 512
+  rollout_batch_size: 512  # equivalent to verl's data.train_batch_size
+  mini_rollout_batch_size: null  # equivalent to verl's data.gen_batch_size
   val_batch_size: 1024
   format_prompt: ./examples/format_prompt/math_format.jinja
   override_chat_template: null
@@ -26,9 +27,9 @@ algorithm:
 
 worker:
   actor:
-    global_batch_size: 128
-    micro_batch_size_per_device_for_update: 4
-    micro_batch_size_per_device_for_experience: 16
+    global_batch_size: 128  # equivalent to verl's actor.ppo_mini_batch_size
+    micro_batch_size_per_device_for_update: 4  # equivalent to verl's actor.ppo_micro_batch_size_per_gpu
+    micro_batch_size_per_device_for_experience: 16  # equivalent to verl's rollout.log_prob_micro_batch_size_per_gpu
     max_grad_norm: 1.0
     padding_free: true
     ulysses_size: 1

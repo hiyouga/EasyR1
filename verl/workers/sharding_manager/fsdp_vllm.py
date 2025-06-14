@@ -27,7 +27,8 @@ from vllm import LLM
 from vllm.distributed import parallel_state as vllm_ps
 
 from ...protocol import DataProto, all_gather_data_proto
-from ...utils.model_utils import print_gpu_memory_usage
+from ...utils.fsdp_utils import load_fsdp_model, offload_fsdp_model
+from ...utils.model_utils import is_rank0, print_gpu_memory_usage
 from .base import BaseShardingManager
 
 
@@ -37,10 +38,13 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         module: FSDP,
         inference_engine: LLM,
         device_mesh: DeviceMesh,
+        use_param_offload: bool,
     ):
         self.module = module
         self.inference_engine = inference_engine
         self.device_mesh = device_mesh
+        self.use_param_offload = use_param_offload
+        self.skip_vllm_sync_once = False
 
         self.world_size = dist.get_world_size()
         self.tp_size = vllm_ps.get_tensor_model_parallel_world_size()
@@ -85,6 +89,24 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         for name, tensor in actor_weights.items():
             yield name, tensor.full_tensor() if self.world_size != 1 else tensor
 
+    def _sync_weight_to_vllm(self):
+        if self.use_param_offload:
+            load_fsdp_model(self.module)
+
+        actor_weights = get_model_state_dict(self.module)
+        actor_weights = self._rename_weight_keys(actor_weights, self.module._fsdp_wrapped_module)
+        print_gpu_memory_usage("After gather model weights in sharding manager")
+
+        model = self.inference_engine.llm_engine.model_executor.driver_worker.worker.model_runner.model
+        model.load_weights(self._make_weight_iterator(actor_weights))
+
+        del actor_weights
+        if self.use_param_offload:
+            offload_fsdp_model(self.module)
+
+        torch.cuda.empty_cache()
+        print_gpu_memory_usage("After sync model weights in sharding manager")
+
     def __enter__(self):
         # NOTE: Basically, we only need `torch.cuda.empty_cache()` before vllm wake_up and
         # after vllm sleep, since vllm has its own caching memory allocator CuMemAllocator.
@@ -94,27 +116,23 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         # pytorch: https://pytorch.org/docs/stable/notes/cuda.html#memory-management
         # vllm: https://github.com/vllm-project/vllm/blob/v0.7.3/vllm/device_allocator/cumem.py#L103
         torch.cuda.empty_cache()
-        print_gpu_memory_usage("Before state_dict() in sharding manager")
-        actor_weights = get_model_state_dict(self.module)
-        actor_weights = self._rename_weight_keys(actor_weights, self.module._fsdp_wrapped_module)
-        print_gpu_memory_usage("After state_dict() in sharding manager")
-
+        print_gpu_memory_usage("Before vllm wake up in sharding manager")
         if "tags" in inspect.signature(self.inference_engine.wake_up).parameters:
             self.inference_engine.wake_up(tags=["weights"])
         else:
             self.inference_engine.wake_up()
 
-        model = self.inference_engine.llm_engine.model_executor.driver_worker.worker.model_runner.model
-        model.load_weights(self._make_weight_iterator(actor_weights))
-        print_gpu_memory_usage("After sync model weights in sharding manager")
-
-        del actor_weights
-        torch.cuda.empty_cache()
+        if self.skip_vllm_sync_once:
+            self.skip_vllm_sync_once = False  # reset the flag
+            if is_rank0():
+                print("Skip vllm weight sync in sharding manager once.")
+        else:
+            self._sync_weight_to_vllm()
 
         if "tags" in inspect.signature(self.inference_engine.wake_up).parameters:
             self.inference_engine.wake_up(tags=["kv_cache"])
 
-        print_gpu_memory_usage("After del state_dict and empty_cache in sharding manager")
+        print_gpu_memory_usage("After vllm wake up in sharding manager")
         # important: need to manually set the random states of each tp to be identical.
         if self.device_mesh is not None:
             self.torch_random_states = torch.cuda.get_rng_state()

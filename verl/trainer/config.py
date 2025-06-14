@@ -42,6 +42,7 @@ class DataConfig:
     max_prompt_length: int = 512
     max_response_length: int = 512
     rollout_batch_size: int = 512
+    mini_rollout_batch_size: Optional[int] = None
     val_batch_size: int = -1
     format_prompt: Optional[str] = None
     override_chat_template: Optional[str] = None

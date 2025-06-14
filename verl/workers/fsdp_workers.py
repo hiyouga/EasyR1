@@ -339,6 +339,7 @@ class FSDPWorker(Worker):
             module=self.fsdp_module,
             inference_engine=self.rollout.inference_engine,
             device_mesh=rollout_device_mesh,
+            use_param_offload=self._use_param_offload,
         )
         print_gpu_memory_usage("After vllm init")
 
@@ -518,9 +519,6 @@ class FSDPWorker(Worker):
     def generate_sequences(self, prompts: DataProto):
         assert self._has_rollout
 
-        if self._use_param_offload:
-            load_fsdp_model(self.fsdp_module)
-
         meta_info = {
             "eos_token_id": self.generation_config.eos_token_id
             if self.generation_config is not None
@@ -530,14 +528,8 @@ class FSDPWorker(Worker):
             else self.tokenizer.pad_token_id,
         }
         prompts.meta_info.update(meta_info)
+        self.rollout_sharding_manager.skip_vllm_sync_once = prompts.meta_info.get("skip_vllm_sync_once", False)
         with self.rollout_sharding_manager:
-            # after parameters sync with rollout, offload actor model to CPU
-            if self._use_param_offload:
-                offload_fsdp_model(self.fsdp_module)
-
-            if self._use_optimizer_offload:
-                offload_fsdp_optimizer(optimizer=self.optimizer)
-
             prompts = self.rollout_sharding_manager.preprocess_data(prompts)
             output = self.rollout.generate_sequences(prompts=prompts)
             output = self.rollout_sharding_manager.postprocess_data(output)
