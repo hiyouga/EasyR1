@@ -137,7 +137,7 @@ class FSDPVLLMShardingManager(BaseShardingManager):
             self.torch_random_states = torch.cuda.get_rng_state()
             torch.cuda.set_rng_state(self.gen_random_states)
 
-    def offload_vllm(self, exc_type, exc_value, traceback):
+    def offload_vllm(self):
         """Offload vllm engine."""
         assert self.loaded is True, "vllm engine has not been loaded"
         self.loaded = False
