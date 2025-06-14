@@ -2,7 +2,9 @@ codetiming
 datasets
 pillow
 pytest
+ray[default]
 ruff
+tensordict
 torch
 torchvision
 transformers
