@@ -167,7 +167,7 @@ class vLLMRollout(BaseRollout):
                 )
         else:
             vllm_inputs = [
-                {"prompt_token_ids": list(raw_prompt_ids)} for raw_prompt_ids in non_tensor_batch.pop("raw_prompt_ids")
+                {"prompt_token_ids": list(raw_prompt_ids)} for raw_prompt_ids in batch_raw_prompt_ids
             ]
 
         # users can customize different sampling_params at different run
