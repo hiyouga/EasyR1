@@ -619,6 +619,7 @@ class RayPPOTrainer:
             metrics.update(compute_throughout_metrics(batch=batch, timing_raw=timing_raw, num_gpus=num_gpus))
 
             self.logger.log(data=metrics, step=self.global_step)
+            main_tqdm.update()
 
         # perform validation after training
         if self.val_reward_fn is not None:
