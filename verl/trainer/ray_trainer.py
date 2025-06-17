@@ -484,7 +484,32 @@ class RayPPOTrainer:
             new_batch = new_batch.union(gen_batch_output)
 
             # filter group
-            # TODO: implement DAPO
+            if self.config.algorithm.online_filtering:
+                reward_ref = self.reward_fn.compute_reward.remote(new_batch)
+                reward_tensor, reward_metrics = ray.get(reward_ref)
+                new_batch.batch["token_level_scores"] = reward_tensor
+                reward_metrics = {f"reward/{k}": v for k, v in reduce_metrics(reward_metrics).items()}
+                metrics.update(reward_metrics)
+                new_batch.non_tensor_batch["seq_reward"] = new_batch.batch["token_level_scores"].sum(dim=-1).numpy()
+
+                prompt_uid2metric_vals = defaultdict(list)
+                for uid, metric_val in zip(
+                    new_batch.non_tensor_batch["uid"], new_batch.non_tensor_batch["seq_reward"]
+                ):
+                    prompt_uid2metric_vals[uid].append(metric_val)
+                prompt_uid2metric_std = {}
+                for prompt_uid, metric_vals in prompt_uid2metric_vals.items():
+                    prompt_uid2metric_std[prompt_uid] = np.std(metric_vals)
+                kept_prompt_uids = [
+                    uid
+                    for uid, std in prompt_uid2metric_std.items()
+                    if std > 0 or len(prompt_uid2metric_vals[uid]) == 1
+                ]
+                kept_traj_idxs = []
+                for idx, traj_from_prompt_uid in enumerate(new_batch.non_tensor_batch["uid"]):
+                    if traj_from_prompt_uid in kept_prompt_uids:
+                        kept_traj_idxs.append(idx)
+                new_batch = new_batch[kept_traj_idxs]
 
             batch = DataProto.concat([batch, new_batch]) if batch is not None else new_batch
             if len(batch) < self.config.data.rollout_batch_size * self.config.worker.rollout.n:

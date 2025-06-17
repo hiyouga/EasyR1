@@ -24,6 +24,7 @@ algorithm:
   use_kl_loss: true
   kl_penalty: low_var_kl
   kl_coef: 1.0e-2
+  online_filtering: false
 
 worker:
   actor:

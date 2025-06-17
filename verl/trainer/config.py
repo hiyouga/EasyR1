@@ -90,6 +90,8 @@ class AlgorithmConfig:
     """kl horizon for adaptive kl controller"""
     kl_target: float = 0.1
     """target kl for adaptive kl controller"""
+    online_filtering: bool = False
+    """use online filtering"""
 
 
 @dataclass
