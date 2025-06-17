@@ -24,7 +24,7 @@ algorithm:
   use_kl_loss: true
   kl_penalty: low_var_kl
   kl_coef: 1.0e-2
-  online_filtering: false
+  online_filtering: false  # dapo filter groups
 
 worker:
   actor:
@@ -85,6 +85,7 @@ trainer:
   logger: ["console", "wandb"]
   nnodes: 1
   n_gpus_per_node: 8
+  max_try_make_batch: 20  # -1 means no limit
   val_freq: 5  # -1 to disable
   val_before_train: true
   val_only: false
@@ -94,4 +95,3 @@ trainer:
   save_model_only: false
   save_checkpoint_path: null
   load_checkpoint_path: null
-  max_try_make_batch: 10 # -1 means no limit

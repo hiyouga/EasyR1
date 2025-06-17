@@ -27,7 +27,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from transformers.modeling_flash_attention_utils import index_first_axis, pad_input, unpad_input
 
 from ...protocol import DataProto
-from ...trainer import core_algos
+from ...trainer.core_algos import average_loss, compute_kl, compute_policy_loss
 from ...utils import torch_functional as VF
 from ...utils.py_functional import append_to_dict
 from ...utils.ulysses import gather_outputs_and_unpad, ulysses_pad_and_slice_inputs
@@ -239,7 +239,7 @@ class DataParallelPPOActor(BasePPOActor):
                     # all return: (bsz, response_length)
                     log_probs = self._forward_micro_batch(model_inputs, temperature=temperature)
 
-                    pg_loss, pg_metrics = core_algos.compute_policy_loss(
+                    pg_loss, pg_metrics = compute_policy_loss(
                         old_log_probs=old_log_probs,
                         log_probs=log_probs,
                         advantages=advantages,
@@ -252,12 +252,12 @@ class DataParallelPPOActor(BasePPOActor):
                     if self.config.use_kl_loss and "ref_log_probs" in model_inputs:
                         ref_log_probs = model_inputs["ref_log_probs"]
                         # compute kl loss
-                        kld = core_algos.compute_kl(
+                        kld = compute_kl(
                             log_probs=log_probs,
                             ref_log_probs=ref_log_probs,
                             kl_penalty=self.config.kl_penalty,
                         )
-                        kl_loss = VF.masked_mean(kld, response_mask)
+                        kl_loss = average_loss(kld, response_mask, mode=self.config.loss_avg_mode)
                         pg_loss = pg_loss + kl_loss * self.config.kl_coef
                         metrics["actor/kl_loss"] = kl_loss.detach().item()
                         metrics["actor/kl_coef"] = self.config.kl_coef

@@ -38,7 +38,7 @@ class RolloutConfig:
     max_num_batched_tokens: int = 8192
     disable_log_stats: bool = True
     val_override_config: Dict[str, Any] = field(default_factory=dict)
-    """auto keys"""
+    # below are auto keys
     prompt_length: int = field(default=-1, init=False)
     response_length: int = field(default=-1, init=False)
     trust_remote_code: bool = field(default=False, init=False)

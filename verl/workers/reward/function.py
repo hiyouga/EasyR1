@@ -27,15 +27,21 @@ from ...protocol import DataProto
 from .config import RewardConfig
 
 
+class RewardInput(TypedDict):
+    response: str
+    response_length: int
+    ground_truth: str
+
+
 class RewardScore(TypedDict):
     overall: float
     format: Optional[float]
     accuracy: Optional[float]
 
 
-SequentialRewardFunction = Callable[[str, str], RewardScore]
+SequentialRewardFunction = Callable[[RewardInput], RewardScore]
 
-BatchRewardFunction = Callable[[List[str], List[str]], List[RewardScore]]
+BatchRewardFunction = Callable[[List[RewardInput]], List[RewardScore]]
 
 
 class FunctionRewardManager(ABC):
@@ -84,10 +90,14 @@ class SequentialFunctionRewardManager(FunctionRewardManager):
             response_str = self.tokenizer.decode(
                 valid_response_ids, skip_special_tokens=self.config.skip_special_tokens
             )
-            ground_truth = data.non_tensor_batch["ground_truth"][i]
-
-            score = self.reward_fn(response_str, ground_truth)
-            reward_tensor[i, response_length[i] - 1] = score["overall"]
+            score = self.reward_fn(
+                {
+                    "response": response_str,
+                    "response_length": response_length[i],
+                    "ground_truth": data.non_tensor_batch["ground_truth"][i],
+                }
+            )
+            reward_tensor[i, response_length[i] - 1] = score.pop("overall")
             for key, value in score.items():
                 reward_metrics[key].append(value)
 
@@ -98,21 +108,27 @@ class BatchFunctionRewardManager(FunctionRewardManager):
     reward_fn: BatchRewardFunction
 
     def compute_reward(self, data: DataProto) -> Tuple[torch.Tensor, Dict[str, List[float]]]:
-        response_str, ground_truth = [], []
+        reward_inputs = []
         response_ids = data.batch["responses"]
         response_length = data.batch["response_mask"].sum(dim=-1)
         for i in range(len(data)):
             valid_response_ids = response_ids[i][: response_length[i]]
-            response_str.append(
-                self.tokenizer.decode(valid_response_ids, skip_special_tokens=self.config.skip_special_tokens)
+            response_str = self.tokenizer.decode(
+                valid_response_ids, skip_special_tokens=self.config.skip_special_tokens
             )
-            ground_truth.append(data.non_tensor_batch["ground_truth"][i])
+            reward_inputs.append(
+                {
+                    "response": response_str,
+                    "response_length": response_length[i],
+                    "ground_truth": data.non_tensor_batch["ground_truth"][i],
+                }
+            )
 
-        scores = self.reward_fn(response_str, ground_truth)
+        scores = self.reward_fn(reward_inputs)
         reward_tensor = torch.zeros_like(data.batch["responses"], dtype=torch.float32)
         reward_metrics = defaultdict(list)
         for i, score in enumerate(scores):
-            reward_tensor[i, response_length[i] - 1] = score["overall"]
+            reward_tensor[i, response_length[i] - 1] = score.pop("overall")
             for key, value in score.items():
                 reward_metrics[key].append(value)
 

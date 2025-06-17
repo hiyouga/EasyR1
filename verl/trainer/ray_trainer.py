@@ -240,75 +240,6 @@ class RayPPOTrainer:
         config.worker.critic.optim.training_steps = self.training_steps
         print(f"Total training steps: {self.training_steps}")
 
-    def _maybe_log_val_generations(
-        self, inputs: List[str], outputs: List[str], labels: List[str], scores: List[float]
-    ) -> None:
-        """Log a table of validation samples"""
-        if self.config.trainer.val_generations_to_log <= 0:
-            return
-
-        # Create tuples of (input, output, score) and sort by input text
-        samples = list(zip(inputs, outputs, labels, scores))
-        samples.sort(key=lambda x: x[0])  # Sort by input text
-
-        # Use fixed random seed for deterministic shuffling
-        rng = np.random.RandomState(42)
-        rng.shuffle(samples)
-
-        samples = samples[: self.config.trainer.val_generations_to_log]
-        self.logger.log_generation(samples, self.global_step)
-
-    def _validate(self) -> Dict[str, Any]:
-        reward_tensor_lst = []
-        # Lists to collect samples for the table
-        sample_inputs, sample_outputs, sample_labels, sample_scores = [], [], [], []
-        reward_metrics_lst = defaultdict(list)
-        print("Start validation...")
-        self.actor_rollout_ref_wg.prepare_rollout_engine()
-        for batch_dict in self.val_dataloader:
-            test_batch = DataProto.from_single_dict(batch_dict)
-            # Store original inputs
-            input_ids = test_batch.batch["input_ids"]
-            input_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in input_ids]
-            sample_inputs.extend(input_texts)
-
-            test_gen_batch = test_batch.pop(
-                batch_keys=["input_ids", "attention_mask", "position_ids"],
-                non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
-            )
-            test_gen_batch.meta_info = self.config.worker.rollout.val_override_config
-            test_gen_batch.meta_info["min_pixels"] = self.config.data.min_pixels
-            test_gen_batch.meta_info["max_pixels"] = self.config.data.max_pixels
-
-            test_gen_batch, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_ref_wg.world_size)
-            test_output_gen_batch = self.actor_rollout_ref_wg.generate_sequences(test_gen_batch)
-            test_output_gen_batch = unpad_dataproto(test_output_gen_batch, pad_size=pad_size)
-
-            # Store generated outputs
-            output_ids = test_output_gen_batch.batch["responses"]
-            output_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in output_ids]
-            sample_outputs.extend(output_texts)
-            sample_labels.extend(test_batch.non_tensor_batch["ground_truth"].tolist())
-            test_batch = test_batch.union(test_output_gen_batch)
-
-            # evaluate using reward_function
-            reward_tensor, reward_metrics = ray.get(self.val_reward_fn.compute_reward.remote(test_batch))
-
-            # Store scores
-            scores = reward_tensor.sum(-1).cpu().tolist()
-            sample_scores.extend(scores)
-
-            reward_tensor_lst.append(reward_tensor)
-            for key, value in reward_metrics.items():
-                reward_metrics_lst[key].extend(value)
-
-        self.actor_rollout_ref_wg.release_rollout_engine()
-        self._maybe_log_val_generations(sample_inputs, sample_outputs, sample_labels, sample_scores)
-        self.val_reward_score = torch.cat(reward_tensor_lst, dim=0).sum(-1).mean().item()
-        val_reward_metrics = {f"val/{key}_reward": value for key, value in reduce_metrics(reward_metrics_lst).items()}
-        print("Finish validation.")
-        return {"val/reward_score": self.val_reward_score, **val_reward_metrics}
-
     def init_workers(self) -> None:
         """Init resource pool and worker group"""
         self.resource_pool_manager.create_resource_pool()
@@ -423,6 +354,75 @@ class RayPPOTrainer:
         else:
             print(f"No dataloader state found at {dataloader_path}, will start from scratch.")
 
+    def _maybe_log_val_generations(
+        self, inputs: List[str], outputs: List[str], labels: List[str], scores: List[float]
+    ) -> None:
+        """Log a table of validation samples"""
+        if self.config.trainer.val_generations_to_log <= 0:
+            return
+
+        # Create tuples of (input, output, score) and sort by input text
+        samples = list(zip(inputs, outputs, labels, scores))
+        samples.sort(key=lambda x: x[0])  # Sort by input text
+
+        # Use fixed random seed for deterministic shuffling
+        rng = np.random.RandomState(42)
+        rng.shuffle(samples)
+
+        samples = samples[: self.config.trainer.val_generations_to_log]
+        self.logger.log_generation(samples, self.global_step)
+
+    def _validate(self) -> Dict[str, Any]:
+        reward_tensor_lst = []
+        # Lists to collect samples for the table
+        sample_inputs, sample_outputs, sample_labels, sample_scores = [], [], [], []
+        reward_metrics_lst = defaultdict(list)
+        print("Start validation...")
+        self.actor_rollout_ref_wg.prepare_rollout_engine()
+        for batch_dict in self.val_dataloader:
+            test_batch = DataProto.from_single_dict(batch_dict)
+            # Store original inputs
+            input_ids = test_batch.batch["input_ids"]
+            input_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in input_ids]
+            sample_inputs.extend(input_texts)
+
+            test_gen_batch = test_batch.pop(
+                batch_keys=["input_ids", "attention_mask", "position_ids"],
+                non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
+            )
+            test_gen_batch.meta_info = self.config.worker.rollout.val_override_config
+            test_gen_batch.meta_info["min_pixels"] = self.config.data.min_pixels
+            test_gen_batch.meta_info["max_pixels"] = self.config.data.max_pixels
+
+            test_gen_batch, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_ref_wg.world_size)
+            test_output_gen_batch = self.actor_rollout_ref_wg.generate_sequences(test_gen_batch)
+            test_output_gen_batch = unpad_dataproto(test_output_gen_batch, pad_size=pad_size)
+
+            # Store generated outputs
+            output_ids = test_output_gen_batch.batch["responses"]
+            output_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in output_ids]
+            sample_outputs.extend(output_texts)
+            sample_labels.extend(test_batch.non_tensor_batch["ground_truth"].tolist())
+            test_batch = test_batch.union(test_output_gen_batch)
+
+            # evaluate using reward_function
+            reward_tensor, reward_metrics = ray.get(self.val_reward_fn.compute_reward.remote(test_batch))
+
+            # Store scores
+            scores = reward_tensor.sum(-1).cpu().tolist()
+            sample_scores.extend(scores)
+
+            reward_tensor_lst.append(reward_tensor)
+            for key, value in reward_metrics.items():
+                reward_metrics_lst[key].extend(value)
+
+        self.actor_rollout_ref_wg.release_rollout_engine()
+        self._maybe_log_val_generations(sample_inputs, sample_outputs, sample_labels, sample_scores)
+        self.val_reward_score = torch.cat(reward_tensor_lst, dim=0).sum(-1).mean().item()
+        val_reward_metrics = {f"val/{key}_reward": value for key, value in reduce_metrics(reward_metrics_lst).items()}
+        print("Finish validation.")
+        return {"val/reward_score": self.val_reward_score, **val_reward_metrics}
+
     def _balance_batch(self, batch: DataProto, metrics: Dict[str, Any], logging_prefix: str = "global_seqlen") -> None:
         """Reorder the data on single controller such that each dp rank gets similar total tokens"""
         attention_mask = batch.batch["attention_mask"]
@@ -442,9 +442,10 @@ class RayPPOTrainer:
 
     def _make_batch_data(self, metrics: Dict[str, Any]) -> DataProto:
         batch = None
-        merged_metrics = defaultdict(list)
+        all_metrics = defaultdict(list)
         num_try_make_batch = 0
         while True:
+            num_try_make_batch += 1
             try:
                 batch_dict = next(self.data_iterator)
             except StopIteration:
@@ -487,38 +488,27 @@ class RayPPOTrainer:
 
             # filter group
             if self.config.algorithm.online_filtering:
-                num_try_make_batch += 1
-                reward_ref = self.reward_fn.compute_reward.remote(new_batch)
-                reward_tensor, reward_metrics = ray.get(reward_ref)
+                reward_tensor, reward_metrics = ray.get(self.reward_fn.compute_reward.remote(new_batch))
                 new_batch.batch["token_level_scores"] = reward_tensor
                 for k, v in reward_metrics.items():
-                    if k not in merged_metrics:
-                        merged_metrics[k] = []
-                    merged_metrics[k] += v
-                seq_reward = new_batch.batch["token_level_scores"].sum(dim=-1).numpy()
+                    all_metrics[k].extend(v)
 
-                prompt_uid2metric_vals = defaultdict(list)
-                for uid, metric_val in zip(new_batch.non_tensor_batch["uid"], seq_reward):
-                    prompt_uid2metric_vals[uid].append(metric_val)
-                prompt_uid2metric_std = {}
-                for prompt_uid, metric_vals in prompt_uid2metric_vals.items():
-                    prompt_uid2metric_std[prompt_uid] = np.std(metric_vals)
-                kept_prompt_uids = [
-                    uid
-                    for uid, std in prompt_uid2metric_std.items()
-                    if std > 0 or len(prompt_uid2metric_vals[uid]) == 1
-                ]
-                kept_traj_idxs = []
-                for idx, traj_from_prompt_uid in enumerate(new_batch.non_tensor_batch["uid"]):
-                    if traj_from_prompt_uid in kept_prompt_uids:
-                        kept_traj_idxs.append(idx)
-                new_batch = new_batch[kept_traj_idxs]
+                sample_level_scores = reward_tensor.sum(dim=-1).numpy()
+                uids = new_batch.non_tensor_batch["uid"]
+                uid2scores = defaultdict(list)
+                for uid, score in zip(uids, sample_level_scores):
+                    uid2scores[uid].append(score)
+
+                uid2mean = {uid: np.mean(scores) for uid, scores in uid2scores.items()}
+                kept_uids = [uid for uid, avg_score in uid2mean.items() if avg_score > 0.01 and avg_score < 0.99]
+                kept_sample_idxs = [idx for idx, uid in enumerate(uids) if uid in kept_uids]
+                new_batch = new_batch[kept_sample_idxs]
 
             batch = DataProto.concat([batch, new_batch]) if batch is not None else new_batch
             if len(batch) < self.config.data.rollout_batch_size * self.config.worker.rollout.n:
-                print(
-                    f"num_prompt_in_batch={len(batch) // self.config.worker.rollout.n} < prompt_bsz={self.config.data.rollout_batch_size}"
-                )
+                num_prompt_in_batch = len(batch) // self.config.worker.rollout.n
+                rollout_batch_size = self.config.data.rollout_batch_size
+                print(f"{num_prompt_in_batch=} < {rollout_batch_size=}")
                 max_try_make_batch = self.config.trainer.max_try_make_batch
                 if max_try_make_batch <= 0 or num_try_make_batch < max_try_make_batch:
                     print(f"{num_try_make_batch=}. Keep generating...")
@@ -528,8 +518,8 @@ class RayPPOTrainer:
                     )
             else:
                 if self.config.algorithm.online_filtering:
-                    merged_metrics = {f"reward/{k}": v for k, v in reduce_metrics(merged_metrics).items()}
-                    metrics.update(merged_metrics)
+                    metrics.update({f"reward/{k}": v for k, v in reduce_metrics(all_metrics).items()})
+
                 return batch[: self.config.data.rollout_batch_size * self.config.worker.rollout.n]
 
     def fit(self):

@@ -25,7 +25,7 @@ from torch import nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 from ...protocol import DataProto
-from ...trainer import core_algos
+from ...trainer.core_algos import compute_value_loss
 from ...utils import torch_functional as VF
 from ...utils.py_functional import append_to_dict
 from ...utils.ulysses import gather_outputs_and_unpad, ulysses_pad_and_slice_inputs
@@ -196,7 +196,7 @@ class DataParallelPPOCritic(BasePPOCritic):
                     returns = model_inputs["returns"]
 
                     vpreds = self._forward_micro_batch(model_inputs)
-                    vf_loss, vf_clipfrac = core_algos.compute_value_loss(
+                    vf_loss, vf_clipfrac = compute_value_loss(
                         vpreds=vpreds,
                         returns=returns,
                         values=values,

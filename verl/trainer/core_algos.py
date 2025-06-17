@@ -453,7 +453,11 @@ def compute_value_loss(
     return vf_loss, vf_clipfrac
 
 
-def compute_kl(log_probs: torch.FloatTensor, ref_log_probs: torch.FloatTensor, kl_penalty: str) -> torch.Tensor:
+def compute_kl(
+    log_probs: torch.FloatTensor,
+    ref_log_probs: torch.FloatTensor,
+    kl_penalty: Literal["kl", "abs", "mse", "low_var_kl", "full"],
+) -> torch.Tensor:
     """Compute KL divergence given log_probs and ref_log_probs.
 
     Adapted from https://github.com/huggingface/trl/blob/v0.11.0/trl/trainer/ppo_trainer.py#L1150
@@ -461,7 +465,7 @@ def compute_kl(log_probs: torch.FloatTensor, ref_log_probs: torch.FloatTensor, k
     Args:
         log_probs: torch.Tensor
         ref_log_probs: torch.Tensor
-        kl_penalty: str
+        kl_penalty: str ("kl", "abs", "mse", "low_var_kl", "full")
 
     Returns:
         kl_div: torch.Tensor

@@ -20,19 +20,18 @@ import numpy as np
 import torch
 import torch.distributed
 from tensordict import TensorDict
-from transformers import PreTrainedTokenizer
+from transformers import PreTrainedTokenizer, ProcessorMixin
 from vllm import LLM, RequestOutput, SamplingParams
 
 from ...protocol import DataProto
 from ...utils import torch_functional as VF
 from ...utils.dataset import process_image
-from ...utils.tokenizer import get_processor
 from ...utils.torch_dtypes import PrecisionType
 from .base import BaseRollout
 from .config import RolloutConfig
 
 
-def _repeat_interleave(value: Union[torch.Tensor, np.ndarray], repeats: int) -> Union[torch.Tensor, List[Any]]:
+def _repeat_interleave(value: Union[torch.Tensor, np.ndarray], repeats: int) -> Union[torch.Tensor, np.ndarray]:
     # repeat the elements, supports both tensor and numpy array
     if isinstance(value, torch.Tensor):
         return value.repeat_interleave(repeats, dim=0)
@@ -40,10 +39,9 @@ def _repeat_interleave(value: Union[torch.Tensor, np.ndarray], repeats: int) -> 
         return np.repeat(value, repeats, axis=0)
 
 
-def _get_logit_bias(model_path: str, trust_remote_code: bool) -> Optional[Dict[int, float]]:
+def _get_logit_bias(processor: Optional[ProcessorMixin]) -> Optional[Dict[int, float]]:
     # enforce vllm to not output image token
     # TODO: add video token
-    processor = get_processor(model_path, trust_remote_code=trust_remote_code)
     if processor is not None and hasattr(processor, "image_token"):
         image_token_id = processor.tokenizer.convert_tokens_to_ids(processor.image_token)
         return {image_token_id: -100}
@@ -62,7 +60,13 @@ def _process_multi_modal_data(multi_modal_data: Dict[str, Any], min_pixels: int,
 
 
 class vLLMRollout(BaseRollout):
-    def __init__(self, model_path: str, config: RolloutConfig, tokenizer: PreTrainedTokenizer):
+    def __init__(
+        self,
+        model_path: str,
+        config: RolloutConfig,
+        tokenizer: PreTrainedTokenizer,
+        processor: Optional[ProcessorMixin],
+    ):
         """A vLLM rollout. It requires the module is supported by the vllm.
 
         Args:
@@ -111,7 +115,7 @@ class vLLMRollout(BaseRollout):
         sampling_kwargs = {
             "max_tokens": config.response_length,
             "detokenize": False,
-            "logit_bias": _get_logit_bias(model_path, trust_remote_code=config.trust_remote_code),
+            "logit_bias": _get_logit_bias(processor),
         }
         default_sampling_params = SamplingParams()
         for key in config.to_dict().keys():
@@ -151,7 +155,7 @@ class vLLMRollout(BaseRollout):
 
         non_tensor_batch = prompts.non_tensor_batch
         batch_raw_prompt_ids = non_tensor_batch.pop("raw_prompt_ids")
-        batch_multi_modal_data = non_tensor_batch.get("multi_modal_data")  # do not pop it
+        batch_multi_modal_data = non_tensor_batch.pop("multi_modal_data", None)
         if batch_size != len(batch_raw_prompt_ids):
             raise RuntimeError("vllm sharding manager is not work properly.")
 
@@ -166,9 +170,7 @@ class vLLMRollout(BaseRollout):
                     }
                 )
         else:
-            vllm_inputs = [
-                {"prompt_token_ids": list(raw_prompt_ids)} for raw_prompt_ids in batch_raw_prompt_ids
-            ]
+            vllm_inputs = [{"prompt_token_ids": list(raw_prompt_ids)} for raw_prompt_ids in batch_raw_prompt_ids]
 
         # users can customize different sampling_params at different run
         with self.update_sampling_params(**prompts.meta_info):
@@ -185,10 +187,8 @@ class vLLMRollout(BaseRollout):
                 input_ids = _repeat_interleave(input_ids, self.sampling_params.n)
                 attention_mask = _repeat_interleave(attention_mask, self.sampling_params.n)
                 position_ids = _repeat_interleave(position_ids, self.sampling_params.n)
-                if "multi_modal_data" in non_tensor_batch:
-                    non_tensor_batch["multi_modal_data"] = _repeat_interleave(
-                        non_tensor_batch["multi_modal_data"], self.sampling_params.n
-                    )
+                if batch_multi_modal_data is not None:
+                    batch_multi_modal_data = _repeat_interleave(batch_multi_modal_data, self.sampling_params.n)
 
         sequence_ids = torch.cat([input_ids, response_ids], dim=-1)
         response_length = response_ids.size(1)
@@ -219,6 +219,7 @@ class vLLMRollout(BaseRollout):
             },
             batch_size=batch_size,
         )
+        non_tensor_batch = {"multi_modal_data": batch_multi_modal_data}
         if self.rank == 0:
             print("[Rollout] Finish generating sequences.")
 

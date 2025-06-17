@@ -49,7 +49,7 @@ class OptimConfig:
     lr_warmup_ratio: float = 0.0
     min_lr_ratio: Optional[float] = None
     warmup_style: str = "constant"
-    """auto keys"""
+    # below are auto keys
     training_steps: int = field(default=-1, init=False)
 
 
@@ -76,9 +76,13 @@ class OffloadConfig:
 class ActorConfig:
     strategy: str = "fsdp"
     global_batch_size: int = 256
+    """number of samples per minibatch for updating actor"""
     micro_batch_size_per_device_for_update: int = 4
+    """number of samples per forward pass for updating actor"""
     micro_batch_size_per_device_for_experience: int = 16
+    """number of samples per forward pass for computing log probs"""
     max_grad_norm: float = 1.0
+    """number to clip grad norm"""
     clip_ratio_low: float = 0.2
     """clip ratio in PPO & DAPO"""
     clip_ratio_high: float = 0.3
@@ -98,7 +102,7 @@ class ActorConfig:
     optim: OptimConfig = field(default_factory=OptimConfig)
     fsdp: FSDPConfig = field(default_factory=FSDPConfig)
     offload: OffloadConfig = field(default_factory=OffloadConfig)
-    """auto keys"""
+    # below are auto keys
     global_batch_size_per_device: int = field(default=-1, init=False)
     disable_kl: bool = field(default=False, init=False)
     use_kl_loss: bool = field(default=False, init=False)
@@ -111,7 +115,7 @@ class RefConfig:
     strategy: str = "fsdp"
     fsdp: FSDPConfig = field(default_factory=FSDPConfig)
     offload: OffloadConfig = field(default_factory=OffloadConfig)
-    """auto keys"""
+    # below are auto keys
     micro_batch_size_per_device_for_experience: int = field(default=-1, init=False)
     padding_free: bool = field(default=False, init=False)
     ulysses_size: int = field(default=1, init=False)
