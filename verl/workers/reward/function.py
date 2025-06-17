@@ -97,7 +97,7 @@ class SequentialFunctionRewardManager(FunctionRewardManager):
                     "ground_truth": data.non_tensor_batch["ground_truth"][i],
                 }
             )
-            reward_tensor[i, response_length[i] - 1] = score.pop("overall")
+            reward_tensor[i, response_length[i] - 1] = score["overall"]
             for key, value in score.items():
                 reward_metrics[key].append(value)
 
@@ -128,7 +128,7 @@ class BatchFunctionRewardManager(FunctionRewardManager):
         reward_tensor = torch.zeros_like(data.batch["responses"], dtype=torch.float32)
         reward_metrics = defaultdict(list)
         for i, score in enumerate(scores):
-            reward_tensor[i, response_length[i] - 1] = score.pop("overall")
+            reward_tensor[i, response_length[i] - 1] = score["overall"]
             for key, value in score.items():
                 reward_metrics[key].append(value)
 

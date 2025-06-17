@@ -444,6 +444,7 @@ class RayPPOTrainer:
         batch = None
         all_metrics = defaultdict(list)
         num_try_make_batch = 0
+        print("Start generating batch...")
         while True:
             num_try_make_batch += 1
             try:
@@ -505,18 +506,19 @@ class RayPPOTrainer:
                 new_batch = new_batch[kept_sample_idxs]
 
             batch = DataProto.concat([batch, new_batch]) if batch is not None else new_batch
-            if len(batch) < self.config.data.rollout_batch_size * self.config.worker.rollout.n:
-                num_prompt_in_batch = len(batch) // self.config.worker.rollout.n
-                rollout_batch_size = self.config.data.rollout_batch_size
-                print(f"{num_prompt_in_batch=} < {rollout_batch_size=}")
+            current_batch_size = len(batch) // self.config.worker.rollout.n
+            rollout_batch_size = self.config.data.rollout_batch_size
+            if current_batch_size < rollout_batch_size:
+                print(f"{current_batch_size=} < {rollout_batch_size=}")
                 max_try_make_batch = self.config.trainer.max_try_make_batch
                 if max_try_make_batch <= 0 or num_try_make_batch < max_try_make_batch:
-                    print(f"{num_try_make_batch=}. Keep generating...")
+                    print(f"{num_try_make_batch=}. Continue generating...")
                 else:
                     raise ValueError(
                         f"{num_try_make_batch=} >= {max_try_make_batch=}. Generated too many. Please check your data."
                     )
             else:
+                print(f"{current_batch_size=} >= {rollout_batch_size=}. Finish generating.")
                 if self.config.algorithm.online_filtering:
                     metrics.update({f"reward/{k}": v for k, v in reduce_metrics(all_metrics).items()})
 

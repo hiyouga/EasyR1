@@ -144,9 +144,6 @@ class vLLMRollout(BaseRollout):
 
     @torch.no_grad()
     def generate_sequences(self, prompts: DataProto) -> DataProto:
-        if self.rank == 0:
-            print("[Rollout] Start generating sequences.")
-
         # left-padded attention_mask
         input_ids: torch.Tensor = prompts.batch["input_ids"]  # (bs, prompt_length)
         attention_mask: torch.Tensor = prompts.batch["attention_mask"]
@@ -221,7 +218,4 @@ class vLLMRollout(BaseRollout):
             batch_size=batch_size,
         )
         non_tensor_batch = {"multi_modal_data": batch_multi_modal_data}
-        if self.rank == 0:
-            print("[Rollout] Finish generating sequences.")
-
         return DataProto(batch=batch, non_tensor_batch=non_tensor_batch, meta_info=prompts.meta_info)
