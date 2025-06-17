@@ -130,6 +130,8 @@ class TrainerConfig:
     """save checkpoint path, if not specified, use `checkpoints/project_name/experiment_name`"""
     load_checkpoint_path: Optional[str] = None
     """load checkpoint path"""
+    max_try_make_batch: int = 10
+    """max number of generations for online filter, -1 means no limit"""
 
     def post_init(self):
         if self.save_checkpoint_path is None:

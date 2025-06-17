@@ -442,6 +442,8 @@ class RayPPOTrainer:
 
     def _make_batch_data(self, metrics: Dict[str, Any]) -> DataProto:
         batch = None
+        merged_metrics = defaultdict(list)
+        num_try_make_batch = 0
         while True:
             try:
                 batch_dict = next(self.data_iterator)
@@ -485,17 +487,18 @@ class RayPPOTrainer:
 
             # filter group
             if self.config.algorithm.online_filtering:
+                num_try_make_batch += 1
                 reward_ref = self.reward_fn.compute_reward.remote(new_batch)
                 reward_tensor, reward_metrics = ray.get(reward_ref)
                 new_batch.batch["token_level_scores"] = reward_tensor
-                reward_metrics = {f"reward/{k}": v for k, v in reduce_metrics(reward_metrics).items()}
-                metrics.update(reward_metrics)
-                new_batch.non_tensor_batch["seq_reward"] = new_batch.batch["token_level_scores"].sum(dim=-1).numpy()
+                for k, v in reward_metrics.items():
+                    if k not in merged_metrics:
+                        merged_metrics[k] = []
+                    merged_metrics[k] += v
+                seq_reward = new_batch.batch["token_level_scores"].sum(dim=-1).numpy()
 
                 prompt_uid2metric_vals = defaultdict(list)
-                for uid, metric_val in zip(
-                    new_batch.non_tensor_batch["uid"], new_batch.non_tensor_batch["seq_reward"]
-                ):
+                for uid, metric_val in zip(new_batch.non_tensor_batch["uid"], seq_reward):
                     prompt_uid2metric_vals[uid].append(metric_val)
                 prompt_uid2metric_std = {}
                 for prompt_uid, metric_vals in prompt_uid2metric_vals.items():
@@ -513,8 +516,20 @@ class RayPPOTrainer:
 
             batch = DataProto.concat([batch, new_batch]) if batch is not None else new_batch
             if len(batch) < self.config.data.rollout_batch_size * self.config.worker.rollout.n:
-                continue
+                print(
+                    f"num_prompt_in_batch={len(batch) // self.config.worker.rollout.n} < prompt_bsz={self.config.data.rollout_batch_size}"
+                )
+                max_try_make_batch = self.config.trainer.max_try_make_batch
+                if max_try_make_batch <= 0 or num_try_make_batch < max_try_make_batch:
+                    print(f"{num_try_make_batch=}. Keep generating...")
+                else:
+                    raise ValueError(
+                        f"{num_try_make_batch=} >= {max_try_make_batch=}. Generated too many. Please check your data."
+                    )
             else:
+                if self.config.algorithm.online_filtering:
+                    merged_metrics = {f"reward/{k}": v for k, v in reduce_metrics(merged_metrics).items()}
+                    metrics.update(merged_metrics)
                 return batch[: self.config.data.rollout_batch_size * self.config.worker.rollout.n]
 
     def fit(self):
