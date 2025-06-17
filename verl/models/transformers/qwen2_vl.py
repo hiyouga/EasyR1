@@ -19,18 +19,29 @@ from typing import Optional, Tuple
 
 import torch
 
+from ...utils.py_functional import is_transformers_version_greater_than
 from .flash_attention_utils import flash_attention_forward
 
 
-try:
+if is_transformers_version_greater_than("4.52.0"):
     from transformers.models.qwen2_vl.modeling_qwen2_vl import (
         Qwen2VLAttention,
+        Qwen2VLCausalLMOutputWithPast,
+        Qwen2VLForConditionalGeneration,
+        Qwen2VLModel,
+        Qwen2VLModelOutputWithPast,
         apply_multimodal_rotary_pos_emb,
         repeat_kv,
     )
     from transformers.models.qwen2_vl.processing_qwen2_vl import Qwen2VLProcessor
-except ImportError:
-    pass
+else:
+    from transformers.models.qwen2_vl.modeling_qwen2_vl import (
+        Qwen2VLAttention,
+        Qwen2VLCausalLMOutputWithPast,
+        Qwen2VLForConditionalGeneration,
+        apply_multimodal_rotary_pos_emb,
+        repeat_kv,
+    )
 
 
 def get_rope_index(
@@ -183,3 +194,184 @@ def qwen2_vl_attn_forward(
     attn_output = attn_output.reshape(bsz, q_len, self.hidden_size).contiguous()
     attn_output = self.o_proj(attn_output)
     return attn_output, None, None
+
+
+def _get_input_embeds(
+    model: "Qwen2VLModel",
+    input_ids: torch.LongTensor,
+    attention_mask: Optional[torch.Tensor] = None,
+    pixel_values: Optional[torch.FloatTensor] = None,
+    pixel_values_videos: Optional[torch.FloatTensor] = None,
+    image_grid_thw: Optional[torch.LongTensor] = None,
+    video_grid_thw: Optional[torch.LongTensor] = None,
+):
+    inputs_embeds = model.get_input_embeddings()(input_ids)
+    if pixel_values is not None:
+        pixel_values = pixel_values.type(model.visual.dtype)
+        image_embeds = model.visual(pixel_values, grid_thw=image_grid_thw)
+        n_image_tokens = (input_ids == model.config.image_token_id).sum().item()
+        n_image_features = image_embeds.shape[0]
+        if n_image_tokens != n_image_features:
+            raise ValueError(
+                f"Image features and image tokens do not match: tokens: {n_image_tokens}, features {n_image_features}"
+            )
+
+        mask = input_ids == model.config.image_token_id
+        mask_unsqueezed = mask.unsqueeze(-1)
+        mask_expanded = mask_unsqueezed.expand_as(inputs_embeds)
+        image_mask = mask_expanded.to(inputs_embeds.device)
+
+        image_embeds = image_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
+        inputs_embeds = inputs_embeds.masked_scatter(image_mask, image_embeds)
+
+    if pixel_values_videos is not None:
+        pixel_values_videos = pixel_values_videos.type(model.visual.dtype)
+        video_embeds = model.visual(pixel_values_videos, grid_thw=video_grid_thw)
+        n_video_tokens = (input_ids == model.config.video_token_id).sum().item()
+        n_video_features = video_embeds.shape[0]
+        if n_video_tokens != n_video_features:
+            raise ValueError(
+                f"Video features and video tokens do not match: tokens: {n_video_tokens}, features {n_video_features}"
+            )
+
+        mask = input_ids == model.config.video_token_id
+        mask_unsqueezed = mask.unsqueeze(-1)
+        mask_expanded = mask_unsqueezed.expand_as(inputs_embeds)
+        video_mask = mask_expanded.to(inputs_embeds.device)
+
+        video_embeds = video_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
+        inputs_embeds = inputs_embeds.masked_scatter(video_mask, video_embeds)
+
+    if pixel_values is None and pixel_values_videos is None:
+        pixel_values = torch.zeros((16, 1176), dtype=inputs_embeds.dtype, device=inputs_embeds.device)
+        image_grid_thw = torch.tensor([[1, 4, 4]], dtype=torch.long, device=inputs_embeds.device)
+        image_embeds = model.visual(pixel_values, grid_thw=image_grid_thw)
+        inputs_embeds += 0.0 * image_embeds.mean()
+
+    if attention_mask is not None:
+        attention_mask = attention_mask.to(inputs_embeds.device)
+
+    return inputs_embeds, attention_mask
+
+
+def qwen2_vl_forward_old(
+    self: "Qwen2VLForConditionalGeneration",
+    input_ids: torch.LongTensor,
+    attention_mask: Optional[torch.Tensor] = None,
+    position_ids: Optional[torch.LongTensor] = None,
+    labels: Optional[torch.LongTensor] = None,
+    pixel_values: Optional[torch.FloatTensor] = None,
+    pixel_values_videos: Optional[torch.FloatTensor] = None,
+    image_grid_thw: Optional[torch.LongTensor] = None,
+    video_grid_thw: Optional[torch.LongTensor] = None,
+    **kwargs,
+) -> "Qwen2VLCausalLMOutputWithPast":
+    inputs_embeds, attention_mask = _get_input_embeds(
+        self, input_ids, attention_mask, pixel_values, pixel_values_videos, image_grid_thw, video_grid_thw
+    )
+    outputs = self.model(
+        input_ids=None,
+        pixel_values=pixel_values,
+        pixel_values_videos=pixel_values_videos,
+        image_grid_thw=image_grid_thw,
+        video_grid_thw=video_grid_thw,
+        position_ids=position_ids,
+        attention_mask=attention_mask,
+        past_key_values=None,
+        inputs_embeds=inputs_embeds,
+        use_cache=False,
+        output_attentions=False,
+        output_hidden_states=False,
+        return_dict=True,
+        cache_position=None,
+    )
+    hidden_states = outputs[0]
+    logits = self.lm_head(hidden_states)
+
+    return Qwen2VLCausalLMOutputWithPast(
+        loss=None,
+        logits=logits,
+        past_key_values=None,
+        hidden_states=None,
+        attentions=None,
+        rope_deltas=None,
+    )
+
+
+def qwen2_vl_base_forward_new(
+    self: "Qwen2VLModel",
+    input_ids: torch.LongTensor,
+    attention_mask: Optional[torch.Tensor] = None,
+    position_ids: Optional[torch.LongTensor] = None,
+    labels: Optional[torch.LongTensor] = None,
+    pixel_values: Optional[torch.FloatTensor] = None,
+    pixel_values_videos: Optional[torch.FloatTensor] = None,
+    image_grid_thw: Optional[torch.LongTensor] = None,
+    video_grid_thw: Optional[torch.LongTensor] = None,
+    **kwargs,
+):
+    inputs_embeds, attention_mask = _get_input_embeds(
+        self, input_ids, attention_mask, pixel_values, pixel_values_videos, image_grid_thw, video_grid_thw
+    )
+    outputs = self.language_model(
+        input_ids=None,
+        position_ids=position_ids,
+        attention_mask=attention_mask,
+        past_key_values=None,
+        inputs_embeds=inputs_embeds,
+        use_cache=False,
+        output_attentions=False,
+        output_hidden_states=False,
+        return_dict=True,
+        cache_position=None,
+    )
+
+    output = Qwen2VLModelOutputWithPast(
+        last_hidden_state=outputs.last_hidden_state,
+        past_key_values=outputs.past_key_values,
+        hidden_states=outputs.hidden_states,
+        attentions=outputs.attentions,
+        rope_deltas=None,
+    )
+    return output
+
+
+def qwen2_vl_forward_new(
+    self: "Qwen2VLForConditionalGeneration",
+    input_ids: torch.LongTensor,
+    attention_mask: Optional[torch.Tensor] = None,
+    position_ids: Optional[torch.LongTensor] = None,
+    labels: Optional[torch.LongTensor] = None,
+    pixel_values: Optional[torch.FloatTensor] = None,
+    pixel_values_videos: Optional[torch.FloatTensor] = None,
+    image_grid_thw: Optional[torch.LongTensor] = None,
+    video_grid_thw: Optional[torch.LongTensor] = None,
+    **kwargs,
+) -> "Qwen2VLCausalLMOutputWithPast":
+    outputs = self.model(
+        input_ids=input_ids,
+        pixel_values=pixel_values,
+        pixel_values_videos=pixel_values_videos,
+        image_grid_thw=image_grid_thw,
+        video_grid_thw=video_grid_thw,
+        position_ids=position_ids,
+        attention_mask=attention_mask,
+        past_key_values=None,
+        inputs_embeds=None,
+        use_cache=False,
+        output_attentions=False,
+        output_hidden_states=False,
+        return_dict=True,
+        cache_position=None,
+    )
+    hidden_states = outputs[0]
+    logits = self.lm_head(hidden_states)
+
+    return Qwen2VLCausalLMOutputWithPast(
+        loss=None,
+        logits=logits,
+        past_key_values=None,
+        hidden_states=None,
+        attentions=None,
+        rope_deltas=None,
+    )

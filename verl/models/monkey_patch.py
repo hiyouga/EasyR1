@@ -15,24 +15,49 @@
 
 from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
 
+from ..utils.py_functional import is_transformers_version_greater_than
 from .transformers.flash_attention_utils import flash_attention_forward
-from .transformers.qwen2_vl import qwen2_vl_attn_forward
+from .transformers.qwen2_vl import (
+    qwen2_vl_attn_forward,
+    qwen2_vl_base_forward_new,
+    qwen2_vl_forward_new,
+    qwen2_vl_forward_old,
+)
 
 
 def apply_ulysses_patch(model_type: str) -> None:
     if model_type in ("llama", "gemma", "gemma2", "mistral", "qwen2", "qwen3", "qwen3_moe"):
         ALL_ATTENTION_FUNCTIONS["flash_attention_2"] = flash_attention_forward
     elif model_type in ("qwen2_vl", "qwen2_5_vl"):
-        try:
+        if is_transformers_version_greater_than("4.53.0"):
+            from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import Qwen2_5_VLAttention
+            from transformers.models.qwen2_vl.modeling_qwen2_vl import Qwen2VLAttention
+
+            Qwen2VLAttention.forward = qwen2_vl_attn_forward
+            Qwen2_5_VLAttention.forward = qwen2_vl_attn_forward
+        else:
             from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import Qwen2_5_VLFlashAttention2
             from transformers.models.qwen2_vl.modeling_qwen2_vl import Qwen2VLFlashAttention2
-        except ImportError:  # transformers >= 4.52.4
-            from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import (
-                Qwen2_5_VLAttention as Qwen2_5_VLFlashAttention2,
-            )
-            from transformers.models.qwen2_vl.modeling_qwen2_vl import Qwen2VLAttention as Qwen2VLFlashAttention2
 
-        Qwen2VLFlashAttention2.forward = qwen2_vl_attn_forward
-        Qwen2_5_VLFlashAttention2.forward = qwen2_vl_attn_forward
+            Qwen2VLFlashAttention2.forward = qwen2_vl_attn_forward
+            Qwen2_5_VLFlashAttention2.forward = qwen2_vl_attn_forward
+
+        if is_transformers_version_greater_than("4.52.0"):
+            from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import (
+                Qwen2_5_VLForConditionalGeneration,
+                Qwen2_5_VLModel,
+            )
+            from transformers.models.qwen2_vl.modeling_qwen2_vl import Qwen2VLForConditionalGeneration, Qwen2VLModel
+
+            Qwen2VLModel.forward = qwen2_vl_base_forward_new
+            Qwen2_5_VLModel.forward = qwen2_vl_base_forward_new
+            Qwen2VLForConditionalGeneration.forward = qwen2_vl_forward_new
+            Qwen2_5_VLForConditionalGeneration.forward = qwen2_vl_forward_new
+        else:
+            from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import Qwen2_5_VLForConditionalGeneration
+            from transformers.models.qwen2_vl.modeling_qwen2_vl import Qwen2VLForConditionalGeneration
+
+            Qwen2VLForConditionalGeneration.forward = qwen2_vl_forward_old
+            Qwen2_5_VLForConditionalGeneration.forward = qwen2_vl_forward_old
     else:
         raise NotImplementedError(f"Model architecture {model_type} is not supported yet.")

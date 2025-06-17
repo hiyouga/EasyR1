@@ -56,7 +56,10 @@ def _process_multi_modal_data(multi_modal_data: Dict[str, Any], min_pixels: int,
     for image in multi_modal_data["images"]:
         images.append(process_image(image, min_pixels=min_pixels, max_pixels=max_pixels))
 
-    return {"image": images}
+    if len(images) != 0:
+        return {"image": images}
+
+    return None
 
 
 class vLLMRollout(BaseRollout):
@@ -85,8 +88,10 @@ class vLLMRollout(BaseRollout):
             raise ValueError("max_num_batched_tokens should be greater than prompt_length + response_length.")
 
         engine_kwargs = {}
-        if config.limit_images:
+        if processor is not None:  # only VLMs have processor
             engine_kwargs["disable_mm_preprocessor_cache"] = True
+
+        if processor is not None and config.limit_images:
             engine_kwargs["limit_mm_per_prompt"] = {"image": config.limit_images}
 
         self.inference_engine = LLM(

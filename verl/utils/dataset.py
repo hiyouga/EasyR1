@@ -156,10 +156,20 @@ class RLHFDataset(Dataset):
 
     def _filter_overlong_prompts(self, example: Dict[str, Any]) -> bool:
         messages = self._build_messages(example)
-        processing_class = self.processor if self.processor is not None else self.tokenizer
-        return (
-            len(processing_class.apply_chat_template(messages, add_generation_prompt=True)) <= self.max_prompt_length
-        )
+        if self.image_key in example:
+            prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+            images = example[self.image_key] or []
+            if self.image_dir is not None and len(images) != 0 and isinstance(images[0], str):  # image paths
+                images = [os.path.join(self.image_dir, image) for image in images]
+
+            resized_images = [
+                process_image(image, min_pixels=self.min_pixels, max_pixels=self.max_pixels) for image in images
+            ] or None
+            model_inputs = self.processor(resized_images, [prompt], add_special_tokens=False, return_tensors="pt")
+            return model_inputs["input_ids"].size(-1) <= self.max_prompt_length
+        else:
+            input_ids = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True)
+            return len(input_ids) <= self.max_prompt_length
 
     def __len__(self):
         return len(self.dataset)
@@ -176,7 +186,7 @@ class RLHFDataset(Dataset):
 
             resized_images = [
                 process_image(image, min_pixels=self.min_pixels, max_pixels=self.max_pixels) for image in images
-            ]
+            ] or None
             model_inputs = self.processor(resized_images, [prompt], add_special_tokens=False, return_tensors="pt")
             input_ids = model_inputs.pop("input_ids")[0]
             attention_mask = model_inputs.pop("attention_mask")[0]

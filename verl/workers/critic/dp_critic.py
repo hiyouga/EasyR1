@@ -59,12 +59,17 @@ class DataParallelPPOCritic(BasePPOCritic):
         if position_ids.dim() == 3:  # qwen2vl mrope
             position_ids = position_ids.transpose(0, 1)  # (bsz, 3, seqlen) -> (3, bsz, seqlen)
 
-        multi_modal_inputs = {}
+        multi_modal_inputs = defaultdict(list)
         if "multi_modal_inputs" in micro_batch:
-            for key in micro_batch["multi_modal_inputs"][0].keys():
-                multi_modal_inputs[key] = torch.cat(
-                    [inputs[key] for inputs in micro_batch["multi_modal_inputs"]], dim=0
-                )
+            for input_dict in micro_batch["multi_modal_inputs"]:
+                for key, value in input_dict.items():
+                    multi_modal_inputs[key].append(value)
+
+            for key, value in multi_modal_inputs.items():
+                if len(value) != 0:
+                    multi_modal_inputs[key] = torch.cat(value, dim=0)
+                else:
+                    multi_modal_inputs[key] = None
 
         if self.config.padding_free:
             input_ids_rmpad, indices, *_ = unpad_input(

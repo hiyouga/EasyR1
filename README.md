@@ -98,6 +98,7 @@ Please refer to the example datasets to prepare your own dataset.
 - Text dataset: https://huggingface.co/datasets/hiyouga/math12k
 - Image-text dataset: https://huggingface.co/datasets/hiyouga/geometry3k
 - Multi-image-text dataset: https://huggingface.co/datasets/hiyouga/journeybench-multi-image-vqa
+- Text-image mixed dataset: https://huggingface.co/datasets/hiyouga/rl-mixed-dataset
 
 ## How to Understand GRPO in EasyR1
 

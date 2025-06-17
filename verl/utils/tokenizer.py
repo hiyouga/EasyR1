@@ -44,7 +44,7 @@ def get_processor(model_path: str, override_chat_template: Optional[str] = None,
         processor.chat_template = override_chat_template
 
     # Avoid load tokenizer, see:
-    # https://github.com/huggingface/transformers/blob/v4.49.0/src/transformers/models/auto/processing_auto.py#L344
+    # https://github.com/huggingface/transformers/blob/v4.52.4/src/transformers/models/auto/processing_auto.py#L386
     if processor is not None and "Processor" not in processor.__class__.__name__:
         processor = None
 
