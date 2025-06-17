@@ -83,6 +83,8 @@ class vLLMRollout(BaseRollout):
         engine_kwargs = {}
         if config.limit_images:
             engine_kwargs["limit_mm_per_prompt"] = {"image": config.limit_images}
+            engine_kwargs["disable_mm_preprocessor_cache"] = True
+
 
         self.inference_engine = LLM(
             model=model_path,
@@ -99,7 +101,6 @@ class vLLMRollout(BaseRollout):
             disable_log_stats=config.disable_log_stats,
             enforce_eager=config.enforce_eager,
             disable_custom_all_reduce=True,
-            disable_mm_preprocessor_cache=True,
             enable_chunked_prefill=config.enable_chunked_prefill,
             enable_sleep_mode=True,
             **engine_kwargs,
