@@ -86,9 +86,8 @@ class vLLMRollout(BaseRollout):
 
         engine_kwargs = {}
         if config.limit_images:
-            engine_kwargs["limit_mm_per_prompt"] = {"image": config.limit_images}
             engine_kwargs["disable_mm_preprocessor_cache"] = True
-
+            engine_kwargs["limit_mm_per_prompt"] = {"image": config.limit_images}
 
         self.inference_engine = LLM(
             model=model_path,
@@ -217,5 +216,9 @@ class vLLMRollout(BaseRollout):
             },
             batch_size=batch_size,
         )
-        non_tensor_batch = {"multi_modal_data": batch_multi_modal_data}
+        if batch_multi_modal_data is not None:
+            non_tensor_batch = {"multi_modal_data": batch_multi_modal_data}
+        else:
+            non_tensor_batch = {}
+
         return DataProto(batch=batch, non_tensor_batch=non_tensor_batch, meta_info=prompts.meta_info)

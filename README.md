@@ -3,6 +3,8 @@
 [![GitHub Repo stars](https://img.shields.io/github/stars/hiyouga/EasyR1)](https://github.com/hiyouga/EasyR1/stargazers)
 [![Twitter](https://img.shields.io/twitter/follow/llamafactory_ai)](https://twitter.com/llamafactory_ai)
 
+### Used by [Amazon Web Services](https://aws.amazon.com/cn/blogs/china/building-llm-model-hub-based-on-llamafactory-and-easyr1/)
+
 This project is a clean fork of the original [veRL](https://github.com/volcengine/verl) project to support vision language models, we thank all the authors for providing such a high-performance RL training framework.
 
 EasyR1 is efficient and scalable due to the design of **[HybirdEngine](https://arxiv.org/abs/2409.19256)** and the latest release of **[vLLM](https://github.com/vllm-project/vllm)**'s SPMD mode.
@@ -16,6 +18,7 @@ EasyR1 is efficient and scalable due to the design of **[HybirdEngine](https://a
 
 - Supported algorithms
   - GRPO
+  - DAPO
   - Reinforce++
   - ReMax
   - RLOO
@@ -49,10 +52,10 @@ docker pull hiyouga/verl:ngc-th2.7.0-cu12.6-vllm0.9.1
 
 \* *estimated*
 
-| Method                   | Bits |  1.5B  |   3B   |   7B   |   32B   |
-| ------------------------ | ---- | ------ | ------ | ------ | ------- |
-| GRPO Full Fine-Tuning    |  AMP | 2*24GB | 4*40GB | 8*40GB | 16*80GB |
-| GRPO Full Fine-Tuning    | BF16 | 1*24GB | 1*40GB | 4*40GB |  8*80GB |
+| Method                   | Bits |  1.5B  |   3B   |   7B   |   32B   |   72B   |
+| ------------------------ | ---- | ------ | ------ | ------ | ------- | ------- |
+| GRPO Full Fine-Tuning    |  AMP | 2*24GB | 4*40GB | 8*40GB | 16*80GB | 32*80GB |
+| GRPO Full Fine-Tuning    | BF16 | 1*24GB | 1*40GB | 4*40GB |  8*80GB | 16*80GB |
 
 > [!NOTE]
 > Use `worker.actor.fsdp.torch_dtype=bf16` and `worker.actor.optim.strategy=adamw_bf16` to enable bf16 training.
