@@ -39,7 +39,10 @@ def get_tokenizer(model_path: str, override_chat_template: Optional[str] = None,
 
 def get_processor(model_path: str, override_chat_template: Optional[str] = None, **kwargs) -> Optional[ProcessorMixin]:
     """Create a huggingface pretrained processor."""
-    processor = AutoProcessor.from_pretrained(model_path, **kwargs)
+    try:
+        processor = AutoProcessor.from_pretrained(model_path, **kwargs)
+    except (OSError, ValueError):
+        processor = None
     if override_chat_template is not None:
         processor.chat_template = override_chat_template
 
