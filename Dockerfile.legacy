@@ -13,7 +13,6 @@ ENV HF_HUB_ENABLE_HF_TRANSFER="1"
 # Define installation arguments
 ARG APT_SOURCE=https://mirrors.tuna.tsinghua.edu.cn/ubuntu/
 ARG PIP_INDEX=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
-ARG VLLM_COMMIT=227578480d71fc94ef46ca77fb69496412158d68
 
 # Set apt source
 RUN cp /etc/apt/sources.list /etc/apt/sources.list.bak && \
@@ -48,24 +47,25 @@ RUN pip uninstall -y torch torchvision torchaudio \
 # Fix cv2
 RUN rm -rf /usr/local/lib/python3.10/dist-packages/cv2
 
-# Install vllm-0.7.4-nightly
-RUN pip install --no-cache-dir vllm --pre --extra-index-url "https://wheels.vllm.ai/${VLLM_COMMIT}" && \
-    git clone -b verl_v1 https://github.com/hiyouga/vllm.git && \
-    cp -r vllm/vllm/ /usr/local/lib/python3.10/dist-packages/
-
-# Install torch-2.5.1
-RUN pip install --no-cache-dir "torch==2.5.1" "torchvision==0.20.1" "torchaudio==2.5.1" tensordict torchdata \
-    "transformers>=4.49.0" accelerate datasets peft hf-transfer \
-    ray[default] codetiming hydra-core pandas "pyarrow>=15.0.0" pylatexenc qwen-vl-utils wandb liger-kernel mathruler \
+# Install torch-2.6.0+cu124 + vllm-0.8.4
+# torch-2.6.0+cu124: cxx11abi=False
+# torch-2.6.0+cu126: cxx11abi=True
+# see https://github.com/flashinfer-ai/flashinfer/issues/911
+RUN pip install --no-cache-dir "vllm==0.8.4" "torch==2.6.0" "torchvision==0.21.0" "torchaudio==2.6.0" tensordict torchdata \
+    "transformers[hf_xet]>=4.51.0" accelerate datasets peft hf-transfer \
+    "numpy<2.0.0" "pyarrow>=15.0.0" "grpcio>=1.62.1" "optree>=0.13.0" pandas \
+    ray[default] codetiming hydra-core pylatexenc qwen-vl-utils wandb liger-kernel mathruler \
     pytest yapf py-spy pyext pre-commit ruff
 
-# Install flash_attn-2.7.4.post1
-RUN wget -nv https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.5cxx11abiFALSE-cp310-cp310-linux_x86_64.whl && \
-    pip install --no-cache-dir flash_attn-2.7.4.post1+cu12torch2.5cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
+# Install flash-attn-2.7.4.post1 (cxx11abi=False)
+RUN wget -nv https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.4.post1/flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp310-cp310-linux_x86_64.whl && \
+    pip install --no-cache-dir flash_attn-2.7.4.post1+cu12torch2.6cxx11abiFALSE-cp310-cp310-linux_x86_64.whl
 
-# Fix packages
-RUN pip uninstall -y pynvml nvidia-ml-py && \
-    pip install --no-cache-dir --upgrade "nvidia-ml-py>=12.560.30" "fastapi[standard]>=0.115.0" "optree>=0.13.0" "pydantic>=2.9" "grpcio>=1.62.1"
+# Install flashinfer-0.2.2.post1+cu124 (cxx11abi=False)
+# vllm-0.8.3 does not support flashinfer>=0.2.3
+# see https://github.com/vllm-project/vllm/pull/15777
+RUN wget -nv https://github.com/flashinfer-ai/flashinfer/releases/download/v0.2.2.post1/flashinfer_python-0.2.2.post1+cu124torch2.6-cp38-abi3-linux_x86_64.whl && \
+    pip install --no-cache-dir flashinfer_python-0.2.2.post1+cu124torch2.6-cp38-abi3-linux_x86_64.whl
 
 # Reset pip config
 RUN pip config unset global.index-url && \
