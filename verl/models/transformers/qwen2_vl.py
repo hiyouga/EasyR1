@@ -271,19 +271,10 @@ def qwen2_vl_forward_old(
     )
     outputs = self.model(
         input_ids=None,
-        pixel_values=pixel_values,
-        pixel_values_videos=pixel_values_videos,
-        image_grid_thw=image_grid_thw,
-        video_grid_thw=video_grid_thw,
-        position_ids=position_ids,
         attention_mask=attention_mask,
-        past_key_values=None,
+        position_ids=position_ids,
         inputs_embeds=inputs_embeds,
-        use_cache=False,
-        output_attentions=False,
-        output_hidden_states=False,
-        return_dict=True,
-        cache_position=None,
+        **kwargs,
     )
     hidden_states = outputs[0]
     logits = self.lm_head(hidden_states)
@@ -317,23 +308,17 @@ def qwen2_vl_base_forward_new(
         input_ids=None,
         position_ids=position_ids,
         attention_mask=attention_mask,
-        past_key_values=None,
         inputs_embeds=inputs_embeds,
-        use_cache=False,
-        output_attentions=False,
-        output_hidden_states=False,
-        return_dict=True,
-        cache_position=None,
+        **kwargs,
     )
 
-    output = Qwen2VLModelOutputWithPast(
+    return Qwen2VLModelOutputWithPast(
         last_hidden_state=outputs.last_hidden_state,
         past_key_values=outputs.past_key_values,
         hidden_states=outputs.hidden_states,
         attentions=outputs.attentions,
         rope_deltas=None,
     )
-    return output
 
 
 def qwen2_vl_forward_new(
@@ -356,13 +341,7 @@ def qwen2_vl_forward_new(
         video_grid_thw=video_grid_thw,
         position_ids=position_ids,
         attention_mask=attention_mask,
-        past_key_values=None,
-        inputs_embeds=None,
-        use_cache=False,
-        output_attentions=False,
-        output_hidden_states=False,
-        return_dict=True,
-        cache_position=None,
+        **kwargs,
     )
     hidden_states = outputs[0]
     logits = self.lm_head(hidden_states)

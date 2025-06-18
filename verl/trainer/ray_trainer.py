@@ -17,6 +17,7 @@ This trainer supports model-agonistic model initialization with huggingface
 """
 
 import json
+import math
 import os
 import uuid
 from collections import defaultdict
@@ -233,6 +234,9 @@ class RayPPOTrainer:
 
         if config.trainer.max_steps is not None:
             self.training_steps = config.trainer.max_steps
+        elif config.data.mini_rollout_batch_size is not None:
+            num_gen_batch = math.ceil(config.data.rollout_batch_size / config.data.mini_rollout_batch_size)
+            self.training_steps = len(train_dataloader) // num_gen_batch * config.trainer.total_epochs
         else:
             self.training_steps = len(train_dataloader) * config.trainer.total_epochs
 
