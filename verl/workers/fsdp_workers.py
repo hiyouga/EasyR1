@@ -86,6 +86,9 @@ class FSDPWorker(Worker):
         if self._has_actor and self._has_critic:
             raise ValueError("Actor and critic cannot be both initialized.")
 
+        if self.config.actor.disable_kl:
+            self._has_ref = False
+
         self._use_param_offload = False
         self._use_optimizer_offload = False
         self._use_ref_param_offload = False
@@ -345,7 +348,7 @@ class FSDPWorker(Worker):
         print_gpu_memory_usage("After vllm init")
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
-    def init_model(self, use_reference_policy: bool = True):
+    def init_model(self):
         if self._has_critic:
             self._build_model_optimizer(
                 model_config=self.config.critic.model,
@@ -364,7 +367,7 @@ class FSDPWorker(Worker):
                 role="actor",
             )
 
-        if self._has_ref and use_reference_policy:
+        if self._has_ref:
             self._build_model_optimizer(
                 model_config=self.config.actor.model,
                 fsdp_config=self.config.ref.fsdp,
@@ -394,7 +397,7 @@ class FSDPWorker(Worker):
         if self._has_rollout:  # must after actor
             self._build_rollout()
 
-        if self._has_ref and use_reference_policy:
+        if self._has_ref:
             from .actor.dp_actor import DataParallelPPOActor  # lazy import
 
             self.ref_policy = DataParallelPPOActor(

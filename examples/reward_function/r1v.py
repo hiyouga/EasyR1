@@ -37,13 +37,12 @@ def accuracy_reward(response: str, ground_truth: str) -> float:
     return 0.0
 
 
-def compute_score(reward_input: Dict[str, Any]) -> Dict[str, float]:
+def compute_score(reward_input: Dict[str, Any], format_weight: float = 0.5) -> Dict[str, float]:
     if not isinstance(reward_input, dict):
         raise ValueError("Please use `reward_type=sequential` for r1v reward function.")
 
     format_score = format_reward(reward_input["response"])
     accuracy_score = accuracy_reward(reward_input["response"], reward_input["ground_truth"])
-    format_weight = reward_input.get("format_weight", 0.5)
     return {
         "overall": (1 - format_weight) * accuracy_score + format_weight * format_score,
         "format": format_score,
