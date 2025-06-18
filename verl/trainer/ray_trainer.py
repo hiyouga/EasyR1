@@ -300,7 +300,7 @@ class RayPPOTrainer:
 
         # we should create rollout at the end so that vllm can have a better estimation of kv cache memory
         self.actor_rollout_ref_wg = all_wg["actor_rollout_ref"]
-        self.actor_rollout_ref_wg.init_model()
+        self.actor_rollout_ref_wg.init_model(self.use_reference_policy)
 
     def _save_checkpoint(self) -> None:
         # path: {save_checkpoint_path}/global_step_{global_step}/{actor,critic}
