@@ -25,6 +25,8 @@ algorithm:
   kl_penalty: low_var_kl
   kl_coef: 1.0e-2
   online_filtering: false  # dapo filter groups
+  filter_low: 0.01
+  filter_high: 0.99
 
 worker:
   actor:

@@ -505,7 +505,11 @@ class RayPPOTrainer:
                     uid2scores[uid].append(score)
 
                 uid2mean = {uid: np.mean(scores) for uid, scores in uid2scores.items()}
-                kept_uids = [uid for uid, avg_score in uid2mean.items() if avg_score > 0.01 and avg_score < 0.99]
+                kept_uids = [
+                    uid
+                    for uid, avg_score in uid2mean.items()
+                    if avg_score > self.config.algorithm.filter_low and avg_score < self.config.algorithm.filter_high
+                ]
                 kept_sample_idxs = [idx for idx, uid in enumerate(uids) if uid in kept_uids]
                 new_batch = new_batch[kept_sample_idxs]
 
