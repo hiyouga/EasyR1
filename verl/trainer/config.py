@@ -92,10 +92,12 @@ class AlgorithmConfig:
     """target kl for adaptive kl controller"""
     online_filtering: bool = False
     """use online filtering"""
+    filter_key: str = "overall"
+    """reward key for filtering samples"""
     filter_low: float = 0.01
-    """filter ratio in DAPO"""
+    """filter out low reward samples if online filtering"""
     filter_high: float = 0.99
-    """filter ratio in DAPO"""
+    """filter out high reward samples if online filtering"""
 
 
 @dataclass

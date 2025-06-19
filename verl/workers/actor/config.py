@@ -47,6 +47,7 @@ class OptimConfig:
     weight_decay: float = 1e-2
     strategy: str = "adamw"
     lr_warmup_ratio: float = 0.0
+    lr_warmup_steps: Optional[int] = None
     min_lr_ratio: Optional[float] = None
     warmup_style: str = "constant"
     # below are auto keys

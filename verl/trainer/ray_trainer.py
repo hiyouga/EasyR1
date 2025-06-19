@@ -17,7 +17,6 @@ This trainer supports model-agonistic model initialization with huggingface
 """
 
 import json
-import math
 import os
 import uuid
 from collections import defaultdict
@@ -235,8 +234,8 @@ class RayPPOTrainer:
         if config.trainer.max_steps is not None:
             self.training_steps = config.trainer.max_steps
         elif config.data.mini_rollout_batch_size is not None:
-            num_gen_batch = math.ceil(config.data.rollout_batch_size / config.data.mini_rollout_batch_size)
-            self.training_steps = len(train_dataloader) // num_gen_batch * config.trainer.total_epochs
+            num_examples = len(train_dataloader) * config.data.mini_rollout_batch_size
+            self.training_steps = num_examples // config.data.rollout_batch_size * config.trainer.total_epochs
         else:
             self.training_steps = len(train_dataloader) * config.trainer.total_epochs
 
@@ -385,35 +384,35 @@ class RayPPOTrainer:
         self.actor_rollout_ref_wg.prepare_rollout_engine()
         for batch_dict in self.val_dataloader:
             test_batch = DataProto.from_single_dict(batch_dict)
-            # Store original inputs
-            input_ids = test_batch.batch["input_ids"]
-            input_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in input_ids]
-            sample_inputs.extend(input_texts)
-
             test_gen_batch = test_batch.pop(
                 batch_keys=["input_ids", "attention_mask", "position_ids"],
                 non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
             )
+            repeat_times = self.config.worker.rollout.val_override_config.get("n", 1)
             test_gen_batch.meta_info = self.config.worker.rollout.val_override_config
             test_gen_batch.meta_info["min_pixels"] = self.config.data.min_pixels
             test_gen_batch.meta_info["max_pixels"] = self.config.data.max_pixels
 
             test_gen_batch, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_ref_wg.world_size)
             test_output_gen_batch = self.actor_rollout_ref_wg.generate_sequences(test_gen_batch)
-            test_output_gen_batch = unpad_dataproto(test_output_gen_batch, pad_size=pad_size)
+            test_output_gen_batch = unpad_dataproto(test_output_gen_batch, pad_size=pad_size * repeat_times)
 
-            # Store generated outputs
-            output_ids = test_output_gen_batch.batch["responses"]
-            output_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in output_ids]
-            sample_outputs.extend(output_texts)
-            sample_labels.extend(test_batch.non_tensor_batch["ground_truth"].tolist())
+            # repeat to align with repeated responses in rollout
+            test_batch = test_batch.repeat(repeat_times=repeat_times, interleave=True)
             test_batch = test_batch.union(test_output_gen_batch)
 
             # evaluate using reward_function
             reward_tensor, reward_metrics = ray.get(self.val_reward_fn.compute_reward.remote(test_batch))
 
-            # Store scores
+            # store generations
+            input_ids = test_batch.batch["prompts"]
+            input_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in input_ids]
+            output_ids = test_batch.batch["responses"]
+            output_texts = [self.tokenizer.decode(ids, skip_special_tokens=True) for ids in output_ids]
             scores = reward_tensor.sum(-1).cpu().tolist()
+            sample_inputs.extend(input_texts)
+            sample_outputs.extend(output_texts)
+            sample_labels.extend(test_batch.non_tensor_batch["ground_truth"].tolist())
             sample_scores.extend(scores)
 
             reward_tensor_lst.append(reward_tensor)
@@ -498,10 +497,10 @@ class RayPPOTrainer:
                 for k, v in reward_metrics.items():
                     all_metrics[k].extend(v)
 
-                sample_level_scores = reward_tensor.sum(dim=-1).numpy()
+                filter_scores = reward_metrics[self.config.algorithm.filter_key]
                 uids = new_batch.non_tensor_batch["uid"]
                 uid2scores = defaultdict(list)
-                for uid, score in zip(uids, sample_level_scores):
+                for uid, score in zip(uids, filter_scores):
                     uid2scores[uid].append(score)
 
                 uid2mean = {uid: np.mean(scores) for uid, scores in uid2scores.items()}

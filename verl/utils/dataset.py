@@ -132,7 +132,9 @@ class RLHFDataset(Dataset):
                 self.format_prompt = f.read()
 
         if self.filter_overlong_prompts:
-            self.dataset = self.dataset.filter(self._filter_overlong_prompts, desc="Filtering overlong prompts")
+            self.dataset = self.dataset.filter(
+                self._filter_overlong_prompts, desc="Filtering overlong prompts", num_proc=16
+            )
 
     def _build_messages(self, example: Dict[str, Any]) -> List[Dict[str, Any]]:
         prompt_str: str = example[self.prompt_key]

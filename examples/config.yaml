@@ -10,7 +10,7 @@ data:
   rollout_batch_size: 512  # equivalent to verl's data.train_batch_size
   mini_rollout_batch_size: null  # equivalent to verl's data.gen_batch_size
   val_batch_size: 1024
-  format_prompt: ./examples/format_prompt/math_format.jinja
+  format_prompt: ./examples/format_prompt/math.jinja
   override_chat_template: null
   shuffle: true
   seed: 1
@@ -25,6 +25,7 @@ algorithm:
   kl_penalty: low_var_kl
   kl_coef: 1.0e-2
   online_filtering: false  # dapo filter groups
+  filter_key: overall
   filter_low: 0.01
   filter_high: 0.99
 

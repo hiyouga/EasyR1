@@ -10,7 +10,7 @@ python3 -m verl.trainer.main \
     config=examples/config.yaml \
     data.train_files=BUAADreamer/clevr_count_70k@train \
     data.val_files=BUAADreamer/clevr_count_70k@test \
-    data.format_prompt=./examples/format_prompt/r1v_format.jinja \
+    data.format_prompt=./examples/format_prompt/r1v.jinja \
     worker.actor.model.model_path=${MODEL_PATH} \
     worker.rollout.tensor_parallel_size=1 \
     worker.reward.reward_type=sequential \

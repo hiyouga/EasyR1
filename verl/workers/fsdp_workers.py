@@ -308,7 +308,11 @@ class FSDPWorker(Worker):
             else:
                 raise NotImplementedError(f"Optimizer {optim_config.strategy} not supported.")
 
-            num_warmup_steps = int(optim_config.lr_warmup_ratio * optim_config.training_steps)
+            if optim_config.lr_warmup_steps is not None:
+                num_warmup_steps = optim_config.lr_warmup_steps
+            else:
+                num_warmup_steps = int(optim_config.lr_warmup_ratio * optim_config.training_steps)
+
             self.lr_scheduler = get_constant_schedule_with_warmup(
                 optimizer=self.optimizer, num_warmup_steps=num_warmup_steps
             )
