@@ -15,6 +15,8 @@ python3 -m verl.trainer.main \
     data.max_response_length=20480 \
     data.rollout_batch_size=512 \
     data.mini_rollout_batch_size=1536 \
+    worker.actor.micro_batch_size_per_device_for_update=1 \
+    worker.actor.micro_batch_size_per_device_for_experience=8 \
     worker.actor.model.model_path=${MODEL_PATH} \
     worker.actor.fsdp.torch_dtype=bf16 \
     worker.actor.optim.strategy=adamw_bf16 \
