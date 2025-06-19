@@ -455,15 +455,19 @@ class FSDPWorker(Worker):
             max_pixels = data.meta_info["max_pixels"]
             batch_multi_modal_inputs = []
             for multi_modal_data in data.non_tensor_batch["multi_modal_data"]:
-                images = []
-                for image in multi_modal_data["images"]:
-                    images.append(process_image(image, min_pixels=min_pixels, max_pixels=max_pixels))
-
-                if len(images) != 0:
+                if "images" in multi_modal_data:
                     # it's necessary to add `dict` to properly convert batch features to dict
                     # otherwise the batch features will be converted to dict keys
                     # see https://github.com/hiyouga/EasyR1/pull/339
+                    images = []
+                    for image in multi_modal_data["images"]:
+                        images.append(process_image(image, min_pixels=min_pixels, max_pixels=max_pixels))
                     multi_modal_inputs = dict(self.processor.image_processor(images=images, return_tensors="pt"))
+                    multi_modal_inputs = {k: v.to(torch.cuda.current_device()) for k, v in multi_modal_inputs.items()}
+                    batch_multi_modal_inputs.append(multi_modal_inputs)
+                elif "video" in multi_modal_data:
+                    video = multi_modal_data["video"]
+                    multi_modal_inputs = dict(self.processor.image_processor(images=None, videos=video, return_tensors="pt"))
                     multi_modal_inputs = {k: v.to(torch.cuda.current_device()) for k, v in multi_modal_inputs.items()}
                     batch_multi_modal_inputs.append(multi_modal_inputs)
                 else:
