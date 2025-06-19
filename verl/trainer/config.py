@@ -38,6 +38,7 @@ class DataConfig:
     prompt_key: str = "prompt"
     answer_key: str = "answer"
     image_key: str = "images"
+    video_key: str = "videos"
     image_dir: Optional[str] = None
     max_prompt_length: int = 512
     max_response_length: int = 512

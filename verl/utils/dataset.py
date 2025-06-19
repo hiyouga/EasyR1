@@ -30,6 +30,7 @@ from transformers import PreTrainedTokenizer, ProcessorMixin
 from ..models.transformers.qwen2_vl import get_rope_index
 from . import torch_functional as VF
 
+from qwen_vl_utils.vision_process import fetch_video
 
 def collate_fn(features: List[Dict[str, Any]]) -> Dict[str, Any]:
     tensors = defaultdict(list)
@@ -91,6 +92,7 @@ class RLHFDataset(Dataset):
         answer_key: str = "answer",
         image_key: str = "images",
         image_dir: Optional[str] = None,
+        video_key: str = "videos",
         max_prompt_length: int = 1024,
         truncation: str = "error",
         format_prompt: Optional[str] = None,
@@ -104,6 +106,7 @@ class RLHFDataset(Dataset):
         self.answer_key = answer_key
         self.image_key = image_key
         self.image_dir = image_dir
+        self.video_key = video_key
         self.max_prompt_length = max_prompt_length
         self.truncation = truncation
         self.min_pixels = min_pixels
@@ -153,6 +156,16 @@ class RLHFDataset(Dataset):
                     content_list.append({"type": "text", "text": content})
 
             return [{"role": "user", "content": content_list}]
+        elif self.video_key in example:
+            content_list = []
+            for i, content in enumerate(prompt_str.split("<video>")):
+                if i != 0:
+                    content_list.append({"type": "video"})
+
+                if content:
+                    content_list.append({"type": "text", "text": content})
+
+            return [{"role": "user", "content": content_list}]
         else:
             return [{"role": "user", "content": prompt_str}]
 
@@ -193,6 +206,18 @@ class RLHFDataset(Dataset):
             input_ids = model_inputs.pop("input_ids")[0]
             attention_mask = model_inputs.pop("attention_mask")[0]
             example["multi_modal_data"] = {"images": images}
+        elif self.video_key in example:
+            prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+            video = example.pop(self.video_key)
+            vision_info = {"video": video, "min_pixels": self.min_pixels, "max_pixels": self.max_pixels, "fps": 25}
+            video_input, video_sample_fps = fetch_video(vision_info, return_video_sample_fps=True)
+
+            model_inputs = self.processor(
+                videos=video_input, text=[prompt], add_special_tokens=False, return_tensors="pt"
+            )
+            input_ids = model_inputs.pop("input_ids")[0]
+            attention_mask = model_inputs.pop("attention_mask")[0]
+            example["multi_modal_data"] = {"video": video_input}
         else:
             prompt = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
             model_inputs = self.tokenizer([prompt], add_special_tokens=False, return_tensors="pt")
@@ -204,7 +229,8 @@ class RLHFDataset(Dataset):
             position_ids = get_rope_index(
                 self.processor,
                 input_ids=input_ids,
-                image_grid_thw=model_inputs.get("image_grid_thw"),
+                image_grid_thw=model_inputs.get("image_grid_thw", None),
+                video_grid_thw=model_inputs.get("video_grid_thw", None),
                 attention_mask=attention_mask,
             )  # (3, seq_length)
         else:

@@ -32,6 +32,7 @@ def create_dataloader(config: DataConfig, tokenizer: PreTrainedTokenizer, proces
         answer_key=config.answer_key,
         image_key=config.image_key,
         image_dir=config.image_dir,
+        video_key=config.video_key,
         max_prompt_length=config.max_prompt_length,
         truncation="right",
         format_prompt=config.format_prompt,
