@@ -96,7 +96,7 @@ class TensorBoardLogger(Logger):
     def __init__(self, config: Dict[str, Any]) -> None:
         tensorboard_dir = os.getenv("TENSORBOARD_DIR", "tensorboard_log")
         tensorboard_dir = os.path.join(
-            tensorboard_dir, config["trianer"]["project_name"], config["trainer"]["experiment_name"]
+            tensorboard_dir, config["trainer"]["project_name"], config["trainer"]["experiment_name"]
         )
         os.makedirs(tensorboard_dir, exist_ok=True)
         print(f"Saving tensorboard log to {tensorboard_dir}.")
