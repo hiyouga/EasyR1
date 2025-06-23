@@ -16,7 +16,7 @@ import math
 import os
 from collections import defaultdict
 from io import BytesIO
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -24,13 +24,13 @@ from datasets import load_dataset
 from jinja2 import Template
 from PIL import Image
 from PIL.Image import Image as ImageObject
+from qwen_vl_utils.vision_process import fetch_video
 from torch.utils.data import Dataset
 from transformers import PreTrainedTokenizer, ProcessorMixin
 
 from ..models.transformers.qwen2_vl import get_rope_index
 from . import torch_functional as VF
 
-from qwen_vl_utils.vision_process import fetch_video
 
 def collate_fn(features: List[Dict[str, Any]]) -> Dict[str, Any]:
     tensors = defaultdict(list)
@@ -78,6 +78,13 @@ def process_image(
     return image
 
 
+def process_video(
+    video: str, min_pixels: Optional[int], max_pixels: Optional[int], video_fps: float, return_fps: bool = False
+) -> Union[List[ImageObject], Tuple[List[ImageObject], List[float]]]:
+    vision_info = {"video": video, "min_pixels": min_pixels, "max_pixels": max_pixels, "fps": video_fps}
+    return fetch_video(vision_info, return_video_sample_fps=return_fps)
+
+
 class RLHFDataset(Dataset):
     """
     We assume the dataset contains a column that contains prompts and other information
@@ -91,8 +98,9 @@ class RLHFDataset(Dataset):
         prompt_key: str = "prompt",
         answer_key: str = "answer",
         image_key: str = "images",
-        image_dir: Optional[str] = None,
         video_key: str = "videos",
+        image_dir: Optional[str] = None,
+        video_fps: float = 2.0,
         max_prompt_length: int = 1024,
         truncation: str = "error",
         format_prompt: Optional[str] = None,
@@ -105,8 +113,9 @@ class RLHFDataset(Dataset):
         self.prompt_key = prompt_key
         self.answer_key = answer_key
         self.image_key = image_key
-        self.image_dir = image_dir
         self.video_key = video_key
+        self.image_dir = image_dir
+        self.video_fps = video_fps
         self.max_prompt_length = max_prompt_length
         self.truncation = truncation
         self.min_pixels = min_pixels
@@ -173,14 +182,29 @@ class RLHFDataset(Dataset):
         messages = self._build_messages(example)
         if self.image_key in example:
             prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
-            images = example[self.image_key] or []
+            images = example[self.image_key]
             if self.image_dir is not None and len(images) != 0 and isinstance(images[0], str):  # image paths
                 images = [os.path.join(self.image_dir, image) for image in images]
 
-            resized_images = [
-                process_image(image, min_pixels=self.min_pixels, max_pixels=self.max_pixels) for image in images
-            ] or None
-            model_inputs = self.processor(resized_images, [prompt], add_special_tokens=False, return_tensors="pt")
+            processed_images = [] if len(images) != 0 else None  # text-only data
+            for image in images:
+                processed_images.append(process_image(image, self.min_pixels, self.max_pixels))
+
+            model_inputs = self.processor(processed_images, [prompt], add_special_tokens=False, return_tensors="pt")
+            return model_inputs["input_ids"].size(-1) <= self.max_prompt_length
+        elif self.video_key in example:
+            prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+            videos = example[self.video_key]
+            if self.image_dir is not None and len(videos) != 0 and isinstance(videos[0], str):  # video paths
+                videos = [os.path.join(self.image_dir, video) for video in videos]
+
+            processed_videos = [] if len(videos) != 0 else None  # text-only data
+            for video in videos:
+                processed_videos.append(process_video(video, self.min_pixels, self.max_pixels, self.video_fps))
+
+            model_inputs = self.processor(
+                videos=processed_videos, text=[prompt], add_special_tokens=False, return_tensors="pt"
+            )
             return model_inputs["input_ids"].size(-1) <= self.max_prompt_length
         else:
             input_ids = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True)
@@ -199,25 +223,38 @@ class RLHFDataset(Dataset):
             if self.image_dir is not None and len(images) != 0 and isinstance(images[0], str):  # image paths
                 images = [os.path.join(self.image_dir, image) for image in images]
 
-            resized_images = [
-                process_image(image, min_pixels=self.min_pixels, max_pixels=self.max_pixels) for image in images
-            ] or None
-            model_inputs = self.processor(resized_images, [prompt], add_special_tokens=False, return_tensors="pt")
+            processed_images = [] if len(images) != 0 else None  # text-only data
+            for image in images:
+                processed_images.append(process_image(image, self.min_pixels, self.max_pixels))
+
+            model_inputs = self.processor(processed_images, [prompt], add_special_tokens=False, return_tensors="pt")
             input_ids = model_inputs.pop("input_ids")[0]
             attention_mask = model_inputs.pop("attention_mask")[0]
             example["multi_modal_data"] = {"images": images}
         elif self.video_key in example:
             prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
-            video = example.pop(self.video_key)
-            vision_info = {"video": video, "min_pixels": self.min_pixels, "max_pixels": self.max_pixels, "fps": 25}
-            video_input, video_sample_fps = fetch_video(vision_info, return_video_sample_fps=True)
+            videos = example.pop(self.video_key)
+            if self.image_dir is not None and len(videos) != 0 and isinstance(videos[0], str):  # video paths
+                videos = [os.path.join(self.image_dir, video) for video in videos]
+
+            processed_videos = [] if len(videos) != 0 else None  # text-only data
+            video_fps_list = []
+            for video in videos:
+                processed_video, video_fps = process_video(
+                    video, self.min_pixels, self.max_pixels, self.video_fps, return_fps=True
+                )
+                processed_videos.append(processed_video)
+                video_fps_list.append(video_fps)
 
             model_inputs = self.processor(
-                videos=video_input, text=[prompt], add_special_tokens=False, return_tensors="pt"
+                videos=processed_videos, text=[prompt], add_special_tokens=False, return_tensors="pt"
             )
+            if "second_per_grid_ts" in self.processor.model_input_names:
+                model_inputs["second_per_grid_ts"] = [2.0 / video_sample_fps for video_sample_fps in video_fps_list]
+
             input_ids = model_inputs.pop("input_ids")[0]
             attention_mask = model_inputs.pop("attention_mask")[0]
-            example["multi_modal_data"] = {"video": video_input}
+            example["multi_modal_data"] = {"videos": videos}
         else:
             prompt = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
             model_inputs = self.tokenizer([prompt], add_special_tokens=False, return_tensors="pt")
@@ -231,6 +268,7 @@ class RLHFDataset(Dataset):
                 input_ids=input_ids,
                 image_grid_thw=model_inputs.get("image_grid_thw", None),
                 video_grid_thw=model_inputs.get("video_grid_thw", None),
+                second_per_grid_ts=model_inputs.get("second_per_grid_ts", None),
                 attention_mask=attention_mask,
             )  # (3, seq_length)
         else:

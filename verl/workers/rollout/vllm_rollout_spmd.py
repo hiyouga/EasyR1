@@ -25,7 +25,7 @@ from vllm import LLM, RequestOutput, SamplingParams
 
 from ...protocol import DataProto
 from ...utils import torch_functional as VF
-from ...utils.dataset import process_image
+from ...utils.dataset import process_image, process_video
 from ...utils.torch_dtypes import PrecisionType
 from .base import BaseRollout
 from .config import RolloutConfig
@@ -49,19 +49,24 @@ def _get_logit_bias(processor: Optional[ProcessorMixin]) -> Optional[Dict[int, f
         return None
 
 
-def _process_multi_modal_data(multi_modal_data: Dict[str, Any], min_pixels: int, max_pixels: int) -> Dict[str, Any]:
+def _process_multi_modal_data(
+    multi_modal_data: Dict[str, Any], min_pixels: int, max_pixels: int, video_fps: float
+) -> Dict[str, Any]:
     # may convert image path to image object
-    # TODO: add video
-    
+    images, videos = [], []
     if "images" in multi_modal_data:
-        images = []
         for image in multi_modal_data["images"]:
-            images.append(process_image(image, min_pixels=min_pixels, max_pixels=max_pixels))
-            return {"image": images}
-    elif "video" in multi_modal_data:
-        # for image in multi_modal_data["video"]:
-        #     images.append(process_image(image, min_pixels=min_pixels, max_pixels=max_pixels))
-        return {"video": multi_modal_data["video"]}
+            images.append(process_image(image, min_pixels, max_pixels))
+
+    if "videos" in multi_modal_data:
+        for video in multi_modal_data["videos"]:
+            videos.append(process_video(video, min_pixels, max_pixels, video_fps))
+
+    if len(images) != 0:
+        return {"image": images}
+
+    if len(videos) != 0:
+        return {"video": videos}
 
     return None
 
@@ -85,6 +90,7 @@ class vLLMRollout(BaseRollout):
         self.rank = int(os.getenv("RANK", "0"))
         self.config = config
         self.pad_token_id = tokenizer.pad_token_id
+        self.use_tqdm = (self.rank == 0) and (not config.disable_tqdm)
         if config.tensor_parallel_size > torch.distributed.get_world_size():
             raise ValueError("Tensor parallelism size should be less than world size.")
 
@@ -94,9 +100,8 @@ class vLLMRollout(BaseRollout):
         engine_kwargs = {}
         if processor is not None:  # only VLMs have processor
             engine_kwargs["disable_mm_preprocessor_cache"] = True
-
-        if processor is not None and config.limit_images:
-            engine_kwargs["limit_mm_per_prompt"] = {"image": config.limit_images}
+            if config.limit_images:
+                engine_kwargs["limit_mm_per_prompt"] = {"image": config.limit_images}
 
         self.inference_engine = LLM(
             model=model_path,
@@ -166,13 +171,17 @@ class vLLMRollout(BaseRollout):
             raise RuntimeError("vllm sharding manager is not work properly.")
 
         if batch_multi_modal_data is not None:
-            min_pixels, max_pixels = prompts.meta_info["min_pixels"], prompts.meta_info["max_pixels"]
             vllm_inputs = []
             for raw_prompt_ids, multi_modal_data in zip(batch_raw_prompt_ids, batch_multi_modal_data):
                 vllm_inputs.append(
                     {
                         "prompt_token_ids": list(raw_prompt_ids),
-                        "multi_modal_data": _process_multi_modal_data(multi_modal_data, min_pixels, max_pixels),
+                        "multi_modal_data": _process_multi_modal_data(
+                            multi_modal_data,
+                            prompts.meta_info["min_pixels"],
+                            prompts.meta_info["max_pixels"],
+                            prompts.meta_info["video_fps"],
+                        ),
                     }
                 )
         else:
@@ -181,7 +190,7 @@ class vLLMRollout(BaseRollout):
         # users can customize different sampling_params at different run
         with self.update_sampling_params(**prompts.meta_info):
             completions: List[RequestOutput] = self.inference_engine.generate(
-                prompts=vllm_inputs, sampling_params=self.sampling_params, use_tqdm=False
+                prompts=vllm_inputs, sampling_params=self.sampling_params, use_tqdm=self.use_tqdm
             )
             response_ids = [output.token_ids for completion in completions for output in completion.outputs]
             response_ids = VF.pad_2d_list_to_length(

@@ -392,6 +392,7 @@ class RayPPOTrainer:
             test_gen_batch.meta_info = self.config.worker.rollout.val_override_config
             test_gen_batch.meta_info["min_pixels"] = self.config.data.min_pixels
             test_gen_batch.meta_info["max_pixels"] = self.config.data.max_pixels
+            test_gen_batch.meta_info["video_fps"] = self.config.data.video_fps
 
             test_gen_batch, pad_size = pad_dataproto_to_divisor(test_gen_batch, self.actor_rollout_ref_wg.world_size)
             test_output_gen_batch = self.actor_rollout_ref_wg.generate_sequences(test_gen_batch)
@@ -456,14 +457,18 @@ class RayPPOTrainer:
                 self.data_iterator = iter(self.train_dataloader)
                 batch_dict = next(self.data_iterator)
 
-            meta_info = {"min_pixels": self.config.data.min_pixels, "max_pixels": self.config.data.max_pixels}
+            meta_info = {
+                "min_pixels": self.config.data.min_pixels,
+                "max_pixels": self.config.data.max_pixels,
+                "video_fps": self.config.data.video_fps,
+            }
             new_batch: DataProto = DataProto.from_single_dict(batch_dict, meta_info=meta_info)
 
             # pop those keys for generation
             gen_batch = new_batch.pop(
                 batch_keys=["input_ids", "attention_mask", "position_ids"],
                 non_tensor_batch_keys=["raw_prompt_ids", "multi_modal_data"],
-                meta_info_keys=["min_pixels", "max_pixels"],
+                meta_info_keys=["min_pixels", "max_pixels", "video_fps"],
             )
 
             # generate a batch

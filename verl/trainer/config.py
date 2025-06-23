@@ -40,6 +40,7 @@ class DataConfig:
     image_key: str = "images"
     video_key: str = "videos"
     image_dir: Optional[str] = None
+    video_fps: float = 2.0
     max_prompt_length: int = 512
     max_response_length: int = 512
     rollout_batch_size: int = 512
