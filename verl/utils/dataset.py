@@ -107,6 +107,7 @@ class RLHFDataset(Dataset):
         min_pixels: Optional[int] = None,
         max_pixels: Optional[int] = None,
         filter_overlong_prompts: bool = True,
+        filter_overlong_prompts_workers: int = 16,
     ):
         self.tokenizer = tokenizer
         self.processor = processor
@@ -120,7 +121,6 @@ class RLHFDataset(Dataset):
         self.truncation = truncation
         self.min_pixels = min_pixels
         self.max_pixels = max_pixels
-        self.filter_overlong_prompts = filter_overlong_prompts
 
         if "@" in data_path:
             data_path, data_split = data_path.split("@")
@@ -143,9 +143,11 @@ class RLHFDataset(Dataset):
             with open(format_prompt, encoding="utf-8") as f:
                 self.format_prompt = f.read()
 
-        if self.filter_overlong_prompts:
+        if filter_overlong_prompts:
             self.dataset = self.dataset.filter(
-                self._filter_overlong_prompts, desc="Filtering overlong prompts", num_proc=16
+                self._filter_overlong_prompts,
+                desc="Filtering overlong prompts",
+                num_proc=filter_overlong_prompts_workers,
             )
 
     def _build_messages(self, example: Dict[str, Any]) -> List[Dict[str, Any]]:
