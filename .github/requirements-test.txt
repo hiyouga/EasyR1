@@ -2,6 +2,7 @@ codetiming
 datasets
 pillow
 pytest
+qwen-vl-utils
 ray[default]
 ruff
 tensordict
