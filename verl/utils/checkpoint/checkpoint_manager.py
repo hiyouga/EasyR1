@@ -141,10 +141,7 @@ def remove_obsolete_ckpt(
     """
     Remove the obsolete checkpoints that exceed the save_limit.
     """
-    if save_limit <= 0:
-        return
-
-    if not os.path.exists(path):
+    if save_limit <= 0 or not os.path.exists(path):
         return
 
     pattern = re.escape(directory_format).replace(r"\{\}", r"(\d+)")
@@ -156,11 +153,15 @@ def remove_obsolete_ckpt(
                 ckpt_global_steps.append(step)
 
     ckpt_global_steps.sort(reverse=True)
-    if best_global_step in ckpt_global_steps:
+    num_ckpt_to_keep = save_limit - 1  # exclude the current ckpt
+    if best_global_step in ckpt_global_steps:  # do not remove the best ckpt
         ckpt_global_steps.remove(best_global_step)
-        save_limit = max(save_limit - 1, 0)
+        num_ckpt_to_keep = max(num_ckpt_to_keep - 1, 0)
 
-    for step in ckpt_global_steps[save_limit - 1 :]:
+    for step in ckpt_global_steps[num_ckpt_to_keep:]:
         folder_path = os.path.join(path, directory_format.format(step))
-        shutil.rmtree(folder_path, ignore_errors=True)
-        print(f"Removed obsolete checkpoint: {folder_path}")
+        try:
+            shutil.rmtree(folder_path, ignore_errors=True)
+            print(f"Removed obsolete checkpoint: {folder_path}")
+        except Exception as e:
+            print(f"Failed to remove {folder_path}: {e}")
