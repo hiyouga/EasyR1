@@ -144,6 +144,7 @@ def remove_obsolete_ckpt(
     if save_limit <= 0 or not os.path.exists(path):
         return
 
+    num_ckpt_to_keep = save_limit - 1  # exclude the current ckpt
     pattern = re.escape(directory_format).replace(r"\{\}", r"(\d+)")
     ckpt_global_steps = []
     for folder in os.listdir(path):
@@ -153,7 +154,6 @@ def remove_obsolete_ckpt(
                 ckpt_global_steps.append(step)
 
     ckpt_global_steps.sort(reverse=True)
-    num_ckpt_to_keep = save_limit - 1  # exclude the current ckpt
     if best_global_step in ckpt_global_steps:  # do not remove the best ckpt
         ckpt_global_steps.remove(best_global_step)
         num_ckpt_to_keep = max(num_ckpt_to_keep - 1, 0)
