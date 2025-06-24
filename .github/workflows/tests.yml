@@ -6,15 +6,15 @@ on:
     branches:
       - "main"
     paths:
-      - "**.py"
-      - "requirements.txt"
+      - "**/*.py"
+      - "**/requirements*.txt"
       - ".github/workflows/*.yml"
   pull_request:
     branches:
       - "main"
     paths:
-      - "**.py"
-      - "requirements.txt"
+      - "**/*.py"
+      - "**/requirements*.txt"
       - ".github/workflows/*.yml"
 
 jobs:
