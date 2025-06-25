@@ -474,7 +474,7 @@ class FSDPWorker(Worker):
                     batch_multi_modal_inputs.append(multi_modal_inputs)
                 elif len(videos) != 0:
                     multi_modal_inputs = dict(
-                        self.processor.image_processor(images=None, videos=video, return_tensors="pt")
+                        self.processor.image_processor(images=None, videos=videos, return_tensors="pt")
                     )
                     multi_modal_inputs = {k: v.to(torch.cuda.current_device()) for k, v in multi_modal_inputs.items()}
                     batch_multi_modal_inputs.append(multi_modal_inputs)
