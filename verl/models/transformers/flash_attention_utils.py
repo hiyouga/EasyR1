@@ -171,7 +171,7 @@ def flash_attention_forward(
         value,
         attention_mask,
         query_length=q_len,
-        is_causal=True,
+        is_causal=module.is_causal,
         dropout=dropout,
         softmax_scale=scaling,
         sliding_window=sliding_window,
