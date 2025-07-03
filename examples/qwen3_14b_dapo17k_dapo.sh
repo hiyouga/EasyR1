@@ -10,7 +10,7 @@ python3 -m verl.trainer.main \
     config=examples/config.yaml \
     data.train_files=Saigyouji-Yuyuko1000/dapo17k@train \
     data.val_files=Saigyouji-Yuyuko1000/dapo17k@test \
-    data.format_prompt=./examples/format_prompt/math.jinja \
+    data.format_prompt=./examples/format_prompt/dapo.jinja \
     data.max_prompt_length=2048 \
     data.max_response_length=20480 \
     data.rollout_batch_size=512 \
