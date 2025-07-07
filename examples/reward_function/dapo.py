@@ -116,30 +116,13 @@ def normalize_final_answer(final_answer: str) -> str:
     return final_answer.strip()
 
 
-def is_correct_minerva(
-    solution_str: str, gt: str, answer_pattern: str = r"(?i)Answer\s*:\s*([^\n]+)"
-) -> tuple[bool, str]:
-    """Check if the solution is correct according to Minerva criteria.
-
-    Args:
-        solution_str: The solution string to check
-        gt: The ground truth answer
-        answer_pattern: Regex pattern to extract the answer
-
-    Returns:
-        is_correct: Whether the answer is correct
-    """
-    # Extract answer from solution
-    match = re.findall(answer_pattern, solution_str)
-    extracted_answer = match[-1] if match else "[INVALID]"
-    pred = normalize_final_answer(extracted_answer)
-    gt = normalize_final_answer(gt)
-
-    return pred == gt
-
-
 def accuracy_reward(response: str, ground_truth: str) -> float:
-    return 1.0 if is_correct_minerva(response, ground_truth) else -1.0
+    match = re.findall(r"(?i)Answer\s*:\s*([^\n]+)", response)
+    answer = match[-1] if match else "[INVALID]"
+    if normalize_final_answer(answer) == normalize_final_answer(ground_truth):
+        return 1.0
+    else:
+        return -1.0
 
 
 def soft_overlong_punishment(response_length: int, max_response_length: int, overlong_buffer_length: int):
@@ -163,7 +146,8 @@ def compute_score(
 
     scores = []
     for reward_input in reward_inputs:
-        accuracy_score = accuracy_reward(reward_input["response"], reward_input["ground_truth"])
+        response = reward_input["response"][-300:]  # The longest answer in MATH-500 has 159 characters
+        accuracy_score = accuracy_reward(response, reward_input["ground_truth"])
         overlong_score = soft_overlong_punishment(
             reward_input["response_length"], max_response_length, overlong_buffer_length
         )
