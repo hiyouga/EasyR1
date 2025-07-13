@@ -170,6 +170,9 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
+# pytorch
+*.pt
+
 # outputs
 outputs/
 checkpoints/

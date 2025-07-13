@@ -35,24 +35,19 @@ def test_image_dataset():
     )
     token_ids = [151644, 8948, 198, 2610, 525, 264, 10950, 17847, 13, 151645, 198, 151644, 872, 198, 151652, 151655]
     assert set(dataset[0].keys()) == {
-        "problem",
-        "ground_truth",
         "input_ids",
         "attention_mask",
         "position_ids",
         "raw_prompt_ids",
+        "ground_truth",
         "multi_modal_data",
     }
-    assert dataset[0]["problem"] == (
-        "<image>Chords $\\overline{A C}$ and $\\overline{D F}$ are equidistant from the center. "
-        "If the radius of $\\odot G$ is 26 find $A C$"
-    )
-    assert dataset[0]["ground_truth"] == "48"
     assert torch.all(dataset[0]["input_ids"] == torch.tensor(token_ids))
     assert torch.all(dataset[0]["attention_mask"] == torch.ones(16))
     assert torch.all(dataset[0]["position_ids"] == torch.arange(16).unsqueeze(0).expand(3, -1))
     assert list(dataset[0]["position_ids"].size()) == [3, 16]  # avoid fake positive caused by broadcasting
     assert dataset[0]["raw_prompt_ids"] == token_ids
+    assert dataset[0]["ground_truth"] == "48"
     assert isinstance(dataset[0]["multi_modal_data"]["images"][0], Image)
 
 

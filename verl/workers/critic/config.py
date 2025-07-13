@@ -39,6 +39,8 @@ class CriticConfig:
     """number of ppo epochs for each rollout batch"""
     padding_free: bool = False
     """use padding-free training"""
+    dynamic_batching: bool = True
+    """enable dynamic batching"""
     ulysses_size: int = 1
     """ulysses sequence parallel size"""
     model: ModelConfig = field(default_factory=ModelConfig)

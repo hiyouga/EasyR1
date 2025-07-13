@@ -26,8 +26,8 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 from ...protocol import DataProto
 from ...trainer.core_algos import compute_value_loss
-from ...utils import torch_functional as VF
 from ...utils.py_functional import append_to_dict
+from ...utils.seqlen_balancing import prepare_dynamic_batch, restore_dynamic_batch
 from ...utils.ulysses import gather_outputs_and_unpad, ulysses_pad_and_slice_inputs
 from .base import BasePPOCritic
 from .config import CriticConfig
@@ -149,9 +149,13 @@ class DataParallelPPOCritic(BasePPOCritic):
         select_keys = ["responses", "input_ids", "attention_mask", "position_ids"]
         non_tensor_select_keys = ["multi_modal_inputs"]
 
-        micro_batches = data.select(select_keys, non_tensor_select_keys).split(
-            self.config.micro_batch_size_per_device_for_experience
-        )
+        data = data.select(select_keys, non_tensor_select_keys)
+        if self.config.dynamic_batching:
+            max_token_len = self.config.micro_batch_size_per_device_for_experience * data.batch["input_ids"].size(-1)
+            micro_batches, batch_idx_list = prepare_dynamic_batch(data, max_token_len=max_token_len)
+        else:
+            micro_batches = data.split(self.config.micro_batch_size_per_device_for_experience)
+
         values_lst = []
         if self.rank == 0:
             micro_batches = tqdm(micro_batches, desc="Compute values", position=1)
@@ -162,10 +166,12 @@ class DataParallelPPOCritic(BasePPOCritic):
             values_lst.append(values)
 
         values = torch.concat(values_lst, dim=0)
-        responses = data.batch["responses"]
-        attention_mask = data.batch["attention_mask"]
-        response_length = responses.size(1)
-        values = values * attention_mask[:, -response_length:]
+
+        if self.config.dynamic_batching:
+            values = restore_dynamic_batch(values, batch_idx_list)
+
+        response_length = data.batch["responses"].size(1)
+        values = values * data.batch["attention_mask"][:, -response_length:]  # only action tokens have values
         return values
 
     def update_critic(self, data: DataProto) -> Dict[str, Any]:
@@ -184,24 +190,29 @@ class DataParallelPPOCritic(BasePPOCritic):
                 mini_batches = tqdm(mini_batches, desc="Train mini-batches", position=1)
 
             for mini_batch in mini_batches:
-                gradient_accumulation = (
-                    self.config.global_batch_size_per_device // self.config.micro_batch_size_per_device_for_update
-                )
-                micro_batches = mini_batch.split(self.config.micro_batch_size_per_device_for_update)
+                response_length = mini_batch.batch["responses"].size(-1)
+                response_mask = mini_batch.batch["attention_mask"][:, -response_length:]
+                total_response_tokens = torch.sum(response_mask)
+
+                if self.config.dynamic_batching:
+                    max_input_len = mini_batch.batch["input_ids"].size(-1)
+                    max_token_len = self.config.micro_batch_size_per_device_for_update * max_input_len
+                    micro_batches, _ = prepare_dynamic_batch(mini_batch, max_token_len=max_token_len)
+                else:
+                    micro_batches = mini_batch.split(self.config.micro_batch_size_per_device_for_update)
+
                 if self.rank == 0:
                     micro_batches = tqdm(micro_batches, desc="Update critic", position=2)
 
                 for micro_batch in micro_batches:
                     model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
-                    responses = model_inputs["responses"]
-                    response_length = responses.size(1)
-                    attention_mask = model_inputs["attention_mask"]
-                    response_mask = attention_mask[:, -response_length:]
+                    response_length = model_inputs["responses"].size(-1)
+                    response_mask = model_inputs["attention_mask"][:, -response_length:]
                     values = model_inputs["values"]
                     returns = model_inputs["returns"]
 
                     vpreds = self._forward_micro_batch(model_inputs)
-                    vf_loss, vf_clipfrac = compute_value_loss(
+                    vf_loss, vf_metrics = compute_value_loss(
                         vpreds=vpreds,
                         returns=returns,
                         values=values,
@@ -209,13 +220,13 @@ class DataParallelPPOCritic(BasePPOCritic):
                         cliprange_value=self.config.cliprange_value,
                         loss_avg_mode=self.config.loss_avg_mode,
                     )
-                    loss = vf_loss / gradient_accumulation
+                    loss = vf_loss * torch.sum(response_mask) / total_response_tokens
                     loss.backward()
 
                     batch_metrics = {
                         "critic/vf_loss": vf_loss.detach().item(),
-                        "critic/vf_clipfrac": vf_clipfrac.detach().item(),
-                        "critic/vpred_mean": VF.masked_mean(vpreds, response_mask).detach().item(),
+                        "critic/vf_clipfrac": vf_metrics["vf_clipfrac"],
+                        "critic/vpred_mean": vf_metrics["vpred_mean"],
                     }
                     append_to_dict(metrics, batch_metrics)
 

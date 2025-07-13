@@ -14,11 +14,14 @@
 
 import copy
 import heapq
+from itertools import chain
 from typing import List, Tuple
 
 import torch
 from tensordict import TensorDict
 from torch import distributed as dist
+
+from ..protocol import DataProto
 
 
 class Set:
@@ -148,8 +151,9 @@ def greedy_partition(seqlen_list: List[int], k_partitions: int, equal_size: bool
 
 
 def get_seqlen_balanced_partitions(seqlen_list: List[int], k_partitions: int, equal_size: bool):
-    """get order of seq lengths to make partitions balanced, this is
-        used in balacing sum of seqlength across dp ranks and microbatches
+    """Get order of seq lengths to make partitions balanced, this is
+    used in balacing sum of seqlength across dp ranks and microbatches.
+
     Parameters:
         seqlen_list (List[int]):
             seq lengths of each items
@@ -159,6 +163,7 @@ def get_seqlen_balanced_partitions(seqlen_list: List[int], k_partitions: int, eq
             if True, number of items in each partitions must be equal.
             if False, only consider balancing the sum, each partition can have
             variable number of items
+
     Returns:
         partitions (List[List[int]]):
             return k_partitions list containing the index of items.
@@ -228,29 +233,22 @@ def rearrange_micro_batches(batch: TensorDict, max_token_len, dp_group=None):
     assert max_token_len >= max_seq_len, (
         f"max_token_len must be greater than the sequence length. Got {max_token_len=} and {max_seq_len=}"
     )
-
-    seq_len_effective: torch.Tensor = batch["attention_mask"].sum(dim=1)
-    total_seqlen = seq_len_effective.sum().item()
+    effective_seqlen = torch.sum(batch["attention_mask"], dim=-1)
+    total_seqlen = effective_seqlen.sum().item()
     num_micro_batches = ceildiv(total_seqlen, max_token_len)
     if dist.is_initialized():
         num_micro_batches = torch.tensor([num_micro_batches], device="cuda")
         dist.all_reduce(num_micro_batches, op=dist.ReduceOp.MAX, group=dp_group)
         num_micro_batches = num_micro_batches.cpu().item()
 
-    seq_len_effective = seq_len_effective.tolist()
-    assert num_micro_batches <= len(seq_len_effective)
-
-    micro_bsz_idx = get_seqlen_balanced_partitions(seq_len_effective, num_micro_batches, equal_size=False)
+    effective_seqlen = effective_seqlen.tolist()
+    assert num_micro_batches <= len(effective_seqlen)
+    micro_bsz_idx = get_seqlen_balanced_partitions(effective_seqlen, num_micro_batches, equal_size=False)
 
     micro_batches = []
-
     for partition in micro_bsz_idx:
-        curr_micro_batch = []
-        for idx in partition:
-            curr_micro_batch.append(batch[idx : idx + 1])
-        curr_micro_batch = torch.cat(curr_micro_batch)
-
-        micro_batches.append(curr_micro_batch)
+        curr_micro_batch = [batch[idx] for idx in partition]
+        micro_batches.append(torch.stack(curr_micro_batch))
 
     return micro_batches, micro_bsz_idx
 
@@ -262,3 +260,23 @@ def get_reverse_idx(idx_map):
         reverse_idx_map[idx] = i
 
     return reverse_idx_map
+
+
+def prepare_dynamic_batch(data: DataProto, max_token_len: int) -> tuple[list[DataProto], list[list[int]]]:
+    batch, batch_idx_list = rearrange_micro_batches(data.batch, max_token_len=max_token_len)
+    micro_batches = []
+    for i, batch_idx in enumerate(batch_idx_list):
+        tensors = dict(batch[i])
+        non_tensors = {}
+        for key in data.non_tensor_batch.keys():
+            non_tensors[key] = [data.non_tensor_batch[key][idx] for idx in batch_idx]
+
+        micro_batches.append(DataProto.from_dict(tensors, non_tensors))
+
+    return micro_batches, batch_idx_list
+
+
+def restore_dynamic_batch(data: torch.Tensor, batch_idx_list: List[List[int]]) -> torch.Tensor:
+    indices = list(chain.from_iterable(batch_idx_list))
+    revert_indices = torch.tensor(get_reverse_idx(indices), dtype=torch.long)
+    return data[revert_indices]

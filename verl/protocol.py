@@ -196,9 +196,12 @@ class DataProto:
         if isinstance(item, (list, np.ndarray, torch.Tensor)):
             return self.index_select(item)
 
-        tensor_data = self.batch[item] if self.batch is not None else None
-        non_tensor_data = {key: value[item] for key, value in self.non_tensor_batch.items()}
-        return DataProtoItem(batch=tensor_data, non_tensor_batch=non_tensor_data, meta_info=self.meta_info)
+        if isinstance(item, (int, np.integer)):
+            tensor_data = self.batch[item] if self.batch is not None else None
+            non_tensor_data = {key: value[item] for key, value in self.non_tensor_batch.items()}
+            return DataProtoItem(batch=tensor_data, non_tensor_batch=non_tensor_data, meta_info=self.meta_info)
+
+        raise TypeError(f"Indexing with {type(item)} is not supported.")
 
     def __getstate__(self) -> Tuple[bytes, Dict[str, NDArray], Dict[str, Any]]:
         buffer = io.BytesIO()
@@ -573,6 +576,9 @@ class DataProto:
         Returns:
             List[DataProto]: a list of DataProto after splitting
         """
+        assert len(self) % split_size == 0, (
+            f"only support equal split. Got size of DataProto {len(self)} and split {split_size}."
+        )
         chunks = len(self) // split_size
         return self.chunk(chunks)
 

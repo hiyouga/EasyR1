@@ -16,7 +16,8 @@ python3 -m verl.trainer.main \
     data.rollout_batch_size=512 \
     data.mini_rollout_batch_size=256 \
     worker.actor.micro_batch_size_per_device_for_update=1 \
-    worker.actor.micro_batch_size_per_device_for_experience=8 \
+    worker.actor.micro_batch_size_per_device_for_experience=4 \
+    worker.actor.ulysses_size=8 \
     worker.actor.model.model_path=${MODEL_PATH} \
     worker.actor.fsdp.torch_dtype=bf16 \
     worker.actor.optim.strategy=adamw_bf16 \

@@ -24,13 +24,7 @@ def reduce_metrics(metrics: Dict[str, List[Any]]) -> Dict[str, Any]:
     return {key: np.mean(value) for key, value in metrics.items()}
 
 
-def compute_data_metrics(batch: DataProto, use_critic: bool = False) -> Dict[str, Any]:
-    sequence_score = batch.batch["token_level_scores"].sum(-1)
-    sequence_reward = batch.batch["token_level_rewards"].sum(-1)
-
-    advantages = batch.batch["advantages"]
-    returns = batch.batch["returns"]
-
+def compute_length_metrics(batch: DataProto) -> Dict[str, Any]:
     max_response_length = batch.batch["responses"].size(-1)
 
     prompt_mask = batch.batch["attention_mask"][:, :-max_response_length].bool()
@@ -39,6 +33,32 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = False) -> Dict[str
     max_prompt_length = prompt_mask.size(-1)
     prompt_length = prompt_mask.sum(-1).float()
     response_length = response_mask.sum(-1).float()
+
+    return {
+        # response length
+        "response_length/mean": torch.mean(response_length).detach().item(),
+        "response_length/max": torch.max(response_length).detach().item(),
+        "response_length/min": torch.min(response_length).detach().item(),
+        "response_length/clip_ratio": torch.mean(torch.eq(response_length, max_response_length).float())
+        .detach()
+        .item(),
+        # prompt length
+        "prompt_length/mean": torch.mean(prompt_length).detach().item(),
+        "prompt_length/max": torch.max(prompt_length).detach().item(),
+        "prompt_length/min": torch.min(prompt_length).detach().item(),
+        "prompt_length/clip_ratio": torch.mean(torch.eq(prompt_length, max_prompt_length).float()).detach().item(),
+    }
+
+
+def compute_data_metrics(batch: DataProto, use_critic: bool = False) -> Dict[str, Any]:
+    sequence_score = batch.batch["token_level_scores"].sum(-1)
+    sequence_reward = batch.batch["token_level_rewards"].sum(-1)
+
+    advantages = batch.batch["advantages"]
+    returns = batch.batch["returns"]
+
+    max_response_length = batch.batch["responses"].size(-1)
+    response_mask = batch.batch["attention_mask"][:, -max_response_length:].bool()
 
     valid_adv = torch.masked_select(advantages, response_mask)
     valid_returns = torch.masked_select(returns, response_mask)
@@ -49,7 +69,7 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = False) -> Dict[str
         return_diff_var = torch.var(valid_returns - valid_values)
         return_var = torch.var(valid_returns)
 
-    metrics = {
+    return {
         # score
         "critic/score/mean": torch.mean(sequence_score).detach().item(),
         "critic/score/max": torch.max(sequence_score).detach().item(),
@@ -78,20 +98,8 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = False) -> Dict[str
             if use_critic
             else {}
         ),
-        # response length
-        "response_length/mean": torch.mean(response_length).detach().item(),
-        "response_length/max": torch.max(response_length).detach().item(),
-        "response_length/min": torch.min(response_length).detach().item(),
-        "response_length/clip_ratio": torch.mean(torch.eq(response_length, max_response_length).float())
-        .detach()
-        .item(),
-        # prompt length
-        "prompt_length/mean": torch.mean(prompt_length).detach().item(),
-        "prompt_length/max": torch.max(prompt_length).detach().item(),
-        "prompt_length/min": torch.min(prompt_length).detach().item(),
-        "prompt_length/clip_ratio": torch.mean(torch.eq(prompt_length, max_prompt_length).float()).detach().item(),
+        **compute_length_metrics(batch),
     }
-    return metrics
 
 
 def compute_timing_metrics(batch: DataProto, timing_raw: Dict[str, float]) -> Dict[str, Any]:

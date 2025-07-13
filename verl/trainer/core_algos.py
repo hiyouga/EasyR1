@@ -343,7 +343,7 @@ def compute_policy_loss(
     clip_ratio_high: float,
     clip_ratio_dual: float,
     loss_avg_mode: Literal["token", "seq"],
-) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+) -> Tuple[torch.Tensor, Dict[str, float]]:
     """Compute the clipped policy objective and related metrics for PPO.
 
     Adapted from https://github.com/huggingface/trl/blob/v0.15.0/trl/trainer/ppo_trainer.py#L568
@@ -417,7 +417,7 @@ def compute_value_loss(
     response_mask: torch.Tensor,
     cliprange_value: float,
     loss_avg_mode: Literal["token", "seq"],
-) -> Tuple[torch.Tensor, float]:
+) -> Tuple[torch.Tensor, Dict[str, float]]:
     """Compute the value loss.
 
     Adapted from https://github.com/huggingface/trl/blob/v0.15.0/trl/trainer/ppo_trainer.py#L556
@@ -442,6 +442,8 @@ def compute_value_loss(
             value function loss
         vf_clipfrac: a float
             The ratio of vf being clipped
+        vpred_mean: a float
+            The mean of predicted values
 
     """
     vpredclipped = torch.clamp(vpreds, values - cliprange_value, values + cliprange_value)
@@ -449,8 +451,11 @@ def compute_value_loss(
     vf_loss2 = torch.square(vpredclipped - returns)
     clipped_vf_losses = torch.max(vf_loss1, vf_loss2)  # clip if vf_loss1 < vf_loss2
     vf_loss = 0.5 * average_loss(clipped_vf_losses, response_mask, mode=loss_avg_mode)
-    vf_clipfrac = VF.masked_mean((vf_loss1 < vf_loss2).float(), response_mask).detach().item()
-    return vf_loss, vf_clipfrac
+    metrics = {
+        "vf_clipfrac": VF.masked_mean((vf_loss1 < vf_loss2).float(), response_mask).detach().item(),
+        "vpred_mean": VF.masked_mean(vpreds, response_mask).detach().item(),
+    }
+    return vf_loss, metrics
 
 
 def compute_kl(

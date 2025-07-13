@@ -38,6 +38,7 @@ worker:
     micro_batch_size_per_device_for_experience: 16  # equivalent to verl's rollout.log_prob_micro_batch_size_per_gpu
     max_grad_norm: 1.0
     padding_free: true
+    dynamic_batching: true
     ulysses_size: 1
     model:
       model_path: Qwen/Qwen2.5-7B-Instruct

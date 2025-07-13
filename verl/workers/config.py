@@ -48,5 +48,6 @@ class WorkerConfig:
     def post_init(self):
         self.ref.micro_batch_size_per_device_for_experience = self.actor.micro_batch_size_per_device_for_experience
         self.ref.padding_free = self.actor.padding_free
+        self.ref.dynamic_batching = self.actor.dynamic_batching
         self.ref.ulysses_size = self.actor.ulysses_size
         self.ref.use_torch_compile = self.actor.use_torch_compile
