@@ -25,7 +25,7 @@ from ray.experimental.tqdm_ray import tqdm
 from torch import nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
-from ...protocol import DataProto
+from ...protocol import DataProto, batch_collate
 from ...trainer.core_algos import compute_value_loss
 from ...utils.py_functional import append_to_dict
 from ...utils.seqlen_balancing import prepare_dynamic_batch, restore_dynamic_batch
@@ -61,17 +61,11 @@ class DataParallelPPOCritic(BasePPOCritic):
         if position_ids.dim() == 3:  # qwen2vl mrope
             position_ids = position_ids.transpose(0, 1)  # (bsz, 3, seqlen) -> (3, bsz, seqlen)
 
-        multi_modal_inputs = defaultdict(list)
         if "multi_modal_inputs" in micro_batch:
-            for input_dict in micro_batch["multi_modal_inputs"]:
-                for key, value in input_dict.items():
-                    multi_modal_inputs[key].append(value)
-
-            for key, value in multi_modal_inputs.items():
-                if len(value) != 0:
-                    multi_modal_inputs[key] = torch.cat(value, dim=0)
-                else:
-                    multi_modal_inputs[key] = None
+            multi_modal_inputs = batch_collate(micro_batch["multi_modal_inputs"])
+            multi_modal_inputs = {key: torch.cat(value, dim=0) for key, value in multi_modal_inputs.items()}
+        else:
+            multi_modal_inputs = {}
 
         if self.config.padding_free:
             input_ids_rmpad, indices, *_ = unpad_input(

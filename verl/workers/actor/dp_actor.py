@@ -26,7 +26,7 @@ from ray.experimental.tqdm_ray import tqdm
 from torch import nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
-from ...protocol import DataProto
+from ...protocol import DataProto, batch_collate
 from ...trainer.core_algos import average_loss, compute_kl, compute_policy_loss
 from ...utils import torch_functional as VF
 from ...utils.py_functional import append_to_dict
@@ -81,15 +81,10 @@ class DataParallelPPOActor(BasePPOActor):
 
         multi_modal_inputs = defaultdict(list)
         if "multi_modal_inputs" in micro_batch:
-            for input_dict in micro_batch["multi_modal_inputs"]:
-                for key, value in input_dict.items():
-                    multi_modal_inputs[key].append(value)
-
-            for key, value in multi_modal_inputs.items():
-                if len(value) != 0:
-                    multi_modal_inputs[key] = torch.cat(value, dim=0)
-                else:
-                    multi_modal_inputs[key] = None
+            multi_modal_inputs = batch_collate(micro_batch["multi_modal_inputs"])
+            multi_modal_inputs = {key: torch.cat(value, dim=0) for key, value in multi_modal_inputs.items()}
+        else:
+            multi_modal_inputs = {}
 
         if self.config.padding_free:
             input_ids_rmpad, indices, *_ = unpad_input(input_ids.unsqueeze(-1), attention_mask)  # (total_nnz, 1)
