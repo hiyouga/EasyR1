@@ -29,6 +29,7 @@ python3 -m verl.trainer.main \
     worker.rollout.max_num_batched_tokens=22528 \
     worker.rollout.val_override_config='{"n":16,"temperature":1.0,"top_p":0.7}' \
     worker.rollout.gpu_memory_utilization=0.8 \
+    worker.rollout.tensor_parallel_size=4 \
     worker.reward.reward_function=./examples/reward_function/dapo.py:compute_score \
     worker.reward.reward_function_kwargs='{"max_response_length":20480,"overlong_buffer_length":4096,"overlong_penalty_factor":1.0}' \
     algorithm.disable_kl=True \
