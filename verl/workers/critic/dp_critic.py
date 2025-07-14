@@ -20,6 +20,7 @@ from collections import defaultdict
 from typing import Any, Dict
 
 import torch
+import torch.distributed as dist
 from ray.experimental.tqdm_ray import tqdm
 from torch import nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -46,6 +47,7 @@ class DataParallelPPOCritic(BasePPOCritic):
     def __init__(self, config: CriticConfig, critic_module: nn.Module, critic_optimizer: torch.optim.Optimizer):
         super().__init__(config)
         self.rank = int(os.getenv("RANK", "0"))
+        self.world_size = int(os.getenv("WORLD_SIZE", "1"))
         self.critic_module = critic_module
         self.critic_optimizer = critic_optimizer
 
@@ -192,7 +194,7 @@ class DataParallelPPOCritic(BasePPOCritic):
             for mini_batch in mini_batches:
                 response_length = mini_batch.batch["responses"].size(-1)
                 response_mask = mini_batch.batch["attention_mask"][:, -response_length:]
-                total_response_tokens = torch.sum(response_mask)
+                total_response_tokens = dist.all_reduce(torch.sum(response_mask), op=dist.ReduceOp.SUM)
 
                 if self.config.dynamic_batching:
                     max_input_len = mini_batch.batch["input_ids"].size(-1)
@@ -220,7 +222,7 @@ class DataParallelPPOCritic(BasePPOCritic):
                         cliprange_value=self.config.cliprange_value,
                         loss_avg_mode=self.config.loss_avg_mode,
                     )
-                    loss = vf_loss * torch.sum(response_mask) / total_response_tokens
+                    loss = vf_loss * torch.sum(response_mask) * self.world_size / total_response_tokens
                     loss.backward()
 
                     batch_metrics = {

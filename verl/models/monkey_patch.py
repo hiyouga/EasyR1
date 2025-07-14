@@ -35,6 +35,7 @@ def apply_ulysses_patch(model_type: str) -> None:
 
             Qwen2VLAttention.forward = qwen2_vl_attn_forward
             Qwen2_5_VLAttention.forward = qwen2_vl_attn_forward
+            raise NotImplementedError("Transformers 4.53.* is not compatible with Qwen2-VL models.")
         else:
             from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import Qwen2_5_VLFlashAttention2
             from transformers.models.qwen2_vl.modeling_qwen2_vl import Qwen2VLFlashAttention2

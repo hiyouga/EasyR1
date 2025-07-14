@@ -133,9 +133,7 @@ class FSDPWorker(Worker):
             config.global_batch_size *= self.config.rollout.n
             self.print_rank0(f"{role} will use global batch size {config.global_batch_size}.")
 
-        config.global_batch_size_per_device = (
-            config.global_batch_size * config.ulysses_size
-        ) // self.device_mesh.size()
+        config.global_batch_size_per_device = config.global_batch_size // (world_size // config.ulysses_size)
         if config.global_batch_size_per_device == 0:
             raise ValueError(f"{role} global batch size * ulysses size must be larger than num gpus.")
 
@@ -685,6 +683,7 @@ class FSDPWorker(Worker):
                     metric: np.array([value] if np.isscalar(value) else value) for metric, value in metrics.items()
                 }
             )
+            data = self.ulysses_sharding_manager.postprocess_data(data=output)
 
         if self._use_param_offload:
             offload_fsdp_model(self.fsdp_module)
