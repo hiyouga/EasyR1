@@ -312,7 +312,7 @@ class DataProto:
                 current_batch = tensor.shape[:num_batch_dims]
                 assert batch_size == current_batch, (
                     f"Not all the tensor in tensors have the same batch size with batch_dims={num_batch_dims}. "
-                    f"Got {pivot_key} has {batch_size}, {key} has {current_batch}"
+                    f"Got {pivot_key} has {batch_size}, {key} has {current_batch}."
                 )
 
         for key, value in non_tensors.items():
@@ -322,18 +322,19 @@ class DataProto:
         tensor_dict = TensorDict(source=tensors, batch_size=batch_size) if tensors else None
         return cls(batch=tensor_dict, non_tensor_batch=non_tensors, meta_info=meta_info)
 
-    def to(self, device: torch.device) -> "DataProto":
-        """move the batch to device
+    def to(self, device: torch.device, non_blocking: bool = True) -> "DataProto":
+        """Move the batch to device
 
         Args:
-            device (torch.device, str): torch device
+            device (torch.device): the device to move to.
+            non_blocking (bool, optional): whether to use non-blocking mode. Defaults to True.
 
         Returns:
-            DataProto: the current DataProto
+            DataProto: the current DataProto.
 
         """
         if self.batch is not None:
-            self.batch = self.batch.to(device)
+            self.batch = self.batch.to(device, non_blocking=non_blocking)
 
         return self
 

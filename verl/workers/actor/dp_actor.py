@@ -195,7 +195,7 @@ class DataParallelPPOActor(BasePPOActor):
         self.actor_module.eval()
 
         temperature = data.meta_info["temperature"]
-        select_keys = ["responses", "input_ids", "attention_mask", "position_ids"]
+        select_keys = ["input_ids", "attention_mask", "position_ids", "responses"]
         non_tensor_select_keys = ["multi_modal_inputs"]
 
         data = data.select(select_keys, non_tensor_select_keys)
@@ -225,7 +225,7 @@ class DataParallelPPOActor(BasePPOActor):
         self.actor_module.train()
 
         temperature = data.meta_info["temperature"]  # temperature must be in the data.meta_info to avoid slient error
-        select_keys = ["responses", "input_ids", "attention_mask", "position_ids"]
+        select_keys = ["input_ids", "attention_mask", "position_ids", "responses", "response_mask"]
         select_keys.extend(["old_log_probs", "ref_log_probs", "advantages"])
         non_tensor_select_keys = ["multi_modal_inputs"]
 
@@ -239,10 +239,8 @@ class DataParallelPPOActor(BasePPOActor):
                 mini_batches = tqdm(mini_batches, desc="Train mini-batches", position=1)
 
             for mini_batch in mini_batches:
-                response_length = mini_batch.batch["responses"].size(-1)
-                response_mask = mini_batch.batch["attention_mask"][:, -response_length:]
-                total_response_tokens = torch.sum(response_mask)
-                dist.all_reduce(torch.sum(response_mask), op=dist.ReduceOp.SUM)
+                total_response_tokens = torch.sum(mini_batch.batch["response_mask"])
+                dist.all_reduce(total_response_tokens, op=dist.ReduceOp.SUM)
 
                 if self.config.dynamic_batching:
                     max_input_len = mini_batch.batch["input_ids"].size(-1)
@@ -256,8 +254,7 @@ class DataParallelPPOActor(BasePPOActor):
 
                 for micro_batch in micro_batches:
                     model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
-                    response_length = model_inputs["responses"].size(-1)
-                    response_mask = model_inputs["attention_mask"][:, -response_length:]
+                    response_mask = model_inputs["response_mask"]
                     old_log_probs = model_inputs["old_log_probs"]
                     advantages = model_inputs["advantages"]
 

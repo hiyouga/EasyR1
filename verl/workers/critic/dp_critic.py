@@ -148,7 +148,7 @@ class DataParallelPPOCritic(BasePPOCritic):
     def compute_values(self, data: DataProto) -> torch.Tensor:
         self.critic_module.eval()
 
-        select_keys = ["responses", "input_ids", "attention_mask", "position_ids"]
+        select_keys = ["input_ids", "attention_mask", "position_ids", "responses", "response_mask"]
         non_tensor_select_keys = ["multi_modal_inputs"]
 
         data = data.select(select_keys, non_tensor_select_keys)
@@ -172,14 +172,14 @@ class DataParallelPPOCritic(BasePPOCritic):
         if self.config.dynamic_batching:
             values = restore_dynamic_batch(values, batch_idx_list)
 
-        response_length = data.batch["responses"].size(1)
-        values = values * data.batch["attention_mask"][:, -response_length:]  # only action tokens have values
+        values = values * data.batch["response_mask"]  # only action tokens have values
         return values
 
     def update_critic(self, data: DataProto) -> Dict[str, Any]:
         self.critic_module.train()
 
-        select_keys = ["input_ids", "responses", "attention_mask", "position_ids", "values", "returns"]
+        select_keys = ["input_ids", "attention_mask", "position_ids", "responses", "response_mask"]
+        select_keys.extend(["values", "returns"])
         non_tensor_select_keys = ["multi_modal_inputs"]
 
         # Split to make minibatch iterator for updating the actor
@@ -192,10 +192,8 @@ class DataParallelPPOCritic(BasePPOCritic):
                 mini_batches = tqdm(mini_batches, desc="Train mini-batches", position=1)
 
             for mini_batch in mini_batches:
-                response_length = mini_batch.batch["responses"].size(-1)
-                response_mask = mini_batch.batch["attention_mask"][:, -response_length:]
-                total_response_tokens = torch.sum(response_mask)
-                dist.all_reduce(torch.sum(response_mask), op=dist.ReduceOp.SUM)
+                total_response_tokens = torch.sum(mini_batch.batch["response_mask"])
+                dist.all_reduce(total_response_tokens, op=dist.ReduceOp.SUM)
 
                 if self.config.dynamic_batching:
                     max_input_len = mini_batch.batch["input_ids"].size(-1)
@@ -209,8 +207,7 @@ class DataParallelPPOCritic(BasePPOCritic):
 
                 for micro_batch in micro_batches:
                     model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
-                    response_length = model_inputs["responses"].size(-1)
-                    response_mask = model_inputs["attention_mask"][:, -response_length:]
+                    response_mask = model_inputs["response_mask"]
                     values = model_inputs["values"]
                     returns = model_inputs["returns"]
 
