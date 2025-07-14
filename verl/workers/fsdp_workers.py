@@ -520,13 +520,13 @@ class FSDPWorker(Worker):
             metrics["actor/lr"] = lr
             self.lr_scheduler.step()
 
-            # Metrics should be in non_tensor_batch instead of meta_info, as DataProto not concat meta_info.
+            # Metrics should be in non_tensor_batch instead of meta_info, as DataProto not concat meta_info
             output = DataProto(
                 non_tensor_batch={
                     key: np.array([value] if np.isscalar(value) else value) for key, value in metrics.items()
                 }
             )
-            output = self.ulysses_sharding_manager.postprocess_data(data=output)
+            # Metrics do not need post processing since their batch size is 1
 
         if self._use_param_offload:
             offload_fsdp_model(self.fsdp_module)
@@ -677,13 +677,13 @@ class FSDPWorker(Worker):
             lr = self.lr_scheduler.get_last_lr()[0]
             metrics["critic/lr"] = lr
 
-            # Metrics should be in non_tensor_batch instead of meta_info, as DataProto not concat meta_info.
+            # Metrics should be in non_tensor_batch instead of meta_info, as DataProto not concat meta_info
             output = DataProto(
                 non_tensor_batch={
-                    metric: np.array([value] if np.isscalar(value) else value) for metric, value in metrics.items()
+                    key: np.array([value] if np.isscalar(value) else value) for key, value in metrics.items()
                 }
             )
-            data = self.ulysses_sharding_manager.postprocess_data(data=output)
+            # Metrics do not need post processing since their batch size is 1
 
         if self._use_param_offload:
             offload_fsdp_model(self.fsdp_module)
