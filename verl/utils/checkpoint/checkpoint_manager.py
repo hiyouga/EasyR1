@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 import os
 import random
 import re
@@ -107,27 +108,6 @@ class BaseCheckpointManager(ABC):
         random.setstate(rng_state["random"])
 
 
-def find_latest_ckpt_path(path: Optional[str] = None, directory_format: str = "global_step_{}") -> Optional[str]:
-    if path is None:
-        return None
-
-    tracker_file = get_checkpoint_tracker_filename(path)
-    if not os.path.exists(tracker_file):
-        print("Checkpoint tracker file does not exist: %s", tracker_file)
-        return None
-
-    with open(tracker_file, "rb") as f:
-        iteration = int(f.read().decode())
-
-    ckpt_path = os.path.join(path, directory_format.format(iteration))
-    if not os.path.exists(ckpt_path):
-        print("Checkpoint does not exist: %s", ckpt_path)
-        return None
-
-    print("Found checkpoint: %s", ckpt_path)
-    return ckpt_path
-
-
 def get_checkpoint_tracker_filename(root_path: str) -> str:
     """
     Tracker file rescords the latest chckpoint during training to restart from.
@@ -135,11 +115,31 @@ def get_checkpoint_tracker_filename(root_path: str) -> str:
     return os.path.join(root_path, CHECKPOINT_TRACKER)
 
 
+def find_latest_ckpt(path: str, directory_format: str = "global_step_{}") -> Optional[str]:
+    """
+    Find the latest checkpoint in the save path.
+    """
+    tracker_file = get_checkpoint_tracker_filename(path)
+    if not os.path.exists(tracker_file):
+        return None
+
+    with open(tracker_file, "rb") as f:
+        checkpointer_tracker_info = json.load(f)
+
+    ckpt_path = os.path.join(path, directory_format.format(checkpointer_tracker_info["last_global_step"]))
+    if not os.path.exists(ckpt_path):
+        print(f"Checkpoint does not exist: {ckpt_path}")
+        return None
+
+    print(f"Found latest checkpoint: {ckpt_path}, will resume from it. Turn off `find_last_checkpoint` to disable it.")
+    return ckpt_path
+
+
 def remove_obsolete_ckpt(
     path: str, global_step: int, best_global_step: int, save_limit: int = -1, directory_format: str = "global_step_{}"
 ):
     """
-    Remove the obsolete checkpoints that exceed the save_limit.
+    Remove the obsolete checkpoints that exceed the save limit.
     """
     if save_limit <= 0 or not os.path.exists(path):
         return

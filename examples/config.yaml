@@ -69,7 +69,8 @@ worker:
     tensor_parallel_size: 2
     disable_tqdm: false
     val_override_config:
-      temperature: 1.0
+      temperature: 0.6
+      top_p: 0.95
       n: 1
 
   ref:
@@ -102,3 +103,4 @@ trainer:
   save_model_only: false
   save_checkpoint_path: null
   load_checkpoint_path: null
+  find_last_checkpoint: true
