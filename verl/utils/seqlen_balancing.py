@@ -130,7 +130,7 @@ def karmarkar_karp(seqlen_list: List[int], k_partitions: int, equal_size: bool):
     return partitions
 
 
-def greedy_partition(seqlen_list: List[int], k_partitions: int, equal_size: bool):
+def greedy_partition(seqlen_list: list[int], k_partitions: int, equal_size: bool):
     bias = sum(seqlen_list) + 1 if equal_size else 0
     sorted_seqlen = [(seqlen + bias, i) for i, seqlen in enumerate(seqlen_list)]
     partitions = [[] for _ in range(k_partitions)]
@@ -250,7 +250,7 @@ def rearrange_micro_batches(
     )
     effective_seqlen = torch.sum(batch["attention_mask"], dim=-1)
     total_seqlen = effective_seqlen.sum().item()
-    num_micro_batches = ceildiv(total_seqlen, max_token_len)
+    num_micro_batches = min(len(effective_seqlen), ceildiv(total_seqlen, max_token_len))
     if dist.is_initialized():
         num_micro_batches = torch.tensor([num_micro_batches], device="cuda")
         dist.all_reduce(num_micro_batches, op=dist.ReduceOp.MAX, group=dp_group)
@@ -259,6 +259,12 @@ def rearrange_micro_batches(
     effective_seqlen = effective_seqlen.tolist()
     assert num_micro_batches <= len(effective_seqlen)
     micro_bsz_idx = get_seqlen_balanced_partitions(effective_seqlen, num_micro_batches, equal_size=False)
+
+    # Use the sum of squared sequence lengths to approximate attention computation workload
+    def compute_workload(partition: List[int]) -> Tuple[int, int]:
+        return (sum(effective_seqlen[idx] ** 2 for idx in partition), min(partition) if partition else 0)
+
+    micro_bsz_idx.sort(key=compute_workload, reverse=True)
 
     micro_batches = []
     for partition in micro_bsz_idx:
