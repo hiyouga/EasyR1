@@ -322,16 +322,17 @@ class DataProto:
         tensor_dict = TensorDict(source=tensors, batch_size=batch_size) if tensors else None
         return cls(batch=tensor_dict, non_tensor_batch=non_tensors, meta_info=meta_info)
 
-    def to(self, device: torch.device, non_blocking: bool = True) -> "DataProto":
+    def to(self, device: torch.device, non_blocking: bool = False) -> "DataProto":
         """Move the batch to device
 
         Args:
             device (torch.device): the device to move to.
-            non_blocking (bool, optional): whether to use non-blocking mode. Defaults to True.
+            non_blocking (bool, optional): whether to use non-blocking mode. Defaults to False.
 
         Returns:
             DataProto: the current DataProto.
 
+        NOTE: remember to use torch.cuda.synchronize() after self.to("cpu") to avoid weird number
         """
         if self.batch is not None:
             self.batch = self.batch.to(device, non_blocking=non_blocking)
