@@ -17,14 +17,14 @@ Actor config
 
 import os
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Optional
 
 
 @dataclass
 class ModelConfig:
     model_path: Optional[str] = None
     tokenizer_path: Optional[str] = None
-    override_config: Dict[str, Any] = field(default_factory=dict)
+    override_config: dict[str, Any] = field(default_factory=dict)
     enable_gradient_checkpointing: bool = True
     trust_remote_code: bool = True
     freeze_vision_tower: bool = False
@@ -43,7 +43,7 @@ class ModelConfig:
 @dataclass
 class OptimConfig:
     lr: float = 1e-6
-    betas: Tuple[float, float] = (0.9, 0.999)
+    betas: tuple[float, float] = (0.9, 0.999)
     weight_decay: float = 1e-2
     strategy: str = "adamw"
     lr_warmup_ratio: float = 0.0

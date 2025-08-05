@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, Dict, List
+from typing import Any
 
 import numpy as np
 import torch
@@ -20,11 +20,11 @@ import torch
 from ..protocol import DataProto
 
 
-def reduce_metrics(metrics: Dict[str, List[Any]]) -> Dict[str, Any]:
+def reduce_metrics(metrics: dict[str, list[Any]]) -> dict[str, Any]:
     return {key: np.mean(value) for key, value in metrics.items()}
 
 
-def compute_length_metrics(batch: DataProto) -> Dict[str, Any]:
+def compute_length_metrics(batch: DataProto) -> dict[str, Any]:
     max_response_length = batch.batch["responses"].size(-1)
     max_prompt_length = batch.batch["attention_mask"].size(-1) - max_response_length
 
@@ -45,7 +45,7 @@ def compute_length_metrics(batch: DataProto) -> Dict[str, Any]:
     }
 
 
-def compute_data_metrics(batch: DataProto, use_critic: bool = False) -> Dict[str, Any]:
+def compute_data_metrics(batch: DataProto, use_critic: bool = False) -> dict[str, Any]:
     sequence_score = batch.batch["token_level_scores"].sum(-1)
     sequence_reward = batch.batch["token_level_rewards"].sum(-1)
 
@@ -97,7 +97,7 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = False) -> Dict[str
     }
 
 
-def compute_timing_metrics(batch: DataProto, timing_raw: Dict[str, float]) -> Dict[str, Any]:
+def compute_timing_metrics(batch: DataProto, timing_raw: dict[str, float]) -> dict[str, Any]:
     num_response_tokens = torch.sum(batch.batch["response_mask"]).item()
     num_overall_tokens = sum(batch.meta_info["global_token_num"])
     num_tokens_of_section = {
@@ -113,7 +113,7 @@ def compute_timing_metrics(batch: DataProto, timing_raw: Dict[str, float]) -> Di
     }
 
 
-def compute_throughout_metrics(batch: DataProto, timing_raw: Dict[str, float], num_gpus: int) -> Dict[str, Any]:
+def compute_throughout_metrics(batch: DataProto, timing_raw: dict[str, float], num_gpus: int) -> dict[str, Any]:
     total_num_tokens = sum(batch.meta_info["global_token_num"])
     time = timing_raw["step"]
     return {

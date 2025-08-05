@@ -17,7 +17,7 @@ import random
 import re
 import string
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional
 from unittest.mock import patch
 
 import ray
@@ -51,7 +51,7 @@ def func_generator(self, method_name, dispatch_fn, collect_fn, execute_fn, block
     return func
 
 
-def sort_placement_group_by_node_ip(pgs: List[PlacementGroup]) -> List[PlacementGroup]:
+def sort_placement_group_by_node_ip(pgs: list[PlacementGroup]) -> list[PlacementGroup]:
     """
     Sort the placement groups by node ip, all bundles in a single placement group should be on the same node.
 
@@ -75,7 +75,7 @@ def sort_placement_group_by_node_ip(pgs: List[PlacementGroup]) -> List[Placement
 class RayResourcePool(ResourcePool):
     def __init__(
         self,
-        process_on_nodes: List[int] = None,
+        process_on_nodes: list[int] = None,
         use_gpu: bool = True,
         name_prefix: str = "",
         max_colocate_count: int = 5,
@@ -88,7 +88,7 @@ class RayResourcePool(ResourcePool):
         self.pgs = None
         self.detached = detached
 
-    def get_placement_groups(self, strategy: str = "STRICT_PACK", name: Optional[str] = None) -> List[PlacementGroup]:
+    def get_placement_groups(self, strategy: str = "STRICT_PACK", name: Optional[str] = None) -> list[PlacementGroup]:
         if self.pgs is not None:
             return self.pgs
 
@@ -118,8 +118,8 @@ class RayResourcePool(ResourcePool):
 
 
 def extract_pg_from_exist(
-    resource_pools: Dict[str, RayResourcePool], src_role_names: List[str], resource_pool: RayResourcePool
-) -> List[PlacementGroup]:
+    resource_pools: dict[str, RayResourcePool], src_role_names: list[str], resource_pool: RayResourcePool
+) -> list[PlacementGroup]:
     src_pgs = [
         pg
         for role_name, resource_pool in resource_pools.items()
@@ -130,7 +130,7 @@ def extract_pg_from_exist(
     sorted_src_pgs = sorted(src_pgs, key=lambda pg: pg.bundle_count, reverse=True)
     sorted_process_on_nodes = sorted([(val, idx) for idx, val in enumerate(resource_pool.store)], reverse=True)
 
-    unsorted_pgs: List[Tuple[int, PlacementGroup]] = []
+    unsorted_pgs: list[tuple[int, PlacementGroup]] = []
     searching_idx = 0
     for request_process, original_idx in sorted_process_on_nodes:
         assert searching_idx < len(sorted_src_pgs), f"no enough nodes for request: searching {searching_idx} th node"
@@ -169,7 +169,7 @@ class RayClassWithInitArgs(ClassWithInitArgs):
     def set_additional_resource(self, additional_resource):
         self._additional_resource = additional_resource
 
-    def update_options(self, options: Dict):
+    def update_options(self, options: dict):
         self._options.update(options)
 
     def __call__(
@@ -216,7 +216,7 @@ class RayWorkerGroup(WorkerGroup):
         bin_pack: bool = True,
         name_prefix: str = None,
         detached: bool = False,
-        worker_names: List[str] = None,
+        worker_names: list[str] = None,
         **kwargs,
     ) -> None:
         super().__init__(resource_pool=resource_pool, **kwargs)
@@ -241,7 +241,7 @@ class RayWorkerGroup(WorkerGroup):
         worker_state_dict = get_actor(worker._actor_id.hex())
         return worker_state_dict.get("state", "undefined") == "ALIVE" if worker_state_dict is not None else False
 
-    def _init_with_detached_workers(self, worker_names: List[str]) -> None:
+    def _init_with_detached_workers(self, worker_names: list[str]) -> None:
         workers = [ray.get_actor(name=name) for name in worker_names]
         self._workers = workers
         self._world_size = len(worker_names)

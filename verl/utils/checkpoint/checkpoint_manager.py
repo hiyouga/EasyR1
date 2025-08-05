@@ -19,7 +19,7 @@ import re
 import shutil
 import tempfile
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Optional, Union
+from typing import Any, Optional, Union
 
 import numpy as np
 import torch
@@ -91,7 +91,7 @@ class BaseCheckpointManager(ABC):
         return path
 
     @staticmethod
-    def get_rng_state() -> Dict[str, Any]:
+    def get_rng_state() -> dict[str, Any]:
         rng_state = {
             "cpu": torch.get_rng_state(),
             "cuda": torch.cuda.get_rng_state(),
@@ -101,7 +101,7 @@ class BaseCheckpointManager(ABC):
         return rng_state
 
     @staticmethod
-    def load_rng_state(rng_state: Dict[str, Any]):
+    def load_rng_state(rng_state: dict[str, Any]):
         torch.set_rng_state(rng_state["cpu"])
         torch.cuda.set_rng_state(rng_state["cuda"])
         np.random.set_state(rng_state["numpy"])

@@ -18,7 +18,7 @@ import sys
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from functools import partial
-from typing import Callable, Dict, List, Optional, Tuple, TypedDict
+from typing import Callable, Optional, Tuple, TypedDict
 
 import torch
 from transformers import PreTrainedTokenizer
@@ -41,7 +41,7 @@ class RewardScore(TypedDict):
 
 SequentialRewardFunction = Callable[[RewardInput], RewardScore]
 
-BatchRewardFunction = Callable[[List[RewardInput]], List[RewardScore]]
+BatchRewardFunction = Callable[[list[RewardInput]], list[RewardScore]]
 
 
 class FunctionRewardManager(ABC):
@@ -72,7 +72,7 @@ class FunctionRewardManager(ABC):
         self.tokenizer = tokenizer
 
     @abstractmethod
-    def compute_reward(self, data: DataProto) -> Tuple[torch.Tensor, Dict[str, List[float]]]:
+    def compute_reward(self, data: DataProto) -> Tuple[torch.Tensor, dict[str, list[float]]]:
         """Compute reward for a batch of data."""
         ...
 
@@ -80,7 +80,7 @@ class FunctionRewardManager(ABC):
 class SequentialFunctionRewardManager(FunctionRewardManager):
     reward_fn: SequentialRewardFunction
 
-    def compute_reward(self, data: DataProto) -> Tuple[torch.Tensor, Dict[str, List[float]]]:
+    def compute_reward(self, data: DataProto) -> Tuple[torch.Tensor, dict[str, list[float]]]:
         reward_tensor = torch.zeros_like(data.batch["responses"], dtype=torch.float32)
         reward_metrics = defaultdict(list)
         response_ids = data.batch["responses"]
@@ -108,7 +108,7 @@ class SequentialFunctionRewardManager(FunctionRewardManager):
 class BatchFunctionRewardManager(FunctionRewardManager):
     reward_fn: BatchRewardFunction
 
-    def compute_reward(self, data: DataProto) -> Tuple[torch.Tensor, Dict[str, List[float]]]:
+    def compute_reward(self, data: DataProto) -> Tuple[torch.Tensor, dict[str, list[float]]]:
         reward_inputs = []
         response_ids = data.batch["responses"]
         response_length = torch.sum(data.batch["response_mask"], dim=-1)

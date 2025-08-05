@@ -14,7 +14,7 @@
 
 import os
 from contextlib import contextmanager
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Optional, Union
 
 import numpy as np
 import torch
@@ -39,7 +39,7 @@ def _repeat_interleave(value: Union[torch.Tensor, np.ndarray], repeats: int) -> 
         return np.repeat(value, repeats, axis=0)
 
 
-def _get_logit_bias(processor: Optional[ProcessorMixin]) -> Optional[Dict[int, float]]:
+def _get_logit_bias(processor: Optional[ProcessorMixin]) -> Optional[dict[int, float]]:
     # enforce vllm to not output image token
     # TODO: add video token
     if processor is not None and hasattr(processor, "image_token"):
@@ -50,8 +50,8 @@ def _get_logit_bias(processor: Optional[ProcessorMixin]) -> Optional[Dict[int, f
 
 
 def _process_multi_modal_data(
-    multi_modal_data: Dict[str, Any], min_pixels: int, max_pixels: int, video_fps: float
-) -> Dict[str, Any]:
+    multi_modal_data: dict[str, Any], min_pixels: int, max_pixels: int, video_fps: float
+) -> dict[str, Any]:
     # may convert image path to image object
     images, videos = [], []
     if "images" in multi_modal_data:
@@ -189,7 +189,7 @@ class vLLMRollout(BaseRollout):
 
         # users can customize different sampling_params at different run
         with self.update_sampling_params(**prompts.meta_info):
-            completions: List[RequestOutput] = self.inference_engine.generate(
+            completions: list[RequestOutput] = self.inference_engine.generate(
                 prompts=vllm_inputs, sampling_params=self.sampling_params, use_tqdm=self.use_tqdm
             )
             response_ids = [output.token_ids for completion in completions for output in completion.outputs]

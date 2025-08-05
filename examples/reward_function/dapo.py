@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import re
-from typing import Any, Dict, List
+from typing import Any
 
 
 # Constants for normalization
@@ -136,11 +136,11 @@ def soft_overlong_punishment(response_length: int, max_response_length: int, ove
 
 
 def compute_score(
-    reward_inputs: List[Dict[str, Any]],
+    reward_inputs: list[dict[str, Any]],
     max_response_length: int,
     overlong_buffer_length: int,
     overlong_penalty_factor: float,
-) -> List[Dict[str, float]]:
+) -> list[dict[str, float]]:
     if not isinstance(reward_inputs, list):
         raise ValueError("Please use `reward_type=batch` for dapo reward function.")
 

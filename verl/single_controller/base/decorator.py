@@ -15,7 +15,7 @@
 from enum import Enum, auto
 from functools import wraps
 from types import FunctionType
-from typing import TYPE_CHECKING, Dict, List, Literal, Union
+from typing import TYPE_CHECKING, Literal, Union
 
 import ray
 
@@ -73,7 +73,7 @@ def collect_all_to_all(worker_group: "WorkerGroup", output):
     return output
 
 
-def _concat_data_proto_or_future(outputs: List[DataProto]) -> DataProto:
+def _concat_data_proto_or_future(outputs: list[DataProto]) -> DataProto:
     # make sure all the elements in output has the same type
     for output in outputs:
         assert type(output) is type(outputs[0])
@@ -98,7 +98,7 @@ def dispatch_dp_compute(worker_group: "WorkerGroup", *args, **kwargs):
     return args, kwargs
 
 
-def collect_dp_compute(worker_group: "WorkerGroup", outputs: List[DataProto]) -> List[DataProto]:
+def collect_dp_compute(worker_group: "WorkerGroup", outputs: list[DataProto]) -> list[DataProto]:
     assert len(outputs) == worker_group.world_size
     return outputs
 
@@ -115,7 +115,7 @@ def dispatch_dp_compute_data_proto_with_func(worker_group: "WorkerGroup", *args,
     return splitted_args_with_func, splitted_kwargs
 
 
-def collect_dp_compute_data_proto(worker_group: "WorkerGroup", outputs: List[DataProto]) -> DataProto:
+def collect_dp_compute_data_proto(worker_group: "WorkerGroup", outputs: list[DataProto]) -> DataProto:
     for output in outputs:
         assert isinstance(output, (DataProto, ray.ObjectRef)), f"Expect a DataProto, but got {type(output)}"
 
@@ -165,7 +165,7 @@ def get_predefined_execute_fn(execute_mode: Execute):
     return predefined_execute_mode_fn[execute_mode]
 
 
-def _check_dispatch_mode(dispatch_mode: Union[Dispatch, Dict[Literal["dispatch_fn", "collect_fn"], FunctionType]]):
+def _check_dispatch_mode(dispatch_mode: Union[Dispatch, dict[Literal["dispatch_fn", "collect_fn"], FunctionType]]):
     assert isinstance(dispatch_mode, (Dispatch, dict)), (
         f"dispatch_mode must be a Dispatch or a Dict. Got {dispatch_mode}"
     )

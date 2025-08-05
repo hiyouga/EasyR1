@@ -16,7 +16,7 @@ Base class for Critic
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict
+from typing import Any
 
 import torch
 
@@ -37,6 +37,6 @@ class BasePPOCritic(ABC):
         pass
 
     @abstractmethod
-    def update_critic(self, data: DataProto) -> Dict[str, Any]:
+    def update_critic(self, data: DataProto) -> dict[str, Any]:
         """Update the critic"""
         pass

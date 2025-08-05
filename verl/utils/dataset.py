@@ -16,7 +16,7 @@ import math
 import os
 from collections import defaultdict
 from io import BytesIO
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Optional, Union
 
 import numpy as np
 import torch
@@ -32,7 +32,7 @@ from ..models.transformers.qwen2_vl import get_rope_index
 from . import torch_functional as VF
 
 
-def collate_fn(features: List[Dict[str, Any]]) -> Dict[str, Any]:
+def collate_fn(features: list[dict[str, Any]]) -> dict[str, Any]:
     tensors = defaultdict(list)
     non_tensors = defaultdict(list)
     for feature in features:
@@ -52,7 +52,7 @@ def collate_fn(features: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def process_image(
-    image: Union[Dict[str, Any], ImageObject, str], min_pixels: Optional[int], max_pixels: Optional[int]
+    image: Union[dict[str, Any], ImageObject, str], min_pixels: Optional[int], max_pixels: Optional[int]
 ) -> ImageObject:
     if isinstance(image, str):
         image = Image.open(image)
@@ -80,7 +80,7 @@ def process_image(
 
 def process_video(
     video: str, min_pixels: Optional[int], max_pixels: Optional[int], video_fps: float, return_fps: bool = False
-) -> Union[List[ImageObject], Tuple[List[ImageObject], List[float]]]:
+) -> Union[list[ImageObject], tuple[list[ImageObject], list[float]]]:
     vision_info = {"video": video, "min_pixels": min_pixels, "max_pixels": max_pixels, "fps": video_fps}
     return fetch_video(vision_info, return_video_sample_fps=return_fps)
 
@@ -150,7 +150,7 @@ class RLHFDataset(Dataset):
                 num_proc=filter_overlong_prompts_workers,
             )
 
-    def _build_messages(self, example: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _build_messages(self, example: dict[str, Any]) -> list[dict[str, Any]]:
         prompt_str: str = example[self.prompt_key]
         if self.format_prompt:
             format_prompt = Template(self.format_prompt.strip())
@@ -180,7 +180,7 @@ class RLHFDataset(Dataset):
         else:
             return [{"role": "user", "content": prompt_str}]
 
-    def _filter_overlong_prompts(self, example: Dict[str, Any]) -> bool:
+    def _filter_overlong_prompts(self, example: dict[str, Any]) -> bool:
         messages = self._build_messages(example)
         if self.image_key in example:
             prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)

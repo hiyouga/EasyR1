@@ -44,6 +44,9 @@ RUN pip uninstall -y torch torchvision torchaudio \
     transformer-engine flash-attn apex megatron-core \
     xgboost opencv grpcio
 
+# Remove nv file
+RUN rm -rf /workspace
+
 # Fix cv2
 RUN rm -rf /usr/local/lib/python3.10/dist-packages/cv2
 

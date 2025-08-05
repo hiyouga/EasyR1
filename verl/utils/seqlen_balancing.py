@@ -15,7 +15,7 @@
 import copy
 import heapq
 from itertools import chain
-from typing import Dict, List, Optional, Tuple
+from typing import Optional, Tuple
 
 import torch
 from tensordict import TensorDict
@@ -47,7 +47,7 @@ class Set:
 
 
 class State:
-    def __init__(self, items: List[Tuple[int, int]], k: int) -> None:
+    def __init__(self, items: list[Tuple[int, int]], k: int) -> None:
         self.k = k
         # sets should always be decreasing order
         self.sets = [Set() for _ in range(k)]
@@ -97,10 +97,10 @@ class State:
         return repr_str
 
 
-def karmarkar_karp(seqlen_list: List[int], k_partitions: int, equal_size: bool):
+def karmarkar_karp(seqlen_list: list[int], k_partitions: int, equal_size: bool):
     # see: https://en.wikipedia.org/wiki/Largest_differencing_method
     sorted_seqlen_list = sorted([(seqlen, i) for i, seqlen in enumerate(seqlen_list)])
-    states_pq: List[State] = []
+    states_pq: list[State] = []
     if equal_size:
         assert len(seqlen_list) % k_partitions == 0, f"{len(seqlen_list)} % {k_partitions} != 0"
         for offset in range(0, len(sorted_seqlen_list), k_partitions):
@@ -150,7 +150,7 @@ def greedy_partition(seqlen_list: list[int], k_partitions: int, equal_size: bool
     return partitions
 
 
-def get_seqlen_balanced_partitions(seqlen_list: List[int], k_partitions: int, equal_size: bool) -> List[List[int]]:
+def get_seqlen_balanced_partitions(seqlen_list: list[int], k_partitions: int, equal_size: bool) -> list[list[int]]:
     """Get order of seq lengths to make partitions balanced, this is
     used in balacing sum of seqlength across dp ranks and microbatches.
 
@@ -185,7 +185,7 @@ def get_seqlen_balanced_partitions(seqlen_list: List[int], k_partitions: int, eq
     return _check_and_sort_partitions(partitions)
 
 
-def log_seqlen_unbalance(seqlen_list: List[int], partitions: List[List[int]], prefix: str) -> Dict[str, float]:
+def log_seqlen_unbalance(seqlen_list: list[int], partitions: list[list[int]], prefix: str) -> dict[str, float]:
     """
     Calculate and log metrics related to sequence length imbalance before and after partitioning.
 
@@ -239,7 +239,7 @@ def ceildiv(a: float, b: float) -> float:
 
 def rearrange_micro_batches(
     batch: TensorDict, max_token_len: int, dp_group: Optional[dist.ProcessGroup] = None
-) -> Tuple[List[TensorDict], List[List[int]]]:
+) -> Tuple[list[TensorDict], list[list[int]]]:
     """Split the batch into a list of micro_batches, where the max_token_len is smaller than max_token_len
     and the number of valid tokens in each micro batch is well balanced.
     """
@@ -261,7 +261,7 @@ def rearrange_micro_batches(
     micro_bsz_idx = get_seqlen_balanced_partitions(effective_seqlen, num_micro_batches, equal_size=False)
 
     # Use the sum of squared sequence lengths to approximate attention computation workload
-    def compute_workload(partition: List[int]) -> Tuple[int, int]:
+    def compute_workload(partition: list[int]) -> Tuple[int, int]:
         return (sum(effective_seqlen[idx] ** 2 for idx in partition), min(partition) if partition else 0)
 
     micro_bsz_idx.sort(key=compute_workload, reverse=True)
@@ -274,7 +274,7 @@ def rearrange_micro_batches(
     return micro_batches, micro_bsz_idx
 
 
-def get_reverse_idx(idx_map: List[int]) -> List[int]:
+def get_reverse_idx(idx_map: list[int]) -> list[int]:
     """
     Build the inverse of an index mapping.
 
@@ -314,7 +314,7 @@ def prepare_dynamic_batch(data: DataProto, max_token_len: int) -> tuple[list[Dat
     return micro_batches, batch_idx_list
 
 
-def restore_dynamic_batch(data: torch.Tensor, batch_idx_list: List[List[int]]) -> torch.Tensor:
+def restore_dynamic_batch(data: torch.Tensor, batch_idx_list: list[list[int]]) -> torch.Tensor:
     """
     Restore a batch from dynamic batching.
 

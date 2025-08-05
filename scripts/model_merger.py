@@ -16,7 +16,6 @@ import argparse
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor
-from typing import Dict, List, Tuple
 
 import numpy as np
 import torch
@@ -31,7 +30,7 @@ from transformers import (
 )
 
 
-def merge_by_placement(tensors: List[torch.Tensor], placement: Placement):
+def merge_by_placement(tensors: list[torch.Tensor], placement: Placement):
     if placement.is_replicate():
         return tensors[0]
     elif placement.is_partial():
@@ -113,8 +112,8 @@ if __name__ == "__main__":
         for rank in range(1, total_shards):
             executor.submit(process_one_shard, rank, model_state_dict_lst)
 
-    state_dict: Dict[str, List[torch.Tensor]] = {}
-    param_placements: Dict[str, List[Placement]] = {}
+    state_dict: dict[str, list[torch.Tensor]] = {}
+    param_placements: dict[str, list[Placement]] = {}
     keys = set(model_state_dict_lst[0].keys())
     for key in keys:
         state_dict[key] = []
@@ -147,7 +146,7 @@ if __name__ == "__main__":
 
         if key in param_placements:
             # merge shards
-            placements: Tuple[Shard] = param_placements[key]
+            placements: tuple[Shard] = param_placements[key]
             if len(mesh_shape) == 1:
                 # 1-D list, FSDP without TP
                 assert len(placements) == 1
@@ -162,7 +161,7 @@ if __name__ == "__main__":
     print("Merge completed.")
     hf_path = os.path.join(local_dir, "huggingface")
     config: PretrainedConfig = AutoConfig.from_pretrained(hf_path)
-    architectures: List[str] = getattr(config, "architectures", ["Unknown"])
+    architectures: list[str] = getattr(config, "architectures", ["Unknown"])
 
     if "ForTokenClassification" in architectures[0]:
         AutoClass = AutoModelForTokenClassification

@@ -17,7 +17,7 @@ Implement Critic
 
 import os
 from collections import defaultdict
-from typing import Any, Dict
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -51,7 +51,7 @@ class DataParallelPPOCritic(BasePPOCritic):
         self.critic_module = critic_module
         self.critic_optimizer = critic_optimizer
 
-    def _forward_micro_batch(self, micro_batch: Dict[str, torch.Tensor]) -> torch.Tensor:
+    def _forward_micro_batch(self, micro_batch: dict[str, torch.Tensor]) -> torch.Tensor:
         input_ids = micro_batch["input_ids"]
         batch_size, seqlen = input_ids.shape
         attention_mask = micro_batch["attention_mask"]
@@ -169,7 +169,7 @@ class DataParallelPPOCritic(BasePPOCritic):
         values = values * data.batch["response_mask"]  # only action tokens have values
         return values
 
-    def update_critic(self, data: DataProto) -> Dict[str, Any]:
+    def update_critic(self, data: DataProto) -> dict[str, Any]:
         self.critic_module.train()
 
         select_keys = ["input_ids", "attention_mask", "position_ids", "responses", "response_mask"]

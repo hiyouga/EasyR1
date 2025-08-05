@@ -14,7 +14,7 @@
 
 import inspect
 import re
-from typing import Dict, Iterable, Tuple, Union
+from typing import Iterable, Union
 
 import torch
 import torch.distributed as dist
@@ -63,7 +63,7 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         self.gen_random_states = torch.cuda.get_rng_state()
         torch.cuda.set_rng_state(self.torch_random_states)
 
-    def _rename_weight_keys(self, actor_weights: Dict[str, Union[torch.Tensor, DTensor]], model: PreTrainedModel):
+    def _rename_weight_keys(self, actor_weights: dict[str, Union[torch.Tensor, DTensor]], model: PreTrainedModel):
         # convert state dict keys: https://github.com/huggingface/transformers/pull/38385
         if not hasattr(model, "_checkpoint_conversion_mapping"):
             return actor_weights
@@ -84,8 +84,8 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         return original_weights
 
     def _make_weight_iterator(
-        self, actor_weights: Dict[str, Union[torch.Tensor, DTensor]]
-    ) -> Iterable[Tuple[str, torch.Tensor]]:
+        self, actor_weights: dict[str, Union[torch.Tensor, DTensor]]
+    ) -> Iterable[tuple[str, torch.Tensor]]:
         for name, tensor in actor_weights.items():
             yield name, tensor.full_tensor() if self.world_size != 1 else tensor
 

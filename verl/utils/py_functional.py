@@ -20,7 +20,7 @@ import importlib.util
 import re
 from contextlib import contextmanager
 from functools import lru_cache
-from typing import Any, Dict, List, Union
+from typing import Any, Union
 
 import numpy as np
 import yaml
@@ -67,7 +67,7 @@ def is_transformers_version_greater_than(content: str):
     return get_package_version("transformers") >= version.parse(content)
 
 
-def union_two_dict(dict1: Dict[str, Any], dict2: Dict[str, Any]) -> Dict[str, Any]:
+def union_two_dict(dict1: dict[str, Any], dict2: dict[str, Any]) -> dict[str, Any]:
     """Union two dict. Will throw an error if there is an item not the same object with the same key."""
     for key in dict2.keys():
         if key in dict1:
@@ -78,7 +78,7 @@ def union_two_dict(dict1: Dict[str, Any], dict2: Dict[str, Any]) -> Dict[str, An
     return dict1
 
 
-def append_to_dict(data: Dict[str, List[Any]], new_data: Dict[str, Any]) -> None:
+def append_to_dict(data: dict[str, list[Any]], new_data: dict[str, Any]) -> None:
     """Append dict to a dict of list."""
     for key, val in new_data.items():
         if key not in data:
@@ -87,7 +87,7 @@ def append_to_dict(data: Dict[str, List[Any]], new_data: Dict[str, Any]) -> None
         data[key].append(val)
 
 
-def unflatten_dict(data: Dict[str, Any], sep: str = "/") -> Dict[str, Any]:
+def unflatten_dict(data: dict[str, Any], sep: str = "/") -> dict[str, Any]:
     unflattened = {}
     for key, value in data.items():
         pieces = key.split(sep)
@@ -103,7 +103,7 @@ def unflatten_dict(data: Dict[str, Any], sep: str = "/") -> Dict[str, Any]:
     return unflattened
 
 
-def flatten_dict(data: Dict[str, Any], parent_key: str = "", sep: str = "/") -> Dict[str, Any]:
+def flatten_dict(data: dict[str, Any], parent_key: str = "", sep: str = "/") -> dict[str, Any]:
     flattened = {}
     for key, value in data.items():
         new_key = parent_key + sep + key if parent_key else key
@@ -115,12 +115,12 @@ def flatten_dict(data: Dict[str, Any], parent_key: str = "", sep: str = "/") -> 
     return flattened
 
 
-def convert_dict_to_str(data: Dict[str, Any]) -> str:
+def convert_dict_to_str(data: dict[str, Any]) -> str:
     return yaml.dump(data, indent=2)
 
 
 @contextmanager
-def timer(name: str, timing_raw: Dict[str, float]):
+def timer(name: str, timing_raw: dict[str, float]):
     with Timer(name=name, logger=None) as timer:
         yield
 

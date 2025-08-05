@@ -19,7 +19,7 @@ import logging
 import signal
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Optional
 
 from .decorator import MAGIC_ATTR, Dispatch, get_predefined_dispatch_fn, get_predefined_execute_fn
 
@@ -51,13 +51,13 @@ class ResourcePool:
     def store(self):
         return self._store
 
-    def local_world_size_list(self) -> List[int]:
+    def local_world_size_list(self) -> list[int]:
         nested_local_world_size_list = [
             [local_world_size for _ in range(local_world_size)] for local_world_size in self._store
         ]
         return [item for row in nested_local_world_size_list for item in row]
 
-    def local_rank_list(self) -> List[int]:
+    def local_rank_list(self) -> list[int]:
         nested_local_rank_list = [[i for i in range(local_world_size)] for local_world_size in self._store]  # noqa: C416
         return [item for row in nested_local_rank_list for item in row]
 
@@ -77,7 +77,7 @@ class ClassWithInitArgs:
         return self.cls(*self.args, **self.kwargs)
 
 
-def check_workers_alive(workers: List, is_alive: Callable, gap_time: float = 1) -> None:
+def check_workers_alive(workers: list, is_alive: Callable, gap_time: float = 1) -> None:
     while True:
         for worker in workers:
             if not is_alive(worker):
@@ -146,7 +146,7 @@ class WorkerGroup:
             if hasattr(method, MAGIC_ATTR):
                 # this method is decorated by register
                 attribute = getattr(method, MAGIC_ATTR)
-                assert isinstance(attribute, Dict), f"attribute must be a dictionary. Got {type(attribute)}"
+                assert isinstance(attribute, dict), f"attribute must be a dictionary. Got {type(attribute)}"
                 assert "dispatch_mode" in attribute, "attribute must contain dispatch_mode in its key"
 
                 dispatch_mode = attribute["dispatch_mode"]

@@ -21,7 +21,7 @@ import io
 import pickle
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Optional, Union
 
 import numpy as np
 import ray
@@ -45,7 +45,7 @@ except Exception:
 __all__ = ["DataProto", "union_tensor_dict"]
 
 
-def pad_dataproto_to_divisor(data: "DataProto", size_divisor: int) -> Tuple["DataProto", int]:
+def pad_dataproto_to_divisor(data: "DataProto", size_divisor: int) -> tuple["DataProto", int]:
     """Pad a DataProto to size divisible by size_divisor
 
     Args:
@@ -97,7 +97,7 @@ def union_tensor_dict(tensor_dict1: TensorDict, tensor_dict2: TensorDict) -> Ten
     return tensor_dict1
 
 
-def union_numpy_dict(tensor_dict1: Dict[str, NDArray], tensor_dict2: Dict[str, NDArray]) -> Dict[str, NDArray]:
+def union_numpy_dict(tensor_dict1: dict[str, NDArray], tensor_dict2: dict[str, NDArray]) -> dict[str, NDArray]:
     for key in tensor_dict2.keys():
         if key in tensor_dict1:
             assert isinstance(tensor_dict2[key], np.ndarray)
@@ -110,7 +110,7 @@ def union_numpy_dict(tensor_dict1: Dict[str, NDArray], tensor_dict2: Dict[str, N
     return tensor_dict1
 
 
-def batch_collate(features: List[Dict[str, Any]]) -> Dict[str, List[Any]]:
+def batch_collate(features: list[dict[str, Any]]) -> dict[str, list[Any]]:
     if len(features) == 0:
         return {}
 
@@ -158,8 +158,8 @@ def collate_fn(data_items: list["DataProtoItem"]):
 @dataclass
 class DataProtoItem:
     batch: Optional[TensorDict] = None
-    non_tensor_batch: Dict[str, NDArray] = field(default_factory=dict)
-    meta_info: Dict[str, Any] = field(default_factory=dict)
+    non_tensor_batch: dict[str, NDArray] = field(default_factory=dict)
+    meta_info: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -172,8 +172,8 @@ class DataProto:
     """
 
     batch: Optional[TensorDict] = None
-    non_tensor_batch: Dict[str, NDArray] = field(default_factory=dict)
-    meta_info: Dict[str, Any] = field(default_factory=dict)
+    non_tensor_batch: dict[str, NDArray] = field(default_factory=dict)
+    meta_info: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         self.check_consistency()  # perform necessary checking
@@ -188,7 +188,7 @@ class DataProto:
             return 0
 
     def __getitem__(
-        self, item: Union[int, slice, List[int], np.ndarray, torch.Tensor]
+        self, item: Union[int, slice, list[int], np.ndarray, torch.Tensor]
     ) -> Union["DataProto", "DataProtoItem"]:
         if isinstance(item, slice):
             return self.slice_select(item.start, item.stop, item.step)
@@ -203,7 +203,7 @@ class DataProto:
 
         raise TypeError(f"Indexing with {type(item)} is not supported.")
 
-    def __getstate__(self) -> Tuple[bytes, Dict[str, NDArray], Dict[str, Any]]:
+    def __getstate__(self) -> tuple[bytes, dict[str, NDArray], dict[str, Any]]:
         buffer = io.BytesIO()
         if self.batch is not None:
             self.batch: TensorDict = self.batch.contiguous()
@@ -213,7 +213,7 @@ class DataProto:
         buffer_bytes = buffer.getvalue()
         return buffer_bytes, self.non_tensor_batch, self.meta_info
 
-    def __setstate__(self, data: Tuple[bytes, Dict[str, NDArray], Dict[str, Any]]) -> None:
+    def __setstate__(self, data: tuple[bytes, dict[str, NDArray], dict[str, Any]]) -> None:
         batch_deserialized_bytes, non_tensor_batch, meta_info = data
         batch_deserialized = io.BytesIO(batch_deserialized_bytes)
         batch = torch.load(batch_deserialized, weights_only=False, map_location="cpu")
@@ -266,8 +266,8 @@ class DataProto:
     @classmethod
     def from_single_dict(
         cls,
-        data: Dict[str, Union[torch.Tensor, NDArray]],
-        meta_info: Optional[Dict[str, Any]] = None,
+        data: dict[str, Union[torch.Tensor, NDArray]],
+        meta_info: Optional[dict[str, Any]] = None,
     ) -> "DataProto":
         tensors, non_tensors = {}, {}
         for key, value in data.items():
@@ -283,9 +283,9 @@ class DataProto:
     @classmethod
     def from_dict(
         cls,
-        tensors: Optional[Dict[str, torch.Tensor]] = None,
-        non_tensors: Optional[Dict[str, NDArray]] = None,
-        meta_info: Optional[Dict[str, Any]] = None,
+        tensors: Optional[dict[str, torch.Tensor]] = None,
+        non_tensors: Optional[dict[str, NDArray]] = None,
+        meta_info: Optional[dict[str, Any]] = None,
         num_batch_dims: int = 1,
     ) -> "DataProto":
         """Create a DataProto from a dict of tensors. This assumes that
@@ -341,9 +341,9 @@ class DataProto:
 
     def select(
         self,
-        batch_keys: Optional[List[str]] = None,
-        non_tensor_batch_keys: Optional[List[str]] = None,
-        meta_info_keys: Optional[List[str]] = None,
+        batch_keys: Optional[list[str]] = None,
+        non_tensor_batch_keys: Optional[list[str]] = None,
+        meta_info_keys: Optional[list[str]] = None,
         deepcopy: bool = False,
     ) -> "DataProto":
         """Select a subset of the DataProto via batch_keys and meta_info_keys
@@ -383,7 +383,7 @@ class DataProto:
 
         return DataProto(batch=sub_batch, non_tensor_batch=non_tensor_batch, meta_info=sub_meta_info)
 
-    def index_select(self, index: Union[List[int], NDArray, torch.Tensor]) -> "DataProto":
+    def index_select(self, index: Union[list[int], NDArray, torch.Tensor]) -> "DataProto":
         """Select a subset of the DataProto via index.
 
         Args:
@@ -421,9 +421,9 @@ class DataProto:
 
     def pop(
         self,
-        batch_keys: Optional[List[str]] = None,
-        non_tensor_batch_keys: Optional[List[str]] = None,
-        meta_info_keys: Optional[List[str]] = None,
+        batch_keys: Optional[list[str]] = None,
+        non_tensor_batch_keys: Optional[list[str]] = None,
+        meta_info_keys: Optional[list[str]] = None,
     ) -> "DataProto":
         """Pop a subset of the DataProto via `batch_keys` and `meta_info_keys`
 
@@ -453,7 +453,7 @@ class DataProto:
         return DataProto.from_dict(tensors=tensors, non_tensors=non_tensors, meta_info=meta_info)
 
     def rename(
-        self, old_keys: Optional[Union[str, List[str]]] = None, new_keys: Optional[Union[str, List[str]]] = None
+        self, old_keys: Optional[Union[str, list[str]]] = None, new_keys: Optional[Union[str, list[str]]] = None
     ) -> "DataProto":
         """
         Note that this function only rename the key in the batch
@@ -500,7 +500,7 @@ class DataProto:
         return self
 
     def make_iterator(
-        self, mini_batch_size: int, epochs: int, seed: int = None, dataloader_kwargs: Dict[str, Any] = None
+        self, mini_batch_size: int, epochs: int, seed: int = None, dataloader_kwargs: dict[str, Any] = None
     ):
         """Make an iterator from the DataProto. This is built upon that TensorDict can be used as a normal Pytorch
         dataset. See https://pytorch.org/tensordict/tutorials/data_fashion for more details.
@@ -541,7 +541,7 @@ class DataProto:
 
         return iter(get_data())
 
-    def chunk(self, chunks: int) -> List["DataProto"]:
+    def chunk(self, chunks: int) -> list["DataProto"]:
         """Split the batch among dim=0 into chunks. The meta_info is passed to each DataProto after split.
 
         Args:
@@ -569,7 +569,7 @@ class DataProto:
             for i in range(chunks)
         ]
 
-    def split(self, split_size: int) -> List["DataProto"]:
+    def split(self, split_size: int) -> list["DataProto"]:
         """Split the batch among dim=0 into chunks. The meta_info is passed to each DataProto after split.
 
         Args:
@@ -585,7 +585,7 @@ class DataProto:
         return self.chunk(chunks)
 
     @staticmethod
-    def concat(data: List["DataProto"]) -> "DataProto":
+    def concat(data: list["DataProto"]) -> "DataProto":
         """Concat a list of DataProto. The batch is concatenated among dim=0.
         The meta_info is assumed to be identical and will use the first one.
 
@@ -669,15 +669,15 @@ class DataProtoFuture:
     """
 
     collect_fn: Callable
-    futures: List[ray.ObjectRef]
+    futures: list[ray.ObjectRef]
     dispatch_fn: Callable = None
 
     @staticmethod
-    def concat(data: List[ray.ObjectRef]) -> "DataProtoFuture":
+    def concat(data: list[ray.ObjectRef]) -> "DataProtoFuture":
         output = DataProtoFuture(collect_fn=DataProto.concat, futures=data)
         return output
 
-    def chunk(self, chunks: int) -> List["DataProtoFuture"]:
+    def chunk(self, chunks: int) -> list["DataProtoFuture"]:
         from functools import partial
 
         arg_future_lst = []
@@ -705,8 +705,8 @@ class DataProtoFuture:
 
 
 def allgather_dict_tensors(
-    tensors: Union[Dict[str, torch.Tensor], TensorDict], size: int, group: ProcessGroup, dim: int = 0
-) -> Union[Dict[str, torch.Tensor], TensorDict]:
+    tensors: Union[dict[str, torch.Tensor], TensorDict], size: int, group: ProcessGroup, dim: int = 0
+) -> Union[dict[str, torch.Tensor], TensorDict]:
     """
     TODO: optimize this.
     - We can use async ops

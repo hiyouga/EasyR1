@@ -14,7 +14,7 @@
 
 
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 import numpy as np
 import pytest
@@ -24,9 +24,9 @@ from verl.protocol import DataProto, pad_dataproto_to_divisor, unpad_dataproto
 
 
 def _get_data_proto(
-    tensors: Optional[Dict[str, List[Any]]] = None,
-    non_tensors: Optional[Dict[str, List[Any]]] = None,
-    meta_info: Optional[Dict[str, Any]] = None,
+    tensors: Optional[dict[str, list[Any]]] = None,
+    non_tensors: Optional[dict[str, list[Any]]] = None,
+    meta_info: Optional[dict[str, Any]] = None,
 ) -> DataProto:
     if tensors is None and non_tensors is None:
         tensors = {"obs": [1, 2, 3, 4, 5, 6]}

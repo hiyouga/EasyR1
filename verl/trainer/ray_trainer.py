@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 """
-FSDP PPO Trainer with Ray-based single controller.
-This trainer supports model-agonistic model initialization with huggingface
+PPO Trainer with Ray-based single controller.
+This trainer supports model-agonistic model initialization with huggingface.
 """
 
 import json
@@ -23,7 +23,7 @@ from collections import defaultdict
 from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import IntEnum, auto
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Optional, Type
 
 import numpy as np
 import ray
@@ -43,9 +43,15 @@ from ..utils.py_functional import convert_dict_to_str, timer
 from ..utils.seqlen_balancing import get_seqlen_balanced_partitions, log_seqlen_unbalance
 from ..workers.fsdp_workers import FSDPWorker
 from ..workers.reward import FunctionRewardManager
-from . import core_algos
 from .config import PPOConfig
-from .core_algos import AdvantageEstimator, FixedKLController, KLController, compute_kl, get_kl_controller
+from .core_algos import (
+    AdvantageEstimator,
+    FixedKLController,
+    KLController,
+    compute_advantage_return,
+    compute_kl,
+    get_kl_controller,
+)
 from .metrics import (
     compute_data_metrics,
     compute_length_metrics,
@@ -80,10 +86,11 @@ class ResourcePoolManager:
     resource_pool_dict: dict[str, RayResourcePool] = field(default_factory=dict)
 
     def create_resource_pool(self):
+        """Create ray resource pools for distributed training."""
         for resource_pool_name, process_on_nodes in self.resource_pool_spec.items():
             # max_colocate_count means the number of WorkerGroups (i.e. processes) in each RayResourcePool
             # For FSDP backend, we recommend using max_colocate_count=1 that merge all WorkerGroups into one.
-            # For Megatron backend, we recommend using max_colocate_count>1 that can utilize different WorkerGroup for differnt models
+            # For Megatron backend, we recommend using max_colocate_count>1 that can utilize different WorkerGroup for different models
             resource_pool = RayResourcePool(
                 process_on_nodes=process_on_nodes, use_gpu=True, max_colocate_count=1, name_prefix=resource_pool_name
             )
@@ -108,6 +115,7 @@ class ResourcePoolManager:
 
 
 def apply_kl_penalty(data: DataProto, kl_ctrl: KLController, kl_penalty="kl"):
+    """Apply KL penalty to the token-level rewards."""
     token_level_scores = data.batch["token_level_scores"]
     batch_size = data.batch.batch_size[0]
     response_mask = data.batch["response_mask"]
@@ -118,9 +126,8 @@ def apply_kl_penalty(data: DataProto, kl_ctrl: KLController, kl_penalty="kl"):
 
     data.batch["token_level_rewards"] = token_level_scores - kl_ctrl.kl_coef * kld
 
-    current_kl = VF.masked_mean(kld, mask=response_mask, dim=-1)  # average over sequence
-    current_kl = torch.mean(current_kl, dim=0).item()
-    metrics = {"critic/kl": current_kl, "critic/kl_coef": kl_ctrl.kl_coef}
+    current_kl = torch.mean(VF.masked_mean(kld, mask=response_mask, dim=-1)).item()
+    metrics = {"actor/kl_penalty": current_kl, "actor/kl_coef": kl_ctrl.kl_coef}
 
     # According to https://github.com/huggingface/trl/blob/v0.11.0/trl/trainer/ppo_trainer.py#L880
     kl_ctrl.update(current_kl=current_kl, n_steps=batch_size)
@@ -128,30 +135,21 @@ def apply_kl_penalty(data: DataProto, kl_ctrl: KLController, kl_penalty="kl"):
 
 
 def compute_advantage(data: DataProto, adv_estimator: AdvantageEstimator, gamma: float = 1.0, lam: float = 1.0):
-    token_level_rewards = data.batch["token_level_rewards"]
-    response_mask = data.batch["response_mask"]
-    index = data.non_tensor_batch["uid"]
-    if adv_estimator == AdvantageEstimator.GAE:
-        values = data.batch["values"]
-        advantages, returns = core_algos.compute_gae_advantage_return(
-            token_level_rewards, values, response_mask, gamma, lam
-        )
-    elif adv_estimator == AdvantageEstimator.GRPO:
-        advantages, returns = core_algos.compute_grpo_outcome_advantage(token_level_rewards, response_mask, index)
-    elif adv_estimator == AdvantageEstimator.REINFORCE_PLUS_PLUS:
-        advantages, returns = core_algos.compute_reinforce_plus_plus_outcome_advantage(
-            token_level_rewards, response_mask, gamma
-        )
-    elif adv_estimator == AdvantageEstimator.REMAX:
-        reward_baselines = data.batch["reward_baselines"]
-        advantages, returns = core_algos.compute_remax_outcome_advantage(
-            token_level_rewards, reward_baselines, response_mask
-        )
-    elif adv_estimator == AdvantageEstimator.RLOO:
-        advantages, returns = core_algos.compute_rloo_outcome_advantage(token_level_rewards, response_mask, index)
-    else:
-        raise NotImplementedError
+    """Compute advantage estimates for policy optimization."""
+    adv_inputs = {
+        "token_level_rewards": data.batch["token_level_rewards"],
+        "response_mask": data.batch["response_mask"],
+        "index": data.non_tensor_batch["uid"],
+        "gamma": gamma,
+        "lam": lam,
+    }
+    if "values" in data.batch:
+        adv_inputs["values"] = data.batch["values"]
 
+    if "reward_baselines" in data.batch:
+        adv_inputs["reward_baselines"] = data.batch["reward_baselines"]
+
+    advantages, returns = compute_advantage_return(adv_estimator, **adv_inputs)
     data.batch["advantages"] = advantages
     data.batch["returns"] = returns
     return data
@@ -254,7 +252,7 @@ class RayPPOTrainer:
         self.resource_pool_manager.create_resource_pool()
         self.resource_pool_to_cls = {pool: {} for pool in self.resource_pool_manager.resource_pool_dict.values()}
 
-        # create actor and rollout
+        # create actor, rollout and ref
         if self.hybrid_engine:
             resource_pool = self.resource_pool_manager.get_resource_pool(Role.ActorRolloutRef)
             actor_rollout_ref_cls = RayClassWithInitArgs(
@@ -285,7 +283,7 @@ class RayPPOTrainer:
         # NOTE: if you want to use a different resource pool for each role, which can support different parallel size,
         # you should not use `create_colocated_worker_cls`. Instead, directly pass different resource pool to different worker groups.
         # See https://github.com/volcengine/verl/blob/master/examples/ray/tutorial.ipynb for more information.
-        all_wg: Dict[str, FSDPWorker] = {}
+        all_wg: dict[str, FSDPWorker] = {}
         self.wg_dicts = []
         for resource_pool, class_dict in self.resource_pool_to_cls.items():
             worker_dict_cls = create_colocated_worker_cls(class_dict=class_dict)
@@ -371,7 +369,7 @@ class RayPPOTrainer:
             print(f"No dataloader state found at {dataloader_path}, will start from scratch.")
 
     def _maybe_log_val_generations(
-        self, inputs: List[str], outputs: List[str], labels: List[str], scores: List[float]
+        self, inputs: list[str], outputs: list[str], labels: list[str], scores: list[float]
     ) -> None:
         """Log a table of validation samples"""
         if self.config.trainer.val_generations_to_log <= 0:
@@ -388,7 +386,7 @@ class RayPPOTrainer:
         samples = samples[: self.config.trainer.val_generations_to_log]
         self.logger.log_generation(samples, self.global_step)
 
-    def _validate(self) -> Dict[str, Any]:
+    def _validate(self) -> dict[str, Any]:
         reward_tensor_lst = []
         # Lists to collect samples for the table
         sample_inputs, sample_outputs, sample_labels, sample_scores = [], [], [], []
@@ -445,7 +443,7 @@ class RayPPOTrainer:
         print("Finish validation.")
         return {"val/reward_score": self.val_reward_score, **val_reward_metrics, **val_length_metrics}
 
-    def _balance_batch(self, batch: DataProto, metrics: Dict[str, Any], logging_prefix: str = "global_seqlen") -> None:
+    def _balance_batch(self, batch: DataProto, metrics: dict[str, Any], logging_prefix: str = "global_seqlen") -> None:
         """Reorder the data on single controller such that each dp rank gets similar total tokens"""
         attention_mask = batch.batch["attention_mask"]
         batch_size = attention_mask.shape[0]
@@ -462,7 +460,7 @@ class RayPPOTrainer:
         )
         metrics.update(global_balance_stats)
 
-    def _make_batch_data(self, metrics: Dict[str, Any]) -> DataProto:
+    def _make_batch_data(self, metrics: dict[str, Any]) -> DataProto:
         batch = None
         all_metrics = defaultdict(list)
         num_try_make_batch = 0
@@ -481,6 +479,9 @@ class RayPPOTrainer:
                 "video_fps": self.config.data.video_fps,
             }
             new_batch: DataProto = DataProto.from_single_dict(batch_dict, meta_info=meta_info)
+            new_batch.non_tensor_batch["uid"] = np.array(
+                [str(uuid.uuid4()) for _ in range(len(new_batch.batch))], dtype=object
+            )
 
             # pop those keys for generation
             gen_batch = new_batch.pop(
@@ -506,9 +507,6 @@ class RayPPOTrainer:
                 new_batch.batch["reward_baselines"] = reward_baseline_tensor
                 del gen_baseline_batch, gen_baseline_output
 
-            new_batch.non_tensor_batch["uid"] = np.array(
-                [str(uuid.uuid4()) for _ in range(len(new_batch.batch))], dtype=object
-            )
             # repeat to align with repeated responses in rollout
             new_batch = new_batch.repeat(repeat_times=self.config.worker.rollout.n, interleave=True)
             new_batch = new_batch.union(gen_batch_output)
@@ -533,6 +531,9 @@ class RayPPOTrainer:
                     if avg_score > self.config.algorithm.filter_low and avg_score < self.config.algorithm.filter_high
                 ]
                 kept_sample_idxs = [idx for idx, uid in enumerate(uids) if uid in kept_uids]
+                if len(kept_sample_idxs) == 0:
+                    raise RuntimeError("No sample is kept after filtering. Please check your data.")
+
                 new_batch = new_batch[kept_sample_idxs]
 
             batch = DataProto.concat([batch, new_batch]) if batch is not None else new_batch
@@ -544,7 +545,7 @@ class RayPPOTrainer:
                 if max_try_make_batch <= 0 or num_try_make_batch < max_try_make_batch:
                     print(f"{num_try_make_batch=}. Continue generating...")
                 else:
-                    raise ValueError(
+                    raise RuntimeError(
                         f"{num_try_make_batch=} >= {max_try_make_batch=}. Generated too many. Please check your data."
                     )
             else:
@@ -563,7 +564,7 @@ class RayPPOTrainer:
         self.logger = Tracker(loggers=self.config.trainer.logger, config=self.config.to_dict())
         self.global_step = 0
         main_tqdm = tqdm(range(self.training_steps), desc="Running step", position=0)
-        val_metrics: Optional[Dict[str, Any]] = None
+        val_metrics: Optional[dict[str, Any]] = None
 
         # load checkpoint before doing anything
         self._load_checkpoint()
