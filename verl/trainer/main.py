@@ -116,14 +116,17 @@ def main():
                 "TORCH_NCCL_AVOID_RECORD_STREAMS": "1",
                 "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:False",
                 "PYTHONUNBUFFERED": "1",
+                "CUDA_DEVICE_MAX_CONNECTIONS": "1",
             }
         }
         ray.init(runtime_env=runtime_env)
-        if ppo_config.trainer.ray_timeline is not None:
-            ray.timeline(filename=ppo_config.trainer.ray_timeline)
-            
+
     runner = Runner.remote()
     ray.get(runner.run.remote(ppo_config))
+
+    if ppo_config.trainer.ray_timeline is not None:
+        # use `export RAY_PROFILING=1` to record the ray timeline
+        ray.timeline(filename=ppo_config.trainer.ray_timeline)
 
 
 if __name__ == "__main__":

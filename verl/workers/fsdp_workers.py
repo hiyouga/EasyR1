@@ -29,8 +29,8 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
+    AutoModelForImageTextToText,
     AutoModelForTokenClassification,
-    AutoModelForVision2Seq,
     GenerationConfig,
     PreTrainedModel,
 )
@@ -192,8 +192,8 @@ class FSDPWorker(Worker):
 
         if role == "critic":
             auto_class = AutoModelForTokenClassification
-        elif type(self.model_config) in AutoModelForVision2Seq._model_mapping.keys():
-            auto_class = AutoModelForVision2Seq
+        elif type(self.model_config) in AutoModelForImageTextToText._model_mapping.keys():
+            auto_class = AutoModelForImageTextToText
         else:
             auto_class = AutoModelForCausalLM
 

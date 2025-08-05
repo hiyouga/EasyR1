@@ -15,6 +15,6 @@ qwen-vl-utils
 ray[default]
 tensordict
 torchdata
-transformers>=4.51.0,<4.53.0
+transformers>=4.51.0
 vllm>=0.8.0
 wandb

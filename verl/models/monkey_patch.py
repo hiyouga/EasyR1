@@ -29,13 +29,11 @@ def apply_ulysses_patch(model_type: str) -> None:
     if model_type in ("llama", "gemma", "gemma2", "mistral", "qwen2", "qwen3", "qwen3_moe"):
         ALL_ATTENTION_FUNCTIONS["flash_attention_2"] = flash_attention_forward
     elif model_type in ("qwen2_vl", "qwen2_5_vl"):
-        if is_transformers_version_greater_than("4.53.0"):
-            from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import Qwen2_5_VLAttention
-            from transformers.models.qwen2_vl.modeling_qwen2_vl import Qwen2VLAttention
-
-            Qwen2VLAttention.forward = qwen2_vl_attn_forward
-            Qwen2_5_VLAttention.forward = qwen2_vl_attn_forward
-            raise NotImplementedError("Transformers 4.53.* is not compatible with Qwen2-VL models.")
+        if is_transformers_version_greater_than("4.54.0"):
+            # transformers 4.54.0 does not need special patch: https://github.com/huggingface/transformers/pull/39447
+            ALL_ATTENTION_FUNCTIONS["flash_attention_2"] = flash_attention_forward
+        elif is_transformers_version_greater_than("4.53.0"):
+            raise NotImplementedError("Transformers 4.53.* is not compatible with Qwen2-VL. Use 4.54.0 or later.")
         else:
             from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import Qwen2_5_VLFlashAttention2
             from transformers.models.qwen2_vl.modeling_qwen2_vl import Qwen2VLFlashAttention2

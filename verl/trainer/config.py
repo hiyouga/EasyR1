@@ -142,7 +142,7 @@ class TrainerConfig:
     load_checkpoint_path: Optional[str] = None
     """load checkpoint path"""
     ray_timeline: Optional[str] = None
-    """file to save ray timeline. set to None to disable"""
+    """file to save ray timeline"""
     find_last_checkpoint: bool = True
     """automatically find the last checkpoint in the save checkpoint path to resume training"""
 
