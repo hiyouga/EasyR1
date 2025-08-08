@@ -456,7 +456,7 @@ class FSDPWorker(Worker):
             multi_modal_inputs_cache = {}  # avoid repeated processing for n > 1 samples
             for index, multi_modal_data in zip(
                 data.non_tensor_batch["uid"], data.non_tensor_batch["multi_modal_data"]
-            ): # process multi modal data per sample
+            ):  # process multi modal data per sample
                 if index not in multi_modal_inputs_cache:
                     images, videos = [], []
                     if "images" in multi_modal_data:

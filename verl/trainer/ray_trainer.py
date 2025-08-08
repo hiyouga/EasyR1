@@ -39,7 +39,7 @@ from ..single_controller.ray.base import create_colocated_worker_cls
 from ..utils import torch_functional as VF
 from ..utils.checkpoint import CHECKPOINT_TRACKER, find_latest_ckpt, remove_obsolete_ckpt
 from ..utils.logger import Tracker
-from ..utils.py_functional import convert_dict_to_str, timer
+from ..utils.py_functional import convert_dict_to_str, timer, unflatten_dict
 from ..utils.seqlen_balancing import get_seqlen_balanced_partitions, log_seqlen_unbalance
 from ..workers.fsdp_workers import FSDPWorker
 from ..workers.reward import FunctionRewardManager
@@ -694,7 +694,7 @@ class RayPPOTrainer:
                 val_metrics = self._validate()
                 self.logger.log(data=val_metrics, step=self.global_step)
 
-            print(f"Final validation metrics: {convert_dict_to_str(val_metrics)}")
+            print(f"Final validation metrics:\n{convert_dict_to_str(unflatten_dict(val_metrics))}")
 
         if self.config.trainer.save_freq <= 0 or self.global_step % self.config.trainer.save_freq != 0:
             self._save_checkpoint()
