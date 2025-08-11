@@ -27,7 +27,7 @@ from torch import nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 from ...protocol import DataProto, batch_collate
-from ...trainer.core_algos import average_loss, compute_kl, compute_policy_loss
+from ...trainer.core_algos import average_loss, compute_kl, compute_policy_loss, compute_policy_loss_gspo
 from ...utils import torch_functional as VF
 from ...utils.py_functional import append_to_dict
 from ...utils.seqlen_balancing import prepare_dynamic_batch, restore_dynamic_batch
@@ -216,7 +216,7 @@ class DataParallelPPOActor(BasePPOActor):
 
         return log_probs
 
-    def update_policy(self, data: DataProto) -> dict[str, Any]:
+    def update_policy(self, data: DataProto, adv_estimator: str) -> dict[str, Any]:
         self.actor_module.train()
 
         temperature = data.meta_info["temperature"]  # temperature must be in the data.meta_info to avoid slient error
@@ -255,17 +255,28 @@ class DataParallelPPOActor(BasePPOActor):
 
                     # all return: (bsz, response_length)
                     log_probs = self._forward_micro_batch(model_inputs, temperature=temperature)
-
-                    pg_loss, pg_metrics = compute_policy_loss(
-                        old_log_probs=old_log_probs,
-                        log_probs=log_probs,
-                        advantages=advantages,
-                        response_mask=response_mask,
-                        clip_ratio_low=self.config.clip_ratio_low,
-                        clip_ratio_high=self.config.clip_ratio_high,
-                        clip_ratio_dual=self.config.clip_ratio_dual,
-                        loss_avg_mode=self.config.loss_avg_mode,
-                    )
+                    if adv_estimator == "gspo":
+                        pg_loss, pg_metrics = compute_policy_loss_gspo(
+                            old_log_probs=old_log_probs,
+                            log_probs=log_probs,
+                            advantages=advantages,
+                            response_mask=response_mask,
+                            clip_ratio_low=self.config.clip_ratio_low,
+                            clip_ratio_high=self.config.clip_ratio_high,
+                            clip_ratio_dual=self.config.clip_ratio_dual,
+                            loss_avg_mode=self.config.loss_avg_mode,
+                        )
+                    else:
+                        pg_loss, pg_metrics = compute_policy_loss(
+                            old_log_probs=old_log_probs,
+                            log_probs=log_probs,
+                            advantages=advantages,
+                            response_mask=response_mask,
+                            clip_ratio_low=self.config.clip_ratio_low,
+                            clip_ratio_high=self.config.clip_ratio_high,
+                            clip_ratio_dual=self.config.clip_ratio_dual,
+                            loss_avg_mode=self.config.loss_avg_mode,
+                        )
                     if self.config.use_kl_loss and "ref_log_probs" in model_inputs:
                         ref_log_probs = model_inputs["ref_log_probs"]
                         # compute kl loss

@@ -350,7 +350,8 @@ class FSDPWorker(Worker):
         print_gpu_memory_usage("After vllm init")
 
     @register(dispatch_mode=Dispatch.ONE_TO_ALL)
-    def init_model(self):
+    def init_model(self, adv_estimator: str):
+        self.adv_estimator = adv_estimator
         if self._has_critic:
             self._build_model_optimizer(
                 model_config=self.config.critic.model,
