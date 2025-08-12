@@ -21,7 +21,7 @@ data:
   filter_overlong_prompts: true
 
 algorithm:
-  adv_estimator: grpo
+  adv_estimator: grpo # gspo
   disable_kl: false
   use_kl_loss: true
   kl_penalty: low_var_kl
