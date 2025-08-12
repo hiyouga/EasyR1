@@ -505,7 +505,7 @@ class FSDPWorker(Worker):
         with self.ulysses_sharding_manager:
             data = self.ulysses_sharding_manager.preprocess_data(data=data)
             with Timer(name="update_policy", logger=None) as timer:
-                metrics = self.actor.update_policy(data=data)
+                metrics = self.actor.update_policy(data=data, adv_estimator=self.adv_estimator)
 
             delta_time = timer.last
             global_num_tokens = data.meta_info["global_token_num"]
