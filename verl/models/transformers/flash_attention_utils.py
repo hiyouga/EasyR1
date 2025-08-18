@@ -43,19 +43,17 @@ if is_flash_attn_2_available():
 def prepare_fa2_from_position_ids(
     query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, position_ids: torch.Tensor
 ):
-    query = query.view(-1, query.size(-2), query.size(-1))
+    assert position_ids.ndim == 2  # (batch_size, seq_length)
+    query = query.contiguous().view(-1, query.size(-2), query.size(-1))
     key = key.contiguous().view(-1, key.size(-2), key.size(-1))
     value = value.contiguous().view(-1, value.size(-2), value.size(-1))
-    position_ids = position_ids.flatten()
-    indices_q = torch.arange(position_ids.size(0), device=position_ids.device, dtype=torch.int32)
+    position_ids = position_ids.view(-1)
+    indices_q = (position_ids == 0).nonzero().view(-1)
     cu_seqlens = torch.cat(
-        (
-            indices_q[position_ids == 0],
-            torch.tensor(position_ids.size(), device=position_ids.device, dtype=torch.int32),
-        )
+        (indices_q, torch.tensor(position_ids.size(), device=position_ids.device, dtype=torch.int32))
     )
     max_length = cu_seqlens.diff().max()  # use cu_seqlens to infer max_length for qwen2vl mrope
-    return (query, key, value, indices_q, (cu_seqlens, cu_seqlens), (max_length, max_length))
+    return (query, key, value, (cu_seqlens, cu_seqlens), (max_length, max_length))
 
 
 def _custom_flash_attention_forward(
@@ -102,7 +100,7 @@ def _custom_flash_attention_forward(
 
     if position_ids is not None and query_length != 1 and not (torch.diff(position_ids, dim=-1) >= 0).all():
         batch_size = query_states.size(0)
-        query_states, key_states, value_states, _, cu_seq_lens, max_seq_lens = prepare_fa2_from_position_ids(
+        query_states, key_states, value_states, cu_seq_lens, max_seq_lens = prepare_fa2_from_position_ids(
             query_states, key_states, value_states, position_ids
         )
         cu_seqlens_q, cu_seqlens_k = cu_seq_lens
@@ -162,8 +160,10 @@ def flash_attention_forward(
     key = key.transpose(1, 2)
     value = value.transpose(1, 2)
 
-    # FA2 always relies on the value set in the module, so remove it if present in kwargs to avoid passing it twice
-    kwargs.pop("is_causal", None)
+    # FA2 uses the kwargs value if explicitly passed, otherwise it uses the module attribute
+    is_causal = kwargs.pop("is_causal", None)
+    if is_causal is None:
+        is_causal = getattr(module, "is_causal", True)
 
     attn_output = _custom_flash_attention_forward(
         query,
@@ -171,7 +171,7 @@ def flash_attention_forward(
         value,
         attention_mask,
         query_length=q_len,
-        is_causal=module.is_causal,
+        is_causal=is_causal,
         dropout=dropout,
         softmax_scale=scaling,
         sliding_window=sliding_window,
