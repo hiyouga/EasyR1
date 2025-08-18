@@ -20,6 +20,7 @@ from typing import Optional, Tuple
 
 import torch
 import torch.distributed as dist
+import torch.nn.functional as F
 from transformers.modeling_flash_attention_utils import _flash_attention_forward, fa_peft_integration_check
 from transformers.utils import is_flash_attn_2_available, is_flash_attn_greater_or_equal_2_10
 
@@ -48,10 +49,7 @@ def prepare_fa2_from_position_ids(
     key = key.contiguous().view(-1, key.size(-2), key.size(-1))
     value = value.contiguous().view(-1, value.size(-2), value.size(-1))
     position_ids = position_ids.view(-1)
-    indices_q = (position_ids == 0).nonzero().view(-1)
-    cu_seqlens = torch.cat(
-        (indices_q, torch.tensor(position_ids.size(), device=position_ids.device, dtype=torch.int32))
-    )
+    cu_seqlens = F.pad((position_ids == 0).nonzero().view(-1), (0, 1), value=position_ids.size())
     max_length = cu_seqlens.diff().max()  # use cu_seqlens to infer max_length for qwen2vl mrope
     return (query, key, value, (cu_seqlens, cu_seqlens), (max_length, max_length))
 

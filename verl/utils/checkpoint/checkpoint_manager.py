@@ -115,7 +115,9 @@ def get_checkpoint_tracker_filename(root_path: str) -> str:
     return os.path.join(root_path, CHECKPOINT_TRACKER)
 
 
-def find_latest_ckpt(path: str, directory_format: str = "global_step_{}") -> tuple[Optional[str], Optional[dict[str, Any]]]:
+def find_latest_ckpt(
+    path: str, directory_format: str = "global_step_{}"
+) -> tuple[Optional[str], Optional[dict[str, Any]]]:
     """
     Find the latest checkpoint in the save path.
     """

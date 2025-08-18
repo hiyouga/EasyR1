@@ -35,9 +35,9 @@ def test_find_latest_ckpt(save_checkpoint_path):
     with open(os.path.join(save_checkpoint_path, CHECKPOINT_TRACKER), "w") as f:
         json.dump({"last_global_step": 10}, f, ensure_ascii=False, indent=2)
 
-    assert find_latest_ckpt(save_checkpoint_path) is None
+    assert find_latest_ckpt(save_checkpoint_path)[0] is None
     os.makedirs(os.path.join(save_checkpoint_path, "global_step_10"), exist_ok=True)
-    assert find_latest_ckpt(save_checkpoint_path) == os.path.join(save_checkpoint_path, "global_step_10")
+    assert find_latest_ckpt(save_checkpoint_path)[0] == os.path.join(save_checkpoint_path, "global_step_10")
 
 
 def test_remove_obsolete_ckpt(save_checkpoint_path):
