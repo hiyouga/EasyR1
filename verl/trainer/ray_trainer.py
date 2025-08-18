@@ -343,7 +343,10 @@ class RayPPOTrainer:
         if self.config.trainer.load_checkpoint_path is not None:
             load_checkpoint_path = self.config.trainer.load_checkpoint_path
         elif self.config.trainer.find_last_checkpoint:
-            load_checkpoint_path = find_latest_ckpt(self.config.trainer.save_checkpoint_path)
+            load_checkpoint_path, tracker_info = find_latest_ckpt(self.config.trainer.save_checkpoint_path)
+            if tracker_info is not None:
+                self.best_val_reward_score = tracker_info.get("best_val_reward_score", 0.0)
+                self.best_global_step = tracker_info.get("best_global_step", 0)
         else:
             load_checkpoint_path = None
 

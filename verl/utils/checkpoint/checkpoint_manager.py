@@ -115,13 +115,13 @@ def get_checkpoint_tracker_filename(root_path: str) -> str:
     return os.path.join(root_path, CHECKPOINT_TRACKER)
 
 
-def find_latest_ckpt(path: str, directory_format: str = "global_step_{}") -> Optional[str]:
+def find_latest_ckpt(path: str, directory_format: str = "global_step_{}") -> tuple[Optional[str], Optional[dict[str, Any]]]:
     """
     Find the latest checkpoint in the save path.
     """
     tracker_file = get_checkpoint_tracker_filename(path)
     if not os.path.exists(tracker_file):
-        return None
+        return None, None
 
     with open(tracker_file, "rb") as f:
         checkpointer_tracker_info = json.load(f)
@@ -129,10 +129,10 @@ def find_latest_ckpt(path: str, directory_format: str = "global_step_{}") -> Opt
     ckpt_path = os.path.join(path, directory_format.format(checkpointer_tracker_info["last_global_step"]))
     if not os.path.exists(ckpt_path):
         print(f"Checkpoint does not exist: {ckpt_path}")
-        return None
+        return None, None
 
     print(f"Found latest checkpoint: {ckpt_path}, will resume from it. Turn off `find_last_checkpoint` to disable it.")
-    return ckpt_path
+    return ckpt_path, checkpointer_tracker_info
 
 
 def remove_obsolete_ckpt(
