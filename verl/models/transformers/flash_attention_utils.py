@@ -50,7 +50,7 @@ def prepare_fa2_from_position_ids(
     position_ids = position_ids.view(-1)
     cu_seqlens = torch.cat(
         (
-            (position_ids == 0).nonzero().view(-1),
+            (position_ids == 0).nonzero().view(-1).to(torch.int32),
             torch.tensor(position_ids.size(), device=position_ids.device, dtype=torch.int32),
         )
     )
