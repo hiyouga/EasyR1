@@ -191,14 +191,14 @@ class FSDPWorker(Worker):
             torch_dtype = PrecisionType.to_dtype(fsdp_config.torch_dtype)
 
         if role == "critic":
-            auto_class = AutoModelForTokenClassification
+            AutoClass = AutoModelForTokenClassification
         elif type(self.model_config) in AutoModelForImageTextToText._model_mapping.keys():
-            auto_class = AutoModelForImageTextToText
+            AutoClass = AutoModelForImageTextToText
         else:
-            auto_class = AutoModelForCausalLM
+            AutoClass = AutoModelForCausalLM
 
         if (not fsdp_config.enable_rank0_init) or self.device_mesh.get_local_rank("fsdp") == 0:
-            model = auto_class.from_pretrained(
+            model = AutoClass.from_pretrained(
                 model_config.model_path,
                 config=self.model_config,
                 torch_dtype=torch_dtype,
@@ -209,7 +209,7 @@ class FSDPWorker(Worker):
             )
         else:
             with no_init_weights(), init_empty_weights():
-                model = auto_class.from_config(
+                model = AutoClass.from_config(
                     self.model_config,
                     torch_dtype=torch_dtype,
                     attn_implementation="flash_attention_2",

@@ -24,7 +24,7 @@ from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
     AutoModelForTokenClassification,
-    AutoModelForVision2Seq,
+    AutoModelForImageTextToText,
     PretrainedConfig,
     PreTrainedModel,
 )
@@ -165,10 +165,10 @@ if __name__ == "__main__":
 
     if "ForTokenClassification" in architectures[0]:
         AutoClass = AutoModelForTokenClassification
+    elif "ForConditionalGeneration" in architectures[0]:
+        AutoClass = AutoModelForImageTextToText
     elif "ForCausalLM" in architectures[0]:
         AutoClass = AutoModelForCausalLM
-    elif "ForConditionalGeneration" in architectures[0]:
-        AutoClass = AutoModelForVision2Seq
     else:
         raise NotImplementedError(f"Unknown architecture {architectures}.")
 
