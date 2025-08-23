@@ -23,8 +23,8 @@ from torch.distributed._tensor import DTensor, Placement, Shard
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
-    AutoModelForTokenClassification,
     AutoModelForImageTextToText,
+    AutoModelForTokenClassification,
     PretrainedConfig,
     PreTrainedModel,
 )
