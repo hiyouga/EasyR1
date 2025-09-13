@@ -8,4 +8,4 @@ ruff
 tensordict
 torch
 torchvision
-transformers
+transformers>=4.51.0,<=4.56.1
