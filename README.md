@@ -28,7 +28,7 @@ EasyR1 is efficient and scalable due to the design of **[HybirdEngine](https://a
 
 - Supported tricks
   - Padding-free training
-  - Resuming from checkpoint
+  - Resuming from the latest/best checkpoint
   - Wandb & SwanLab & Mlflow & Tensorboard tracking
 
 ## Requirements
