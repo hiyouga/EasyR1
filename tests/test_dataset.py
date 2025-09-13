@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import pytest
 import torch
 from PIL.Image import Image
 
@@ -19,9 +20,10 @@ from verl.utils.dataset import RLHFDataset
 from verl.utils.tokenizer import get_processor, get_tokenizer
 
 
-def test_image_dataset():
-    tokenizer = get_tokenizer("Qwen/Qwen2.5-VL-7B-Instruct", use_fast=True)
-    processor = get_processor("Qwen/Qwen2.5-VL-7B-Instruct", use_fast=True)
+@pytest.mark.parametrize("use_fast", [True, False])
+def test_image_dataset(use_fast: bool):
+    tokenizer = get_tokenizer("Qwen/Qwen2.5-VL-7B-Instruct", use_fast=use_fast)
+    processor = get_processor("Qwen/Qwen2.5-VL-7B-Instruct", use_fast=use_fast)
     dataset = RLHFDataset(
         data_path="hiyouga/geometry3k@test",
         tokenizer=tokenizer,
@@ -44,8 +46,8 @@ def test_image_dataset():
     }
     assert torch.all(dataset[0]["input_ids"] == torch.tensor(token_ids))
     assert torch.all(dataset[0]["attention_mask"] == torch.ones(16))
-    assert torch.all(dataset[0]["position_ids"] == torch.arange(16).unsqueeze(0).expand(3, -1))
-    assert list(dataset[0]["position_ids"].size()) == [3, 16]  # avoid fake positive caused by broadcasting
+    assert torch.all(dataset[0]["position_ids"] == torch.arange(16).unsqueeze(0).expand(4, -1))
+    assert list(dataset[0]["position_ids"].size()) == [4, 16]  # avoid fake positive caused by broadcasting
     assert dataset[0]["raw_prompt_ids"] == token_ids
     assert dataset[0]["ground_truth"] == "48"
     assert isinstance(dataset[0]["multi_modal_data"]["images"][0], Image)

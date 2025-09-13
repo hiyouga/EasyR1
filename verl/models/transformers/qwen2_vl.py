@@ -147,6 +147,19 @@ def get_rope_index(
     return position_ids
 
 
+def process_position_ids(position_ids: torch.Tensor) -> torch.Tensor:
+    if position_ids.dim() != 3 or position_ids.size(0) != 4:
+        # we concat the text position ids with the 3D vision position ids by default
+        # see https://github.com/huggingface/transformers/pull/39447
+        raise ValueError("position_ids should be a 3D tensor of shape (4, batch_size, seq_length).")
+
+    if not is_transformers_version_greater_than("4.54.0"):
+        # transformers < 4.54.0 only accepts vision position ids, so we discard the text position ids here
+        position_ids = position_ids[1:]
+
+    return position_ids
+
+
 def qwen2_vl_attn_forward(
     self: "Qwen2VLAttention",
     hidden_states: torch.Tensor,
@@ -272,7 +285,7 @@ def qwen2_vl_forward_old(
     outputs = self.model(
         input_ids=None,
         attention_mask=attention_mask,
-        position_ids=position_ids,
+        position_ids=process_position_ids(position_ids),
         inputs_embeds=inputs_embeds,
         **kwargs,
     )
@@ -306,7 +319,7 @@ def qwen2_vl_base_forward_new(
     )
     outputs = self.language_model(
         input_ids=None,
-        position_ids=position_ids,
+        position_ids=process_position_ids(position_ids),
         attention_mask=attention_mask,
         inputs_embeds=inputs_embeds,
         **kwargs,

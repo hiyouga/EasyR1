@@ -77,7 +77,7 @@ class DataParallelPPOActor(BasePPOActor):
         responses = micro_batch["responses"]
         response_length = responses.size(-1)
         if position_ids.dim() == 3:  # qwen2vl mrope
-            position_ids = position_ids.transpose(0, 1)  # (bsz, 3, seqlen) -> (3, bsz, seqlen)
+            position_ids = position_ids.transpose(0, 1)  # (bsz, 4, seqlen) -> (4, bsz, seqlen)
 
         multi_modal_inputs = defaultdict(list)
         if "multi_modal_inputs" in micro_batch:
@@ -96,7 +96,7 @@ class DataParallelPPOActor(BasePPOActor):
                     index_first_axis(rearrange(position_ids, "c b s ... -> (b s) c ..."), indices)
                     .transpose(0, 1)
                     .unsqueeze(1)
-                )  # (3, bsz, seqlen) -> (3, 1, bsz * seqlen)
+                )  # (4, bsz, seqlen) -> (4, 1, bsz * seqlen)
             else:
                 position_ids_rmpad = index_first_axis(
                     rearrange(position_ids.unsqueeze(-1), "b s ... -> (b s) ..."), indices

@@ -266,7 +266,7 @@ class RLHFDataset(Dataset):
 
         if self.processor is not None and "Qwen2VLImageProcessor" in self.processor.image_processor.__class__.__name__:
             # qwen2vl mrope
-            position_ids = get_rope_index(
+            vision_position_ids = get_rope_index(
                 self.processor,
                 input_ids=input_ids,
                 image_grid_thw=model_inputs.get("image_grid_thw", None),
@@ -274,6 +274,8 @@ class RLHFDataset(Dataset):
                 second_per_grid_ts=model_inputs.get("second_per_grid_ts", None),
                 attention_mask=attention_mask,
             )  # (3, seq_length)
+            text_position_ids = torch.arange(len(input_ids)).unsqueeze(0)  # (1, seq_length)
+            position_ids = torch.cat((text_position_ids, vision_position_ids), dim=0)  # (4, seq_length)
         else:
             position_ids = torch.clip(attention_mask.cumsum(dim=0) - 1, min=0, max=None)  # (seq_length,)
 
