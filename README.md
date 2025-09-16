@@ -36,7 +36,7 @@ EasyR1 is efficient and scalable due to the design of **[HybirdEngine](https://a
 ### Software Requirements
 
 - Python 3.9+
-- transformers>=4.51.0
+- transformers>=4.54.0
 - flash-attn>=2.4.3
 - vllm>=0.8.3
 

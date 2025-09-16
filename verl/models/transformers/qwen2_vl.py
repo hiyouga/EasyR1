@@ -15,33 +15,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional, Tuple
+from typing import Optional
 
 import torch
-
-from ...utils.py_functional import is_transformers_version_greater_than
-from .flash_attention_utils import flash_attention_forward
-
-
-if is_transformers_version_greater_than("4.52.0"):
-    from transformers.models.qwen2_vl.modeling_qwen2_vl import (
-        Qwen2VLAttention,
-        Qwen2VLCausalLMOutputWithPast,
-        Qwen2VLForConditionalGeneration,
-        Qwen2VLModel,
-        Qwen2VLModelOutputWithPast,
-        apply_multimodal_rotary_pos_emb,
-        repeat_kv,
-    )
-    from transformers.models.qwen2_vl.processing_qwen2_vl import Qwen2VLProcessor
-else:
-    from transformers.models.qwen2_vl.modeling_qwen2_vl import (
-        Qwen2VLAttention,
-        Qwen2VLCausalLMOutputWithPast,
-        Qwen2VLForConditionalGeneration,
-        apply_multimodal_rotary_pos_emb,
-        repeat_kv,
-    )
+from transformers.models.qwen2_vl.modeling_qwen2_vl import (
+    Qwen2VLCausalLMOutputWithPast,
+    Qwen2VLForConditionalGeneration,
+    Qwen2VLModel,
+    Qwen2VLModelOutputWithPast,
+)
+from transformers.models.qwen2_vl.processing_qwen2_vl import Qwen2VLProcessor
 
 
 def get_rope_index(
@@ -147,68 +130,6 @@ def get_rope_index(
     return position_ids
 
 
-def process_position_ids(position_ids: torch.Tensor) -> torch.Tensor:
-    if position_ids.dim() != 3 or position_ids.size(0) != 4:
-        # we concat the text position ids with the 3D vision position ids by default
-        # see https://github.com/huggingface/transformers/pull/39447
-        raise ValueError("position_ids should be a 3D tensor of shape (4, batch_size, seq_length).")
-
-    if not is_transformers_version_greater_than("4.54.0"):
-        # transformers < 4.54.0 only accepts vision position ids, so we discard the text position ids here
-        position_ids = position_ids[1:]
-
-    return position_ids
-
-
-def qwen2_vl_attn_forward(
-    self: "Qwen2VLAttention",
-    hidden_states: torch.Tensor,
-    attention_mask: Optional[torch.Tensor] = None,
-    position_ids: Optional[torch.LongTensor] = None,
-    position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,  # will become mandatory in v4.46
-    **kwargs,
-) -> Tuple[torch.Tensor, None, None]:
-    bsz, q_len, _ = hidden_states.size()  # q_len = seq_length / sp_size
-    query_states = self.q_proj(hidden_states)  # (batch_size, seq_length / sp_size, num_heads * head_size)
-    key_states = self.k_proj(hidden_states)
-    value_states = self.v_proj(hidden_states)
-
-    query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
-    key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
-    value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
-
-    # Because the input can be padded, the absolute sequence length depends on the max position id.
-    cos, sin = position_embeddings
-    query_states, key_states = apply_multimodal_rotary_pos_emb(
-        query_states, key_states, cos, sin, self.rope_scaling["mrope_section"]
-    )
-    key_states = repeat_kv(key_states, self.num_key_value_groups)
-    value_states = repeat_kv(value_states, self.num_key_value_groups)
-    dropout_rate = 0.0 if not self.training else self.attention_dropout
-
-    sliding_window = None
-    if (
-        self.config.use_sliding_window
-        and getattr(self.config, "sliding_window", None) is not None
-        and self.layer_idx >= self.config.max_window_layers
-    ):
-        sliding_window = self.config.sliding_window
-
-    attn_output, _ = flash_attention_forward(
-        self,
-        query_states,
-        key_states,
-        value_states,
-        attention_mask,
-        dropout=dropout_rate,
-        sliding_window=sliding_window,
-        position_ids=position_ids[0],  # important: pass position ids
-    )  # (batch_size, seq_length, num_head / sp_size, head_size)
-    attn_output = attn_output.reshape(bsz, q_len, self.hidden_size).contiguous()
-    attn_output = self.o_proj(attn_output)
-    return attn_output, None, None
-
-
 def _get_input_embeds(
     model: "Qwen2VLModel",
     input_ids: torch.LongTensor,
@@ -255,7 +176,7 @@ def _get_input_embeds(
         video_embeds = video_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
         inputs_embeds = inputs_embeds.masked_scatter(video_mask, video_embeds)
 
-    if pixel_values is None and pixel_values_videos is None:
+    if model.training and pixel_values is None and pixel_values_videos is None:
         pixel_values = torch.zeros((16, 1176), dtype=inputs_embeds.dtype, device=inputs_embeds.device)
         image_grid_thw = torch.tensor([[1, 4, 4]], dtype=torch.long, device=inputs_embeds.device)
         image_embeds = model.visual(pixel_values, grid_thw=image_grid_thw)
@@ -267,63 +188,26 @@ def _get_input_embeds(
     return inputs_embeds, attention_mask
 
 
-def qwen2_vl_forward_old(
-    self: "Qwen2VLForConditionalGeneration",
-    input_ids: torch.LongTensor,
-    attention_mask: Optional[torch.Tensor] = None,
-    position_ids: Optional[torch.LongTensor] = None,
-    labels: Optional[torch.LongTensor] = None,
-    pixel_values: Optional[torch.FloatTensor] = None,
-    pixel_values_videos: Optional[torch.FloatTensor] = None,
-    image_grid_thw: Optional[torch.LongTensor] = None,
-    video_grid_thw: Optional[torch.LongTensor] = None,
-    **kwargs,
-) -> "Qwen2VLCausalLMOutputWithPast":
-    inputs_embeds, attention_mask = _get_input_embeds(
-        self, input_ids, attention_mask, pixel_values, pixel_values_videos, image_grid_thw, video_grid_thw
-    )
-    outputs = self.model(
-        input_ids=None,
-        attention_mask=attention_mask,
-        position_ids=process_position_ids(position_ids),
-        inputs_embeds=inputs_embeds,
-        **kwargs,
-    )
-    hidden_states = outputs[0]
-    logits = self.lm_head(hidden_states)
-
-    return Qwen2VLCausalLMOutputWithPast(
-        loss=None,
-        logits=logits,
-        past_key_values=None,
-        hidden_states=None,
-        attentions=None,
-        rope_deltas=None,
-    )
-
-
-def qwen2_vl_base_forward_new(
+def qwen2_vl_base_forward(
     self: "Qwen2VLModel",
     input_ids: torch.LongTensor,
     attention_mask: Optional[torch.Tensor] = None,
-    position_ids: Optional[torch.LongTensor] = None,
-    labels: Optional[torch.LongTensor] = None,
     pixel_values: Optional[torch.FloatTensor] = None,
     pixel_values_videos: Optional[torch.FloatTensor] = None,
     image_grid_thw: Optional[torch.LongTensor] = None,
     video_grid_thw: Optional[torch.LongTensor] = None,
     **kwargs,
 ):
-    inputs_embeds, attention_mask = _get_input_embeds(
+    position_ids = kwargs.get("position_ids")
+    if isinstance(position_ids, torch.Tensor) and (position_ids.ndim != 3 or position_ids.size(0) != 4):
+        # we concat the text position ids with the 3D vision position ids by default
+        # see https://github.com/huggingface/transformers/pull/39447
+        raise ValueError("position_ids should be a 3D tensor of shape (4, batch_size, seq_length).")
+
+    kwargs["inputs_embeds"], kwargs["attention_mask"] = _get_input_embeds(
         self, input_ids, attention_mask, pixel_values, pixel_values_videos, image_grid_thw, video_grid_thw
-    )
-    outputs = self.language_model(
-        input_ids=None,
-        position_ids=process_position_ids(position_ids),
-        attention_mask=attention_mask,
-        inputs_embeds=inputs_embeds,
-        **kwargs,
-    )
+    )  # avoid lora module to have multiple keyword arguments
+    outputs = self.language_model(input_ids=None, **kwargs)
 
     return Qwen2VLModelOutputWithPast(
         last_hidden_state=outputs.last_hidden_state,
@@ -334,36 +218,14 @@ def qwen2_vl_base_forward_new(
     )
 
 
-def qwen2_vl_forward_new(
+def qwen2_vl_model_forward(
     self: "Qwen2VLForConditionalGeneration",
     input_ids: torch.LongTensor,
-    attention_mask: Optional[torch.Tensor] = None,
-    position_ids: Optional[torch.LongTensor] = None,
     labels: Optional[torch.LongTensor] = None,
-    pixel_values: Optional[torch.FloatTensor] = None,
-    pixel_values_videos: Optional[torch.FloatTensor] = None,
-    image_grid_thw: Optional[torch.LongTensor] = None,
-    video_grid_thw: Optional[torch.LongTensor] = None,
     **kwargs,
 ) -> "Qwen2VLCausalLMOutputWithPast":
-    outputs = self.model(
-        input_ids=input_ids,
-        pixel_values=pixel_values,
-        pixel_values_videos=pixel_values_videos,
-        image_grid_thw=image_grid_thw,
-        video_grid_thw=video_grid_thw,
-        position_ids=position_ids,
-        attention_mask=attention_mask,
-        **kwargs,
-    )
+    outputs = self.model(input_ids=input_ids, **kwargs)
     hidden_states = outputs[0]
     logits = self.lm_head(hidden_states)
 
-    return Qwen2VLCausalLMOutputWithPast(
-        loss=None,
-        logits=logits,
-        past_key_values=None,
-        hidden_states=None,
-        attentions=None,
-        rope_deltas=None,
-    )
+    return Qwen2VLCausalLMOutputWithPast(logits=logits)
