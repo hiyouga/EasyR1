@@ -44,7 +44,7 @@ Welcome to contribute new data points!
 - vLLM TP: rollout.tensor_parallel_size
 - Peak Mem: Peak CPU memory usage
 - Peak VRAM: Peak GPU memory usage
-- Throughput: Number of tokens per second per GPU by one training step (including the improvement compared to the previous version)
+- Throughput: Number of tokens per second per GPU by one training step (including the improvement compared to the [previous version](https://github.com/hiyouga/EasyR1/blob/v0.3.1/assets/baselines.md))
 - Sec per step: Average time per step in seconds
 
 > [!NOTE]
