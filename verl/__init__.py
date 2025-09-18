@@ -21,7 +21,7 @@ if is_package_available("modelscope"):
     from modelscope.utils.hf_util import patch_hub  # type: ignore
 
 
-__version__ = "0.3.2.dev0"
+__version__ = "0.3.2"
 
 
 if os.getenv("USE_MODELSCOPE_HUB", "0").lower() in ["true", "y", "1"]:

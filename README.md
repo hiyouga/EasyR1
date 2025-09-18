@@ -56,6 +56,8 @@ apptainer pull easyr1.sif docker://hiyouga/verl:ngc-th2.7.1-cu12.6-vllm0.10.0
 apptainer shell --nv --cleanenv --bind /mnt/your_dir:/mnt/your_dir easyr1.sif
 ```
 
+Use `USE_MODELSCOPE_HUB=1` to download models from the ModelScope hub.
+
 ### Hardware Requirements
 
 \* *estimated*
