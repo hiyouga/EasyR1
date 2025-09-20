@@ -15,6 +15,7 @@
 
 from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
 
+from ..utils.py_functional import is_transformers_version_greater_than
 from .transformers.flash_attention_utils import flash_attention_forward
 from .transformers.qwen2_vl import qwen2_vl_base_forward, qwen2_vl_model_forward
 
@@ -36,6 +37,9 @@ SUPPORTED_VLM_TYPE = ("qwen2_vl", "qwen2_5_vl")
 
 
 def apply_ulysses_patch(model_type: str) -> None:
+    if not is_transformers_version_greater_than("4.54.0"):
+        raise RuntimeError("Only support transformers >= 4.54.0.")
+
     if model_type in SUPPORTED_MODEL_TYPE:
         ALL_ATTENTION_FUNCTIONS["flash_attention_2"] = flash_attention_forward
     else:
