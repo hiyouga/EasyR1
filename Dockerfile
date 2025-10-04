@@ -1,6 +1,6 @@
-# Start from the NVIDIA official image (ubuntu-22.04 + cuda-12.6 + python-3.10)
-# https://docs.nvidia.com/deeplearning/frameworks/pytorch-release-notes/rel-24-08.html
-FROM nvcr.io/nvidia/pytorch:24.08-py3
+# Start from the NVIDIA official image (ubuntu-24.04 + cuda-12.9 + python-3.12)
+# https://docs.nvidia.com/deeplearning/frameworks/pytorch-release-notes/rel-25-05.html
+FROM nvcr.io/nvidia/pytorch:25.05-py3
 
 # Define environments
 ENV MAX_JOBS=32
@@ -50,16 +50,16 @@ RUN rm -rf /workspace
 # Fix cv2
 RUN rm -rf /usr/local/lib/python3.10/dist-packages/cv2
 
-# Install torch-2.7.1+cu126 + vllm-0.10.0
-RUN pip install --no-cache-dir "vllm==0.10.0" "torch==2.7.1" "torchvision==0.22.1" "torchaudio==2.7.1" tensordict torchdata \
+# Install torch-2.8.0+cu128 + vllm-0.11.0
+RUN pip install --no-cache-dir "vllm==0.11.0" "torch==2.8.0" "torchvision==0.23.0" "torchaudio==2.8.0" tensordict torchdata \
     "transformers[hf_xet]>=4.51.0" accelerate datasets peft hf-transfer \
     "numpy<2.0.0" "pyarrow>=15.0.0" "grpcio>=1.62.1" "optree>=0.13.0" pandas \
     ray[default] codetiming hydra-core pylatexenc qwen-vl-utils wandb liger-kernel mathruler \
     pytest yapf py-spy pyext pre-commit ruff
 
-# Install flash-attn-2.8.2
+# Install flash-attn-2.8.3
 RUN ABI_FLAG=$(python -c "import torch; print('TRUE' if torch._C._GLIBCXX_USE_CXX11_ABI else 'FALSE')") && \
-    URL="https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.2/flash_attn-2.8.2+cu12torch2.7cxx11abi${ABI_FLAG}-cp310-cp310-linux_x86_64.whl" && \
+    URL="https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abi${ABI_FLAG}-cp312-cp312-linux_x86_64.whl" && \
     wget -nv -P /opt/tiger "${URL}" && \
     pip install --no-cache-dir "/opt/tiger/$(basename ${URL})"
 

@@ -64,6 +64,7 @@ class ConsoleLogger(Logger):
 class FileLogger(Logger):
     def __init__(self, config: dict[str, Any]) -> None:
         self.config = config
+        print(f"Initializing logging file to {config['trainer']['save_checkpoint_path']}.")
         os.makedirs(config["trainer"]["save_checkpoint_path"], exist_ok=True)
         with open(os.path.join(config["trainer"]["save_checkpoint_path"], "experiment_config.json"), "w") as f:
             json.dump(config, f, indent=2)
