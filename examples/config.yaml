@@ -90,7 +90,7 @@ trainer:
   max_steps: null
   project_name: easy_r1
   experiment_name: qwen2_5_7b_math_grpo
-  logger: ["console", "wandb"]
+  logger: ["file", "wandb"]
   nnodes: 1
   n_gpus_per_node: 8
   max_try_make_batch: 20  # -1 means no limit
