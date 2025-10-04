@@ -28,7 +28,6 @@ from qwen_vl_utils.vision_process import fetch_video
 from torch.utils.data import Dataset
 from transformers import PreTrainedTokenizer, ProcessorMixin
 
-from ..models.transformers.qwen2_vl import get_rope_index
 from . import torch_functional as VF
 
 
@@ -265,7 +264,12 @@ class RLHFDataset(Dataset):
             attention_mask = model_inputs.pop("attention_mask")[0]
 
         if self.processor is not None and "Qwen2VLImageProcessor" in self.processor.image_processor.__class__.__name__:
-            # qwen2vl mrope
+            # qwen-vl mrope
+            if "Qwen3VLProcessor" in self.processor.__class__.__name__:
+                from ..models.transformers.qwen3_vl import get_rope_index
+            else:
+                from ..models.transformers.qwen2_vl import get_rope_index
+
             vision_position_ids = get_rope_index(
                 self.processor,
                 input_ids=input_ids,

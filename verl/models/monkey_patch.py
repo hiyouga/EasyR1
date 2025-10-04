@@ -31,9 +31,12 @@ SUPPORTED_MODEL_TYPE = (
     "qwen3_moe",
     "qwen2_vl",
     "qwen2_5_vl",
+    "qwen3_vl",
+    "qwen3_vl_moe",
 )
 
-SUPPORTED_VLM_TYPE = ("qwen2_vl", "qwen2_5_vl")
+QWEN2_VL_MODELS = ("qwen2_vl", "qwen2_5_vl")
+QWEN3_VL_MODELS = ("qwen3_vl", "qwen3_vl_moe")
 
 
 def apply_ulysses_patch(model_type: str) -> None:
@@ -45,7 +48,7 @@ def apply_ulysses_patch(model_type: str) -> None:
     else:
         raise NotImplementedError(f"Model architecture {model_type} is not supported yet.")
 
-    if model_type in SUPPORTED_VLM_TYPE:
+    if model_type in QWEN2_VL_MODELS:
         from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import (
             Qwen2_5_VLForConditionalGeneration,
             Qwen2_5_VLModel,
@@ -58,3 +61,10 @@ def apply_ulysses_patch(model_type: str) -> None:
         # TODO: add linear cross entropy kernels
         Qwen2VLForConditionalGeneration.forward = qwen2_vl_model_forward
         Qwen2_5_VLForConditionalGeneration.forward = qwen2_vl_model_forward
+    elif model_type in QWEN3_VL_MODELS:
+        from transformers.models.qwen3_vl.modeling_qwen3_vl import Qwen3VLForConditionalGeneration, Qwen3VLModel
+
+        # fix text-image mixed data
+        Qwen3VLModel.forward = qwen2_vl_base_forward
+        # TODO: add linear cross entropy kernels
+        Qwen3VLForConditionalGeneration.forward = qwen2_vl_model_forward

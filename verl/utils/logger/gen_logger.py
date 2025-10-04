@@ -13,9 +13,10 @@
 # limitations under the License.
 
 
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import Any, List, Optional, Tuple
 
 from ..py_functional import is_package_available
 
@@ -30,6 +31,8 @@ if is_package_available("swanlab"):
 
 @dataclass
 class GenerationLogger(ABC):
+    config: dict[str, Any]
+
     @abstractmethod
     def log(self, samples: List[Tuple[str, str, str, float]], step: int) -> None: ...
 
@@ -39,6 +42,14 @@ class ConsoleGenerationLogger(GenerationLogger):
     def log(self, samples: List[Tuple[str, str, str, float]], step: int) -> None:
         for inp, out, lab, score in samples:
             print(f"[prompt] {inp}\n[output] {out}\n[ground_truth] {lab}\n[score] {score}\n")
+
+
+@dataclass
+class FileGenerationLogger(GenerationLogger):
+    def log(self, samples: List[Tuple[str, str, str, float]], step: int) -> None:
+        with open(os.path.join(self.config["trainer"]["save_checkpoint_path"], "generations.log"), "a") as f:
+            for inp, out, lab, score in samples:
+                f.write(f"[prompt] {inp}\n[output] {out}\n[ground_truth] {lab}\n[score] {score}\n\n")
 
 
 @dataclass
@@ -83,19 +94,19 @@ class SwanlabGenerationLogger(GenerationLogger):
 
 GEN_LOGGERS = {
     "console": ConsoleGenerationLogger,
+    "file": FileGenerationLogger,
     "wandb": WandbGenerationLogger,
     "swanlab": SwanlabGenerationLogger,
 }
 
 
-@dataclass
 class AggregateGenerationsLogger:
-    def __init__(self, loggers: List[str]):
+    def __init__(self, loggers: List[str], config: Optional[dict[str, Any]] = None):
         self.loggers: List[GenerationLogger] = []
 
         for logger in loggers:
             if logger in GEN_LOGGERS:
-                self.loggers.append(GEN_LOGGERS[logger]())
+                self.loggers.append(GEN_LOGGERS[logger](config))
 
     def log(self, samples: List[Tuple[str, str, str, float]], step: int) -> None:
         for logger in self.loggers:
