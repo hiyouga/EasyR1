@@ -192,7 +192,7 @@ These features are temporarily disabled for now, we plan to fix them one-by-one 
 
 ## Discussion Group
 
-👋 Join our [WeChat group](assets/wechat.jpg).
+👋 Join our [WeChat group](https://github.com/hiyouga/llamafactory-community/blob/main/wechat/easyr1.jpg).
 
 ## FAQs
 
