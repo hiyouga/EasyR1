@@ -55,7 +55,7 @@ RUN pip install --no-cache-dir "vllm==0.11.0" "torch==2.8.0" "torchvision==0.23.
     "transformers[hf_xet]>=4.51.0" accelerate datasets peft hf-transfer \
     "numpy<2.0.0" "pyarrow>=15.0.0" "grpcio>=1.62.1" "optree>=0.13.0" pandas \
     ray[default] codetiming hydra-core pylatexenc qwen-vl-utils wandb liger-kernel mathruler \
-    pytest yapf py-spy pyext pre-commit ruff
+    pytest yapf py-spy pre-commit ruff
 
 # Install flash-attn-2.8.3
 RUN ABI_FLAG=$(python -c "import torch; print('TRUE' if torch._C._GLIBCXX_USE_CXX11_ABI else 'FALSE')") && \
