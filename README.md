@@ -13,7 +13,7 @@ EasyR1 is efficient and scalable due to the design of **[HybirdEngine](https://a
 
 - Supported models
   - Llama3/Qwen2/Qwen2.5/Qwen3 language models
-  - Qwen2/Qwen2.5-VL vision language models
+  - Qwen2-VL/Qwen2.5-VL/Qwen3-VL vision language models
   - DeepSeek-R1 distill models
 
 - Supported algorithms
