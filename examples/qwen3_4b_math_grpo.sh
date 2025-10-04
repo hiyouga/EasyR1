@@ -2,8 +2,6 @@
 
 set -x
 
-export PYTHONUNBUFFERED=1
-
 MODEL_PATH=Qwen/Qwen3-4B  # replace it with your local file path
 
 python3 -m verl.trainer.main \
