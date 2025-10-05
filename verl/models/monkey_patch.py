@@ -14,6 +14,7 @@
 
 from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
 
+from ..models.transformers.flash_attention_utils import flash_attention_forward
 from ..utils.py_functional import is_transformers_version_greater_than
 
 
@@ -37,8 +38,6 @@ QWEN3_VL_MODELS = ("qwen3_vl", "qwen3_vl_moe")
 
 
 def apply_ulysses_patch(model_type: str) -> None:
-    from ..models.transformers.flash_attention_utils import flash_attention_forward
-
     if not is_transformers_version_greater_than("4.54.0"):
         raise RuntimeError("Only support transformers >= 4.54.0.")
 
@@ -63,9 +62,6 @@ def apply_ulysses_patch(model_type: str) -> None:
         Qwen2VLForConditionalGeneration.forward = qwen2_vl_model_forward
         Qwen2_5_VLForConditionalGeneration.forward = qwen2_vl_model_forward
     elif model_type in QWEN3_VL_MODELS:
-        if not is_transformers_version_greater_than("4.57.0"):
-            raise ImportError("Qwen3VL models only supported by transformers >= 4.57.0.")
-
         from transformers.models.qwen3_vl.modeling_qwen3_vl import Qwen3VLForConditionalGeneration, Qwen3VLModel
         from transformers.models.qwen3_vl_moe.modeling_qwen3_vl_moe import (
             Qwen3VLMoeForConditionalGeneration,
@@ -74,6 +70,7 @@ def apply_ulysses_patch(model_type: str) -> None:
 
         from ..models.transformers.qwen3_vl import qwen3_vl_base_forward, qwen3_vl_model_forward
 
+        # fix text-image mixed data
         Qwen3VLModel.forward = qwen3_vl_base_forward
         Qwen3VLMoeModel.forward = qwen3_vl_base_forward
         # TODO: add linear cross entropy kernels
