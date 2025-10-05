@@ -14,8 +14,8 @@
 
 from transformers.modeling_utils import ALL_ATTENTION_FUNCTIONS
 
-from ..models.transformers.flash_attention_utils import flash_attention_forward
 from ..utils.py_functional import is_transformers_version_greater_than
+from .transformers.flash_attention_utils import flash_attention_forward
 
 
 SUPPORTED_MODEL_TYPE = (
@@ -53,7 +53,7 @@ def apply_ulysses_patch(model_type: str) -> None:
         )
         from transformers.models.qwen2_vl.modeling_qwen2_vl import Qwen2VLForConditionalGeneration, Qwen2VLModel
 
-        from ..models.transformers.qwen2_vl import qwen2_vl_base_forward, qwen2_vl_model_forward
+        from .transformers.qwen2_vl import qwen2_vl_base_forward, qwen2_vl_model_forward
 
         # fix text-image mixed data
         Qwen2VLModel.forward = qwen2_vl_base_forward
@@ -68,7 +68,7 @@ def apply_ulysses_patch(model_type: str) -> None:
             Qwen3VLMoeModel,
         )
 
-        from ..models.transformers.qwen3_vl import qwen3_vl_base_forward, qwen3_vl_model_forward
+        from .transformers.qwen3_vl import qwen3_vl_base_forward, qwen3_vl_model_forward
 
         # fix text-image mixed data
         Qwen3VLModel.forward = qwen3_vl_base_forward
