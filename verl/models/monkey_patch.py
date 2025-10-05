@@ -36,6 +36,7 @@ def apply_ulysses_patch(model_type: str) -> None:
 
     from verl.models.transformers.flash_attention_utils import flash_attention_forward
     from verl.models.transformers.qwen2_vl import qwen2_vl_base_forward, qwen2_vl_model_forward
+    from verl.models.transformers.qwen3_vl import qwen3_vl_base_forward, qwen3_vl_model_forward
     from verl.utils.py_functional import is_transformers_version_greater_than
 
     if not is_transformers_version_greater_than("4.54.0"):
@@ -66,7 +67,7 @@ def apply_ulysses_patch(model_type: str) -> None:
             Qwen3VLMoeModel,
         )
 
-        Qwen3VLMoeModel.forward = qwen2_vl_base_forward
-        Qwen3VLMoeForConditionalGeneration.forward = qwen2_vl_model_forward
-        Qwen3VLModel.forward = qwen2_vl_base_forward
-        Qwen3VLForConditionalGeneration.forward = qwen2_vl_model_forward
+        Qwen3VLMoeModel.forward = qwen3_vl_base_forward
+        Qwen3VLMoeForConditionalGeneration.forward = qwen3_vl_model_forward
+        Qwen3VLModel.forward = qwen3_vl_base_forward
+        Qwen3VLForConditionalGeneration.forward = qwen3_vl_model_forward
