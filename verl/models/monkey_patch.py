@@ -62,9 +62,17 @@ def apply_ulysses_patch(model_type: str) -> None:
         Qwen2VLForConditionalGeneration.forward = qwen2_vl_model_forward
         Qwen2_5_VLForConditionalGeneration.forward = qwen2_vl_model_forward
     elif model_type in QWEN3_VL_MODELS:
-        from transformers.models.qwen3_vl.modeling_qwen3_vl import Qwen3VLForConditionalGeneration, Qwen3VLModel
-
-        # fix text-image mixed data
-        Qwen3VLModel.forward = qwen2_vl_base_forward
-        # TODO: add linear cross entropy kernels
-        Qwen3VLForConditionalGeneration.forward = qwen2_vl_model_forward
+        if "moe" in model_type:
+            from transformers.models.qwen3_vl_moe.modeling_qwen3_vl_moe import (
+                Qwen3VLMoeForConditionalGeneration,
+                Qwen3VLMoeModel,
+            )
+            Qwen3VLMoeModel.forward = qwen2_vl_base_forward
+            Qwen3VLMoeForConditionalGeneration.forward = qwen2_vl_model_forward
+        else:
+            from transformers.models.qwen3_vl.modeling_qwen3_vl import (
+                Qwen3VLForConditionalGeneration,
+                Qwen3VLModel,
+            )
+            Qwen3VLModel.forward = qwen2_vl_base_forward
+            Qwen3VLForConditionalGeneration.forward = qwen2_vl_model_forward

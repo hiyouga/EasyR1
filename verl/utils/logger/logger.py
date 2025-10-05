@@ -69,6 +69,12 @@ class FileLogger(Logger):
         with open(os.path.join(config["trainer"]["save_checkpoint_path"], "experiment_config.json"), "w") as f:
             json.dump(config, f, indent=2)
 
+        with open(os.path.join(config["trainer"]["save_checkpoint_path"], "experiment_log.jsonl"), "w") as f:
+            pass
+
+        with open(os.path.join(config["trainer"]["save_checkpoint_path"], "generations.log"), "w") as f:
+            pass
+
     def log(self, data: dict[str, Any], step: int) -> None:
         with open(os.path.join(self.config["trainer"]["save_checkpoint_path"], "experiment_log.jsonl"), "a") as f:
             f.write(json.dumps({"step": step, **unflatten_dict(data)}) + "\n")
