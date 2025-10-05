@@ -130,7 +130,7 @@ class FlopsCounter:
         moe_topk = config.num_experts_per_tok
         num_experts = config.num_experts
 
-        head_dim = getattr(self.config, "head_dim", self.config.hidden_size // self.config.num_attention_heads)
+        head_dim = getattr(config, "head_dim", hidden_size // num_attention_heads)
         q_size = num_attention_heads * head_dim
         k_size = num_key_value_heads * head_dim
         v_size = num_key_value_heads * head_dim
