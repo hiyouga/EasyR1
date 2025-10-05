@@ -75,6 +75,7 @@ def apply_ulysses_patch(model_type: str) -> None:
         from verl.models.transformers.qwen3_vl import qwen3_vl_base_forward, qwen3_vl_model_forward
 
         Qwen3VLModel.forward = qwen3_vl_base_forward
-        Qwen3VLForConditionalGeneration.forward = qwen3_vl_model_forward
         Qwen3VLMoeModel.forward = qwen3_vl_base_forward
+        # TODO: add linear cross entropy kernels
+        Qwen3VLForConditionalGeneration.forward = qwen3_vl_model_forward
         Qwen3VLMoeForConditionalGeneration.forward = qwen3_vl_model_forward
