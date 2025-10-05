@@ -64,7 +64,7 @@ def apply_ulysses_patch(model_type: str) -> None:
         Qwen2_5_VLForConditionalGeneration.forward = qwen2_vl_model_forward
     elif model_type in QWEN3_VL_MODELS:
         if not is_transformers_version_greater_than("4.57.0"):
-            raise RuntimeError("Qwen3VL models only supported by transformers >= 4.57.0.")
+            raise ImportError("Qwen3VL models only supported by transformers >= 4.57.0.")
 
         from transformers.models.qwen3_vl.modeling_qwen3_vl import Qwen3VLForConditionalGeneration, Qwen3VLModel
         from transformers.models.qwen3_vl_moe.modeling_qwen3_vl_moe import (
