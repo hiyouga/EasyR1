@@ -120,15 +120,15 @@ class FlopsCounter:
         return flops_achieved
 
     def _estimate_qwen2_moe_flops(self, tokens_sum: int, batch_seqlens: List[int], delta_time: float) -> float:
-        self.config = self.config.text_config if hasattr(self.config, "text_config") else self.config
-        hidden_size = self.config.hidden_size
-        vocab_size = self.config.vocab_size
-        num_hidden_layers = self.config.num_hidden_layers
-        num_key_value_heads = self.config.num_key_value_heads
-        num_attention_heads = self.config.num_attention_heads
-        moe_intermediate_size = self.config.moe_intermediate_size
-        moe_topk = self.config.num_experts_per_tok
-        num_experts = self.config.num_experts
+        config = self.config.text_config if hasattr(self.config, "text_config") else self.config
+        hidden_size = config.hidden_size
+        vocab_size = config.vocab_size
+        num_hidden_layers = config.num_hidden_layers
+        num_key_value_heads = config.num_key_value_heads
+        num_attention_heads = config.num_attention_heads
+        moe_intermediate_size = config.moe_intermediate_size
+        moe_topk = config.num_experts_per_tok
+        num_experts = config.num_experts
 
         head_dim = getattr(self.config, "head_dim", self.config.hidden_size // self.config.num_attention_heads)
         q_size = num_attention_heads * head_dim
