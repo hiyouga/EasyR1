@@ -78,21 +78,22 @@ class FlopsCounter:
         if config.model_type not in _ESTIMATE_FUNC:
             print(f"Only support {_ESTIMATE_FUNC.keys()}, but got {config.model_type}. MFU will always be zero.")
 
-        self.config = config
+        self.config = getattr(config, "text_config", config)
         self._estimate_flops = _ESTIMATE_FUNC.get(config.model_type, self._estimate_unknown_flops)
 
     def _estimate_unknown_flops(self, tokens_sum: int, batch_seqlens: List[int], delta_time: float) -> float:
         return 0
 
     def _estimate_llama_flops(self, tokens_sum: int, batch_seqlens: List[int], delta_time: float) -> float:
-        hidden_size = self.config.hidden_size
-        vocab_size = self.config.vocab_size
-        num_hidden_layers = self.config.num_hidden_layers
-        num_key_value_heads = self.config.num_key_value_heads
-        num_attention_heads = self.config.num_attention_heads
-        intermediate_size = self.config.intermediate_size
+        config = self.config
+        hidden_size = config.hidden_size
+        vocab_size = config.vocab_size
+        num_hidden_layers = config.num_hidden_layers
+        num_key_value_heads = config.num_key_value_heads
+        num_attention_heads = config.num_attention_heads
+        intermediate_size = config.intermediate_size
 
-        head_dim = hidden_size // num_attention_heads
+        head_dim = getattr(config, "head_dim", hidden_size // num_attention_heads)
         q_size = num_attention_heads * head_dim
         k_size = num_key_value_heads * head_dim
         v_size = num_key_value_heads * head_dim
@@ -120,7 +121,7 @@ class FlopsCounter:
         return flops_achieved
 
     def _estimate_qwen2_moe_flops(self, tokens_sum: int, batch_seqlens: List[int], delta_time: float) -> float:
-        config = self.config.text_config if hasattr(self.config, "text_config") else self.config
+        config = self.config
         hidden_size = config.hidden_size
         vocab_size = config.vocab_size
         num_hidden_layers = config.num_hidden_layers
