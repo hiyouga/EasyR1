@@ -120,6 +120,7 @@ class FlopsCounter:
         return flops_achieved
 
     def _estimate_qwen2_moe_flops(self, tokens_sum: int, batch_seqlens: List[int], delta_time: float) -> float:
+        self.config = self.config.text_config if hasattr(self.config, "text_config") else self.config
         hidden_size = self.config.hidden_size
         vocab_size = self.config.vocab_size
         num_hidden_layers = self.config.num_hidden_layers
