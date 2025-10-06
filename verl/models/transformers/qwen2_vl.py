@@ -22,6 +22,7 @@ from transformers.models.qwen2_vl.modeling_qwen2_vl import (
     Qwen2VLCausalLMOutputWithPast,
     Qwen2VLForConditionalGeneration,
     Qwen2VLModel,
+    Qwen2VLModelOutputWithPast,
 )
 from transformers.models.qwen2_vl.processing_qwen2_vl import Qwen2VLProcessor
 
@@ -212,7 +213,8 @@ def qwen2_vl_base_forward(
         self, input_ids, attention_mask, pixel_values, pixel_values_videos, image_grid_thw, video_grid_thw
     )
     kwargs.update(input_kwargs)  # avoid lora module to have multiple keyword arguments
-    return self.language_model(input_ids=None, **kwargs)
+    outputs = self.language_model(input_ids=None, **kwargs)
+    return Qwen2VLModelOutputWithPast(last_hidden_state=outputs.last_hidden_state)
 
 
 def qwen2_vl_model_forward(
