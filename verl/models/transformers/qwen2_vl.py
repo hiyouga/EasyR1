@@ -214,14 +214,7 @@ def qwen2_vl_base_forward(
     )
     kwargs.update(input_kwargs)  # avoid lora module to have multiple keyword arguments
     outputs = self.language_model(input_ids=None, **kwargs)
-
-    return Qwen2VLModelOutputWithPast(
-        last_hidden_state=outputs.last_hidden_state,
-        past_key_values=outputs.past_key_values,
-        hidden_states=outputs.hidden_states,
-        attentions=outputs.attentions,
-        rope_deltas=None,
-    )
+    return Qwen2VLModelOutputWithPast(last_hidden_state=outputs.last_hidden_state)
 
 
 def qwen2_vl_model_forward(
