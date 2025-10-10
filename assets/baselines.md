@@ -24,6 +24,18 @@ Welcome to contribute new data points!
 | 3B   | GRPO        | AMP  | 1e-6 | 1e-2 | 0.24 -> 0.38 (+0.14) |
 | 32B  | GRPO        | BF16 | 1e-6 | 1e-2 | 0.50 -> 0.56 (+0.06) |
 
+### [Qwen3-VL-Instruct](https://huggingface.co/Qwen/Qwen3-VL-30B-A3B-Instruct) on [Geometry3k](https://huggingface.co/datasets/hiyouga/geometry3k)
+
+|  Size   | Algorithm   | Bits | LR   | KL   | Test Accuracy        |
+| ------- | ----------- | ---- | ---- | ---- | -------------------- |
+| 30B-A3B | GRPO        | BF16 | 1e-6 | 1e-2 | 0.55 -> 0.78 (+0.23) |
+
+### [Qwen3-VL-Thinking](https://huggingface.co/Qwen/Qwen3-VL-30B-A3B-Thinking) on [Geometry3k](https://huggingface.co/datasets/hiyouga/geometry3k)
+
+|  Size   | Algorithm   | Bits | LR   | KL   | Test Accuracy        |
+| ------- | ----------- | ---- | ---- | ---- | -------------------- |
+| 30B-A3B | GRPO        | BF16 | 1e-6 | 1e-2 | 0.49 -> 0.77 (+0.28) |
+
 > [!NOTE]
 > The hyper-parameters not listed are all the same as the default values.
 
@@ -39,6 +51,18 @@ Welcome to contribute new data points!
 | 7B   | 8 * L20 48GB  | AMP  | 1 / 2      | 2       | 120GB    | 42GB      | 410  (+0)   | 580s         | 26.5%     |
 | 7B   | 8 * H100 80GB | BF16 | 1 / 2      | 2       | 120GB    | 58GB      | 1600 (+320) | 145s         | 16.0%     |
 | 32B  | 8 * H100 80GB | BF16 | 1 / 2      | 8       | 260GB    | 72GB      | 620  (+260) | 530s         | 25.8%     |
+
+### [Qwen3-VL-Instruct](https://huggingface.co/Qwen/Qwen3-VL-30B-A3B-Instruct) on [Geometry3k](https://huggingface.co/datasets/hiyouga/geometry3k)
+
+| Size    | GPU Type      | Bits | Batch Size | vLLM TP | Peak Mem | Peak VRAM | Throughput  | Sec per step | Actor MFU |
+| ------- | ------------- | ---- | ---------- | ------- | -------- | --------- | ----------- | ------------ | --------- |
+| 30B-A3B | 8 * H800 80GB | AMP  | 1 / 2      | 8       | 170GB    | 50GB      | 80          | 4600s        | 1.8%      |
+
+### [Qwen3-VL-Thinking](https://huggingface.co/Qwen/Qwen3-VL-30B-A3B-Thinking) on [Geometry3k](https://huggingface.co/datasets/hiyouga/geometry3k)
+
+| Size    | GPU Type      | Bits | Batch Size | vLLM TP | Peak Mem | Peak VRAM | Throughput  | Sec per step | Actor MFU |
+| ------- | ------------- | ---- | ---------- | ------- | -------- | --------- | ----------- | ------------ | --------- |
+| 30B-A3B | 8 * H800 80GB | AMP  | 1 / 2      | 8       | 210GB    | 50GB      | 65          | 8000s        | 1.4%      |
 
 - Batch Size: micro_batch_size_per_device_for_update / micro_batch_size_per_device_for_experience
 - vLLM TP: rollout.tensor_parallel_size
