@@ -56,13 +56,13 @@ Welcome to contribute new data points!
 
 | Size    | GPU Type      | Bits | Batch Size | vLLM TP | Peak Mem | Peak VRAM | Throughput  | Sec per step | Actor MFU |
 | ------- | ------------- | ---- | ---------- | ------- | -------- | --------- | ----------- | ------------ | --------- |
-| 30B-A3B | 8 * H800 80GB | AMP  | 1 / 2      | 8       | 170GB    | 50GB      | 80          | 4600s        | 1.8%      |
+| 30B-A3B | 8 * H800 80GB | BF16 | 1 / 2      | 8       | 170GB    | 50GB      | 80          | 4600s        | 1.8%      |
 
 ### [Qwen3-VL-Thinking](https://huggingface.co/Qwen/Qwen3-VL-30B-A3B-Thinking) on [Geometry3k](https://huggingface.co/datasets/hiyouga/geometry3k)
 
 | Size    | GPU Type      | Bits | Batch Size | vLLM TP | Peak Mem | Peak VRAM | Throughput  | Sec per step | Actor MFU |
 | ------- | ------------- | ---- | ---------- | ------- | -------- | --------- | ----------- | ------------ | --------- |
-| 30B-A3B | 8 * H800 80GB | AMP  | 1 / 2      | 8       | 210GB    | 50GB      | 65          | 8000s        | 1.4%      |
+| 30B-A3B | 8 * H800 80GB | BF16 | 1 / 2      | 8       | 210GB    | 50GB      | 65          | 8000s        | 1.4%      |
 
 - Batch Size: micro_batch_size_per_device_for_update / micro_batch_size_per_device_for_experience
 - vLLM TP: rollout.tensor_parallel_size
