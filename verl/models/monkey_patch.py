@@ -35,6 +35,8 @@ SUPPORTED_MODEL_TYPE = (
 
 QWEN2_VL_MODELS = ("qwen2_vl", "qwen2_5_vl")
 QWEN3_VL_MODELS = ("qwen3_vl", "qwen3_vl_moe")
+# TODO support monkey patch for glm4.1v
+GLM_VL_MODELS = ("glm4.1v_base", "glm4.1v_thinking")
 
 
 def apply_ulysses_patch(model_type: str) -> None:

@@ -478,7 +478,10 @@ class FSDPWorker(Worker):
                         )
                     else:
                         multi_modal_inputs = {}
-
+                    
+                    # Some image processor return with batch dim (such as glm4.1), we need to squeeze the pix_value.
+                    multi_modal_inputs['pixel_values'] = multi_modal_inputs['pixel_values'].squeeze(0)
+                    
                     multi_modal_inputs_cache[index] = multi_modal_inputs
 
                 batch_multi_modal_inputs.append(multi_modal_inputs_cache[index])
