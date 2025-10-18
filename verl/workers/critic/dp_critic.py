@@ -217,11 +217,8 @@ class DataParallelPPOCritic(BasePPOCritic):
                     loss = vf_loss * torch.sum(response_mask) * self.world_size / total_response_tokens
                     loss.backward()
 
-                    batch_metrics = {
-                        "critic/vf_loss": vf_loss.detach().item(),
-                        "critic/vf_clipfrac": vf_metrics["vf_clipfrac"],
-                        "critic/vpred_mean": vf_metrics["vpred_mean"],
-                    }
+                    batch_metrics = {f"critic/{k}": v for k, v in vf_metrics.items()}
+                    batch_metrics["critic/vf_loss"] = vf_loss.detach().item()
                     append_to_dict(metrics, batch_metrics)
 
                 grad_norm = self._optimizer_step()

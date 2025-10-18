@@ -92,6 +92,8 @@ class ActorConfig:
     """constant C in dual-clip PPO, clips when advantage < -C"""
     loss_avg_mode: str = "token"
     """loss average mode: `token`, `seq`"""
+    loss_type: str = "default"
+    """loss type: `default`, `gspo`, `cispo`"""
     ppo_epochs: int = 1
     """number of ppo epochs for each rollout batch"""
     padding_free: bool = True
