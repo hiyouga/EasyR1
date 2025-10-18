@@ -23,6 +23,8 @@ EasyR1 is efficient and scalable due to the design of **[HybirdEngine](https://a
   - Reinforce++
   - ReMax
   - RLOO
+  - GSPO
+  - CISPO
 
 - Supported datasets
   - Any text, vision-text dataset in a [specific format](#custom-dataset)
