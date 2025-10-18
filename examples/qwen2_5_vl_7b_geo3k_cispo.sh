@@ -10,5 +10,7 @@ python3 -m verl.trainer.main \
     data.val_files=hiyouga/geometry3k@test \
     worker.actor.model.model_path=${MODEL_PATH} \
     worker.actor.loss_type=cispo \
+    worker.actor.clip_ratio_low=0 \
+    worker.actor.clip_ratio_high=4 \
     trainer.experiment_name=qwen2_5_vl_7b_geo_cispo \
     trainer.n_gpus_per_node=8
