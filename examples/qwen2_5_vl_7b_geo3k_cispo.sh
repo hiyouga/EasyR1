@@ -1,0 +1,16 @@
+#!/bin/bash
+
+set -x
+
+MODEL_PATH=Qwen/Qwen2.5-VL-7B-Instruct  # replace it with your local file path
+
+python3 -m verl.trainer.main \
+    config=examples/config.yaml \
+    data.train_files=hiyouga/geometry3k@train \
+    data.val_files=hiyouga/geometry3k@test \
+    worker.actor.model.model_path=${MODEL_PATH} \
+    worker.actor.loss_type=cispo \
+    worker.actor.clip_ratio_low=0 \
+    worker.actor.clip_ratio_high=4 \
+    trainer.experiment_name=qwen2_5_vl_7b_geo_cispo \
+    trainer.n_gpus_per_node=8

@@ -264,6 +264,7 @@ class DataParallelPPOActor(BasePPOActor):
                         clip_ratio_low=self.config.clip_ratio_low,
                         clip_ratio_high=self.config.clip_ratio_high,
                         clip_ratio_dual=self.config.clip_ratio_dual,
+                        loss_type=self.config.loss_type,
                         loss_avg_mode=self.config.loss_avg_mode,
                     )
                     if self.config.use_kl_loss and "ref_log_probs" in model_inputs:
@@ -284,13 +285,8 @@ class DataParallelPPOActor(BasePPOActor):
                     loss = loss * torch.sum(response_mask) * self.world_size / total_response_tokens
                     loss.backward()
 
-                    batch_metrics = {
-                        "actor/pg_loss": pg_loss.detach().item(),
-                        "actor/pg_clipfrac_higher": pg_metrics["pg_clipfrac_higher"],
-                        "actor/pg_clipfrac_lower": pg_metrics["pg_clipfrac_lower"],
-                        "actor/entropy_loss": pg_metrics["entropy_loss"],
-                        "actor/ppo_kl": pg_metrics["ppo_kl"],
-                    }
+                    batch_metrics = {f"actor/{k}": v for k, v in pg_metrics.items()}
+                    batch_metrics["actor/pg_loss"] = pg_loss.detach().item()
                     append_to_dict(metrics, batch_metrics)
 
                 grad_norm = self._optimizer_step()
