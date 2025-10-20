@@ -13,5 +13,6 @@ python3 -m verl.trainer.main \
     worker.actor.loss_avg_mode=seq \
     worker.actor.clip_ratio_low=3e-4 \
     worker.actor.clip_ratio_high=4e-4 \
+    algorithm.disable_kl=True \
     trainer.experiment_name=qwen2_5_vl_7b_geo_gspo \
     trainer.n_gpus_per_node=8
