@@ -19,12 +19,12 @@ EasyR1 is efficient and scalable due to the design of **[HybirdEngine](https://a
 
 - Supported algorithms
   - GRPO
-  - DAPO
+  - DAPO ![new](https://img.shields.io/badge/new-orange)
   - Reinforce++
   - ReMax
   - RLOO
-  - GSPO
-  - CISPO
+  - GSPO ![new](https://img.shields.io/badge/new-orange)
+  - CISPO ![new](https://img.shields.io/badge/new-orange)
 
 - Supported datasets
   - Any text, vision-text dataset in a [specific format](#custom-dataset)
