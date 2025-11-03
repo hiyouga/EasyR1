@@ -208,10 +208,10 @@ def get_cosine_schedule_with_warmup(
     optimizer: torch.optim.Optimizer,
     num_warmup_steps: int,
     num_training_steps: int,
-    min_lr_ratio: float = 0.0,
+    min_lr_ratio: Optional[float] = 0.0,
     num_cycles: float = 0.5,
     last_epoch: int = -1,
-    init_lr_ratio: float = None,
+    init_lr_ratio: Optional[float] = None,
 ):
     """
     Create a schedule with a learning rate that decreases following the values of the cosine function between the

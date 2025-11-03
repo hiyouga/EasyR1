@@ -311,14 +311,13 @@ class FSDPWorker(Worker):
             else:
                 num_warmup_steps = int(optim_config.lr_warmup_ratio * optim_config.training_steps)
 
-
             if optim_config.warmup_style == "constant":
                 self.lr_scheduler = get_constant_schedule_with_warmup(
                     optimizer=self.optimizer, num_warmup_steps=num_warmup_steps
                 )
             elif optim_config.warmup_style == "cosine":
                 total_steps = optim_config.training_steps
-                min_lr_ratio = optim_config.min_lr_ratio if optim_config.min_lr_ratio is not None else 0.0
+                min_lr_ratio = optim_config.min_lr_ratio
                 num_cycles = optim_config.num_cycles
                 self.lr_scheduler = get_cosine_schedule_with_warmup(
                     optimizer=self.optimizer,
