@@ -54,7 +54,7 @@ from ..utils.fsdp_utils import (
 from ..utils.model_utils import print_gpu_memory_usage, print_model_size
 from ..utils.tokenizer import get_processor, get_tokenizer
 from ..utils.torch_dtypes import PrecisionType
-from ..utils.torch_functional import AnyPrecisionAdamW, get_constant_schedule_with_warmup
+from ..utils.torch_functional import AnyPrecisionAdamW, get_constant_schedule_with_warmup, get_cosine_schedule_with_warmup
 from .config import ActorConfig, CriticConfig, FSDPConfig, ModelConfig, OptimConfig, WorkerConfig
 from .rollout import vLLMRollout
 from .sharding_manager import FSDPVLLMShardingManager
@@ -311,9 +311,24 @@ class FSDPWorker(Worker):
             else:
                 num_warmup_steps = int(optim_config.lr_warmup_ratio * optim_config.training_steps)
 
-            self.lr_scheduler = get_constant_schedule_with_warmup(
-                optimizer=self.optimizer, num_warmup_steps=num_warmup_steps
-            )
+
+            if optim_config.warmup_style == "constant":
+                self.lr_scheduler = get_constant_schedule_with_warmup(
+                    optimizer=self.optimizer, num_warmup_steps=num_warmup_steps
+                )
+            elif optim_config.warmup_style == "cosine":
+                total_steps = optim_config.training_steps
+                min_lr_ratio = optim_config.min_lr_ratio if optim_config.min_lr_ratio is not None else 0.0
+                num_cycles = optim_config.num_cycles
+                self.lr_scheduler = get_cosine_schedule_with_warmup(
+                    optimizer=self.optimizer,
+                    num_warmup_steps=num_warmup_steps,
+                    num_training_steps=total_steps,
+                    min_lr_ratio=min_lr_ratio,
+                    num_cycles=num_cycles,
+                )
+            else:
+                raise NotImplementedError(f"Warmup style {optim_config.warmup_style} is not supported")
             print_gpu_memory_usage("After optimizer init")
             if self._use_param_offload:
                 offload_fsdp_model(self.fsdp_module)
