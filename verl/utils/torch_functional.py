@@ -214,9 +214,9 @@ def get_cosine_schedule_with_warmup(
     init_lr_ratio: Optional[float] = None,
 ):
     """
-    Create a schedule with a learning rate that decreases following the values of the cosine function between the
-    initial lr set in the optimizer to 0, after a warmup period during which it increases linearly between 0 and the
-    initial lr set in the optimizer.
+    Creates a learning rate schedule that linearly increases the learning rate ratio from `init_lr_ratio`
+    to 1.0 over the first `num_warmup_steps`, then applies a cosine decay from 1.0 down to `min_lr_ratio`
+    over the remaining training steps.
     Args:
         optimizer (:class:`~torch.optim.Optimizer`):
             The optimizer for which to schedule the learning rate.

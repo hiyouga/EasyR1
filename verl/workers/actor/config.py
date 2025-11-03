@@ -49,8 +49,7 @@ class OptimConfig:
     lr_warmup_ratio: float = 0.0
     lr_warmup_steps: Optional[int] = None
     min_lr_ratio: Optional[float] = None
-    warmup_style: str = "constant"
-    num_cycles: float = 0.5
+    lr_scheduler_type: str = "constant"
     # below are auto keys
     training_steps: int = field(default=-1, init=False)
 

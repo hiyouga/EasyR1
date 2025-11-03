@@ -311,14 +311,14 @@ class FSDPWorker(Worker):
             else:
                 num_warmup_steps = int(optim_config.lr_warmup_ratio * optim_config.training_steps)
 
-            if optim_config.warmup_style == "constant":
+            if optim_config.lr_scheduler_type == "constant":
                 self.lr_scheduler = get_constant_schedule_with_warmup(
                     optimizer=self.optimizer, num_warmup_steps=num_warmup_steps
                 )
-            elif optim_config.warmup_style == "cosine":
+            elif optim_config.lr_scheduler_type == "cosine":
                 total_steps = optim_config.training_steps
                 min_lr_ratio = optim_config.min_lr_ratio
-                num_cycles = optim_config.num_cycles
+                num_cycles = 0.5
                 self.lr_scheduler = get_cosine_schedule_with_warmup(
                     optimizer=self.optimizer,
                     num_warmup_steps=num_warmup_steps,
@@ -327,7 +327,7 @@ class FSDPWorker(Worker):
                     num_cycles=num_cycles,
                 )
             else:
-                raise NotImplementedError(f"Warmup style {optim_config.warmup_style} is not supported")
+                raise NotImplementedError(f"LR scheduler type {optim_config.lr_scheduler_type} is not supported")
             print_gpu_memory_usage("After optimizer init")
             if self._use_param_offload:
                 offload_fsdp_model(self.fsdp_module)
