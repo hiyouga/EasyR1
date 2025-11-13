@@ -19,6 +19,7 @@ import os
 from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from typing import Optional, Tuple
 
+from ..utils.py_functional import get_abs_path
 from ..workers.config import WorkerConfig
 
 
@@ -56,19 +57,9 @@ class DataConfig:
     filter_overlong_prompts_workers: int = 16
 
     def post_init(self):
-        if self.image_dir is not None:
-            if os.path.exists(self.image_dir):  # ray job uses absolute path
-                self.image_dir = os.path.abspath(self.image_dir)
-            else:
-                print(f"Image directory {self.image_dir} not found.")
-                self.image_dir = None
-
-        if self.format_prompt is not None:
-            if os.path.exists(self.format_prompt):  # ray job uses absolute path
-                self.format_prompt = os.path.abspath(self.format_prompt)
-            else:
-                print(f"Format prompt file {self.format_prompt} not found.")
-                self.format_prompt = None
+        self.image_dir = get_abs_path(self.image_dir, prompt="Image directory")
+        self.format_prompt = get_abs_path(self.format_prompt, prompt="Format prompt file")
+        self.override_chat_template = get_abs_path(self.override_chat_template, prompt="Chat template file")
 
 
 @dataclass
@@ -150,13 +141,8 @@ class TrainerConfig:
         if self.save_checkpoint_path is None:
             self.save_checkpoint_path = os.path.join("checkpoints", self.project_name, self.experiment_name)
 
-        self.save_checkpoint_path = os.path.abspath(self.save_checkpoint_path)  # ray job uses absolute path
-        if self.load_checkpoint_path is not None:
-            if os.path.exists(self.load_checkpoint_path):  # ray job uses absolute path
-                self.load_checkpoint_path = os.path.abspath(self.load_checkpoint_path)
-            else:
-                print(f"Model checkpoint {self.load_checkpoint_path} not found.")
-                self.load_checkpoint_path = None
+        self.save_checkpoint_path = get_abs_path(self.save_checkpoint_path, prompt="Save path")
+        self.load_checkpoint_path = get_abs_path(self.load_checkpoint_path, prompt="Model checkpoint")
 
 
 @dataclass

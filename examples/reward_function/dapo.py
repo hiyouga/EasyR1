@@ -16,6 +16,11 @@ import re
 from typing import Any
 
 
+# Metadata
+REWARD_NAME = "dapo"
+REWARD_TYPE = "batch"
+
+
 # Constants for normalization
 SUBSTITUTIONS = [
     ("an ", ""),
@@ -141,9 +146,6 @@ def compute_score(
     overlong_buffer_length: int,
     overlong_penalty_factor: float,
 ) -> list[dict[str, float]]:
-    if not isinstance(reward_inputs, list):
-        raise ValueError("Please use `reward_type=batch` for dapo reward function.")
-
     scores = []
     for reward_input in reward_inputs:
         response = reward_input["response"][-300:]  # The longest answer in MATH-500 has 159 characters

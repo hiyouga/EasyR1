@@ -17,10 +17,11 @@ Contain small python utility functions
 
 import importlib.metadata
 import importlib.util
+import os
 import re
 from contextlib import contextmanager
 from functools import lru_cache
-from typing import Any, Union
+from typing import Any, Optional, Union
 
 import numpy as np
 import yaml
@@ -117,6 +118,14 @@ def flatten_dict(data: dict[str, Any], parent_key: str = "", sep: str = "/") -> 
 
 def convert_dict_to_str(data: dict[str, Any]) -> str:
     return yaml.dump(data, indent=2)
+
+
+def get_abs_path(path: str, prompt: str = "File") -> Optional[str]:
+    if path is not None:
+        if os.path.exists(path):  # ray job uses absolute path
+            return os.path.abspath(path)
+        else:
+            print(f"{prompt} {path} not found.")
 
 
 @contextmanager

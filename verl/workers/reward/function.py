@@ -15,7 +15,6 @@
 import importlib.util
 import os
 import sys
-from abc import ABC, abstractmethod
 from collections import defaultdict
 from functools import partial
 from typing import Callable, Optional, Tuple, TypedDict
@@ -44,43 +43,10 @@ SequentialRewardFunction = Callable[[RewardInput], RewardScore]
 BatchRewardFunction = Callable[[list[RewardInput]], list[RewardScore]]
 
 
-class FunctionRewardManager(ABC):
-    """Reward manager for rule-based reward."""
-
-    def __init__(self, config: RewardConfig, tokenizer: PreTrainedTokenizer):
-        if config.reward_function is None:
-            raise ValueError("Reward function is not provided.")
-
-        if not os.path.exists(config.reward_function):
-            raise FileNotFoundError(f"Reward function file {config.reward_function} not found.")
-
-        spec = importlib.util.spec_from_file_location("custom_reward_fn", config.reward_function)
-        module = importlib.util.module_from_spec(spec)
-        try:
-            sys.modules["custom_reward_fn"] = module
-            spec.loader.exec_module(module)
-        except Exception as e:
-            raise RuntimeError(f"Failed to load reward function: {e}")
-
-        if not hasattr(module, config.reward_function_name):
-            raise AttributeError(f"Module {module} does not have function {config.reward_function_name}.")
-
-        reward_fn = getattr(module, config.reward_function_name)
-        print(f"Using reward function `{config.reward_function_name}` from `{config.reward_function}`.")
-        self.reward_fn = partial(reward_fn, **config.reward_function_kwargs)
-        self.config = config
-        self.tokenizer = tokenizer
-
-    @abstractmethod
-    def compute_reward(self, data: DataProto) -> Tuple[torch.Tensor, dict[str, list[float]]]:
-        """Compute reward for a batch of data."""
-        ...
-
-
-class SequentialFunctionRewardManager(FunctionRewardManager):
+class SequentialFunctionRewardManagerMixin:
     reward_fn: SequentialRewardFunction
 
-    def compute_reward(self, data: DataProto) -> Tuple[torch.Tensor, dict[str, list[float]]]:
+    def compute_reward_sequential(self, data: DataProto) -> Tuple[torch.Tensor, dict[str, list[float]]]:
         reward_tensor = torch.zeros_like(data.batch["responses"], dtype=torch.float32)
         reward_metrics = defaultdict(list)
         response_ids = data.batch["responses"]
@@ -105,10 +71,10 @@ class SequentialFunctionRewardManager(FunctionRewardManager):
         return reward_tensor, reward_metrics
 
 
-class BatchFunctionRewardManager(FunctionRewardManager):
+class BatchFunctionRewardManagerMixin:
     reward_fn: BatchRewardFunction
 
-    def compute_reward(self, data: DataProto) -> Tuple[torch.Tensor, dict[str, list[float]]]:
+    def compute_reward_batch(self, data: DataProto) -> Tuple[torch.Tensor, dict[str, list[float]]]:
         reward_inputs = []
         response_ids = data.batch["responses"]
         response_length = torch.sum(data.batch["response_mask"], dim=-1)
@@ -136,3 +102,42 @@ class BatchFunctionRewardManager(FunctionRewardManager):
                 reward_metrics[key].append(value)
 
         return reward_tensor, reward_metrics
+
+
+class FunctionRewardManager(BatchFunctionRewardManagerMixin, SequentialFunctionRewardManagerMixin):
+    """Reward manager for rule-based reward."""
+
+    def __init__(self, config: RewardConfig, tokenizer: PreTrainedTokenizer):
+        if config.reward_function is None:
+            raise ValueError("Reward function is not provided.")
+
+        if not os.path.exists(config.reward_function):
+            raise FileNotFoundError(f"Reward function file {config.reward_function} not found.")
+
+        spec = importlib.util.spec_from_file_location("custom_reward_fn", config.reward_function)
+        module = importlib.util.module_from_spec(spec)
+        try:
+            sys.modules["custom_reward_fn"] = module
+            spec.loader.exec_module(module)
+        except Exception as e:
+            raise RuntimeError(f"Failed to load reward function: {e}")
+
+        if not hasattr(module, config.reward_function_name):
+            raise AttributeError(f"Module {module} does not have function {config.reward_function_name}.")
+
+        reward_fn = getattr(module, config.reward_function_name)
+        reward_name = getattr(module, "REWARD_NAME", "unknown")
+        reward_type = getattr(module, "REWARD_TYPE", "batch")
+        print(f"Using reward function `{config.reward_function_name}` from `{config.reward_function}`.")
+        print(f"Reward name: {reward_name}, reward type: {reward_type}.")
+        self.reward_fn = partial(reward_fn, **config.reward_function_kwargs)
+        self.reward_type = reward_type
+        self.config = config
+        self.tokenizer = tokenizer
+
+    def compute_reward(self, data: DataProto) -> Tuple[torch.Tensor, dict[str, list[float]]]:
+        """Compute reward for a batch of data."""
+        if self.reward_type == "batch":
+            return self.compute_reward_batch(data)
+        elif self.reward_type == "sequential":
+            return self.compute_reward_sequential(data)

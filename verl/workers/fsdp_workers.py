@@ -54,7 +54,11 @@ from ..utils.fsdp_utils import (
 from ..utils.model_utils import print_gpu_memory_usage, print_model_size
 from ..utils.tokenizer import get_processor, get_tokenizer
 from ..utils.torch_dtypes import PrecisionType
-from ..utils.torch_functional import AnyPrecisionAdamW, get_constant_schedule_with_warmup, get_cosine_schedule_with_warmup
+from ..utils.torch_functional import (
+    AnyPrecisionAdamW,
+    get_constant_schedule_with_warmup,
+    get_cosine_schedule_with_warmup,
+)
 from .config import ActorConfig, CriticConfig, FSDPConfig, ModelConfig, OptimConfig, WorkerConfig
 from .rollout import vLLMRollout
 from .sharding_manager import FSDPVLLMShardingManager
