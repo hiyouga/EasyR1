@@ -141,3 +141,5 @@ class FunctionRewardManager(BatchFunctionRewardManagerMixin, SequentialFunctionR
             return self.compute_reward_batch(data)
         elif self.reward_type == "sequential":
             return self.compute_reward_sequential(data)
+        else:
+            raise ValueError(f"Unsupported reward type: {self.reward_type}")
