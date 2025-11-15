@@ -104,7 +104,7 @@ class BatchFunctionRewardManagerMixin:
         return reward_tensor, reward_metrics
 
 
-class FunctionRewardManager(BatchFunctionRewardManagerMixin, SequentialFunctionRewardManagerMixin):
+class AutoRewardManager(BatchFunctionRewardManagerMixin, SequentialFunctionRewardManagerMixin):
     """Reward manager for rule-based reward."""
 
     def __init__(self, config: RewardConfig, tokenizer: PreTrainedTokenizer):
@@ -142,4 +142,4 @@ class FunctionRewardManager(BatchFunctionRewardManagerMixin, SequentialFunctionR
         elif self.reward_type == "sequential":
             return self.compute_reward_sequential(data)
         else:
-            raise ValueError(f"Unsupported reward type: {self.reward_type}")
+            raise ValueError(f"Unsupported reward type: {self.reward_type}.")
