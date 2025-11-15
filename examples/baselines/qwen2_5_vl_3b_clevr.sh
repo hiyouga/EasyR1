@@ -13,7 +13,6 @@ python3 -m verl.trainer.main \
     data.format_prompt=./examples/format_prompt/r1v.jinja \
     worker.actor.model.model_path=${MODEL_PATH} \
     worker.rollout.tensor_parallel_size=1 \
-    worker.reward.reward_type=sequential \
     worker.reward.reward_function=./examples/reward_function/r1v.py:compute_score \
     trainer.experiment_name=qwen2_5_vl_3b_clevr \
     trainer.n_gpus_per_node=2

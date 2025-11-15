@@ -82,7 +82,6 @@ worker:
       offload_params: false
 
   reward:
-    reward_type: batch
     reward_function: ./examples/reward_function/math.py:compute_score
 
 trainer:
