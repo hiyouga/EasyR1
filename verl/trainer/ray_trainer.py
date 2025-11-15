@@ -42,7 +42,7 @@ from ..utils.logger import Tracker
 from ..utils.py_functional import convert_dict_to_str, timer, unflatten_dict
 from ..utils.seqlen_balancing import get_seqlen_balanced_partitions, log_seqlen_unbalance
 from ..workers.fsdp_workers import FSDPWorker
-from ..workers.reward import FunctionRewardManager
+from ..workers.reward import AutoRewardManager
 from .config import PPOConfig
 from .core_algos import (
     AdvantageEstimator,
@@ -170,8 +170,8 @@ class RayPPOTrainer:
         role_worker_mapping: dict[Role, Type[Worker]],
         resource_pool_manager: ResourcePoolManager,
         ray_worker_group_cls: Type[RayWorkerGroup] = RayWorkerGroup,
-        reward_fn: Optional[FunctionRewardManager] = None,
-        val_reward_fn: Optional[FunctionRewardManager] = None,
+        reward_fn: Optional[AutoRewardManager] = None,
+        val_reward_fn: Optional[AutoRewardManager] = None,
     ):
         self.tokenizer = tokenizer
         self.processor = processor
