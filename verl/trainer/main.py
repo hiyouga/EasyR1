@@ -20,7 +20,7 @@ from omegaconf import OmegaConf
 from ..single_controller.ray import RayWorkerGroup
 from ..utils.tokenizer import get_processor, get_tokenizer
 from ..workers.fsdp_workers import FSDPWorker
-from ..workers.reward import FunctionRewardManager
+from ..workers.reward import AutoRewardManager
 from .config import PPOConfig
 from .data_loader import create_dataloader
 from .ray_trainer import RayPPOTrainer, ResourcePoolManager, Role
