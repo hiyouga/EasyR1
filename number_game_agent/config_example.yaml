@@ -1,0 +1,39 @@
+# 数字选择游戏 Agent 配置示例
+
+# VLM 模型配置
+model:
+  # 模型类型: "ollama" 或 "vllm"
+  type: ollama
+  
+  # API 地址
+  # Ollama: http://localhost:11434
+  # vLLM: http://localhost:8000
+  api_url: http://localhost:11434
+  
+  # 模型名称
+  # Ollama 示例: qwen2.5vl:3b, llava:7b
+  # vLLM 示例: Qwen/Qwen2.5-VL-3B-Instruct
+  model_name: qwen2.5vl:3b
+
+# Android 设备配置
+devices:
+  # 单个设备
+  - 101.43.137.83:5555
+  
+  # 多个设备（可选）
+  # - 192.168.1.100:5555
+  # - 192.168.1.101:5555
+
+# 运行配置
+run:
+  # 每个设备运行几局游戏
+  episodes: 1
+  
+  # 是否并发处理多个设备
+  parallel: false
+  
+  # 截图保存目录
+  screenshot_dir: game_screenshots
+  
+  # 调试模式
+  debug: false
