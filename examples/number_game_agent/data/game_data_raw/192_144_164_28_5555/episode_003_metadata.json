@@ -1,0 +1,121 @@
+{
+  "episode_id": 3,
+  "device_id": "192.144.164.28:5555",
+  "start_time": "2025-11-19T17:20:17.812099",
+  "rounds": [
+    {
+      "round": 1,
+      "question_screenshot": "192_144_164_28_5555/episode_003_round_01_question.png",
+      "result_screenshot": "192_144_164_28_5555/episode_003_round_01_result.png",
+      "selected_index": 2,
+      "click_position": [
+        585,
+        860
+      ],
+      "timestamp": "2025-11-19T17:20:25.109858"
+    },
+    {
+      "round": 2,
+      "question_screenshot": "192_144_164_28_5555/episode_003_round_02_question.png",
+      "result_screenshot": "192_144_164_28_5555/episode_003_round_02_result.png",
+      "selected_index": 2,
+      "click_position": [
+        585,
+        860
+      ],
+      "timestamp": "2025-11-19T17:20:33.454792"
+    },
+    {
+      "round": 3,
+      "question_screenshot": "192_144_164_28_5555/episode_003_round_03_question.png",
+      "result_screenshot": "192_144_164_28_5555/episode_003_round_03_result.png",
+      "selected_index": 2,
+      "click_position": [
+        585,
+        860
+      ],
+      "timestamp": "2025-11-19T17:20:41.750295"
+    },
+    {
+      "round": 4,
+      "question_screenshot": "192_144_164_28_5555/episode_003_round_04_question.png",
+      "result_screenshot": "192_144_164_28_5555/episode_003_round_04_result.png",
+      "selected_index": 0,
+      "click_position": [
+        135,
+        860
+      ],
+      "timestamp": "2025-11-19T17:20:50.149127"
+    },
+    {
+      "round": 5,
+      "question_screenshot": "192_144_164_28_5555/episode_003_round_05_question.png",
+      "result_screenshot": "192_144_164_28_5555/episode_003_round_05_result.png",
+      "selected_index": 0,
+      "click_position": [
+        135,
+        860
+      ],
+      "timestamp": "2025-11-19T17:20:58.657330"
+    },
+    {
+      "round": 6,
+      "question_screenshot": "192_144_164_28_5555/episode_003_round_06_question.png",
+      "result_screenshot": "192_144_164_28_5555/episode_003_round_06_result.png",
+      "selected_index": 2,
+      "click_position": [
+        585,
+        860
+      ],
+      "timestamp": "2025-11-19T17:21:07.054849"
+    },
+    {
+      "round": 7,
+      "question_screenshot": "192_144_164_28_5555/episode_003_round_07_question.png",
+      "result_screenshot": "192_144_164_28_5555/episode_003_round_07_result.png",
+      "selected_index": 2,
+      "click_position": [
+        585,
+        860
+      ],
+      "timestamp": "2025-11-19T17:21:15.474236"
+    },
+    {
+      "round": 8,
+      "question_screenshot": "192_144_164_28_5555/episode_003_round_08_question.png",
+      "result_screenshot": "192_144_164_28_5555/episode_003_round_08_result.png",
+      "selected_index": 2,
+      "click_position": [
+        585,
+        860
+      ],
+      "timestamp": "2025-11-19T17:21:23.819925"
+    },
+    {
+      "round": 9,
+      "question_screenshot": "192_144_164_28_5555/episode_003_round_09_question.png",
+      "result_screenshot": "192_144_164_28_5555/episode_003_round_09_result.png",
+      "selected_index": 0,
+      "click_position": [
+        135,
+        860
+      ],
+      "timestamp": "2025-11-19T17:21:31.946204"
+    },
+    {
+      "round": 10,
+      "question_screenshot": "192_144_164_28_5555/episode_003_round_10_question.png",
+      "result_screenshot": "192_144_164_28_5555/episode_003_round_10_result.png",
+      "selected_index": 2,
+      "click_position": [
+        585,
+        860
+      ],
+      "timestamp": "2025-11-19T17:21:40.056470"
+    }
+  ],
+  "completed_rounds": 10,
+  "success": true,
+  "end_time": "2025-11-19T17:21:40.056704",
+  "final_screenshot": "192_144_164_28_5555/episode_003_round_99_final.png"
+}

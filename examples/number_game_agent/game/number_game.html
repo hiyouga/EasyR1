@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>数字选择游戏 - RL 训练</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+            padding: 5px;
+            overflow-y: auto;
+        }
+
+        .game-container {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+            padding: 8px 10px;
+            max-width: 500px;
+            width: 100%;
+            margin-top: 5px;
+        }
+
+        .title {
+            text-align: center;
+            color: #333;
+            font-size: 16px;
+            font-weight: bold;
+            margin-bottom: 3px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            font-size: 10px;
+            margin-bottom: 6px;
+        }
+
+        .score-board {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            border-radius: 8px;
+            padding: 8px;
+            margin-bottom: 6px;
+            text-align: center;
+            color: white;
+        }
+
+        .score-label {
+            font-size: 11px;
+            margin-bottom: 3px;
+            opacity: 0.9;
+        }
+
+        .score-value {
+            font-size: 28px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .round-info {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 5px;
+            font-size: 10px;
+            opacity: 0.9;
+        }
+
+        .instruction {
+            background: #f8f9fa;
+            border-radius: 6px;
+            padding: 6px;
+            margin-bottom: 6px;
+            text-align: center;
+            color: #333;
+            font-size: 11px;
+            font-weight: 500;
+        }
+
+        /* 指示灯容器 */
+        .indicator-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 6px;
+            padding: 8px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        .indicator-light {
+            width: 45px;
+            height: 45px;
+            border-radius: 50%;
+            border: 2px solid #ddd;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 9px;
+            font-weight: bold;
+            color: #999;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .indicator-light.active {
+            border-color: #333;
+            box-shadow: 0 0 12px rgba(0,0,0,0.3), inset 0 0 12px rgba(255,255,255,0.3);
+            animation: glow 1.5s ease-in-out infinite;
+        }
+
+        .indicator-light.green {
+            background: radial-gradient(circle, #38ef7d, #11998e);
+        }
+
+        .indicator-light.red {
+            background: radial-gradient(circle, #f45c43, #eb3349);
+        }
+
+        .indicator-light.yellow {
+            background: radial-gradient(circle, #ffd200, #f7971e);
+        }
+
+        .indicator-light.inactive {
+            background: #ccc;
+        }
+
+        @keyframes glow {
+            0%, 100% { box-shadow: 0 0 12px rgba(0,0,0,0.3), inset 0 0 12px rgba(255,255,255,0.3); }
+            50% { box-shadow: 0 0 18px rgba(0,0,0,0.5), inset 0 0 18px rgba(255,255,255,0.5); }
+        }
+
+        .indicator-label {
+            text-align: center;
+            font-size: 9px;
+            color: #666;
+            margin-top: 3px;
+        }
+
+        .cards-container {
+            display: flex;
+            justify-content: space-around;
+            gap: 6px;
+            margin-bottom: 8px;
+        }
+
+        .card {
+            flex: 1;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 10px;
+            padding: 20px 10px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 6px 15px rgba(0,0,0,0.2);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+        }
+
+        .card:active {
+            transform: translateY(-1px);
+        }
+
+        .card.selected {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            animation: pulse 0.5s ease;
+        }
+
+        .card.correct {
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+        }
+
+        .card.wrong {
+            background: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);
+        }
+
+        .card.medium {
+            background: linear-gradient(135deg, #f7971e 0%, #ffd200 100%);
+        }
+
+        .card-number {
+            font-size: 42px;
+            font-weight: bold;
+            color: white;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .card-label {
+            font-size: 9px;
+            color: white;
+            margin-top: 5px;
+            opacity: 0.9;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        .feedback {
+            text-align: center;
+            font-size: 13px;
+            font-weight: bold;
+            min-height: 20px;
+            margin-bottom: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .feedback.correct {
+            color: #38ef7d;
+        }
+
+        .feedback.wrong {
+            color: #f45c43;
+        }
+
+        .feedback.medium {
+            color: #ffd200;
+        }
+
+        .next-button {
+            width: 100%;
+            padding: 10px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.2);
+        }
+
+        .next-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 12px rgba(0,0,0,0.3);
+        }
+
+        .next-button:active {
+            transform: translateY(0);
+        }
+
+        .next-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .game-over {
+            text-align: center;
+            padding: 15px;
+        }
+
+        .game-over-title {
+            font-size: 20px;
+            color: #333;
+            margin-bottom: 10px;
+            font-weight: bold;
+        }
+
+        .final-score {
+            font-size: 40px;
+            font-weight: bold;
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 15px;
+        }
+
+        .restart-button {
+            padding: 10px 25px;
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.2);
+        }
+
+        .stats {
+            margin-top: 15px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            padding: 10px;
+        }
+
+        .stats-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 5px 0;
+            font-size: 12px;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div id="gameView">
+            <h1 class="title">🎯 数字选择游戏</h1>
+            <p class="subtitle">观察指示灯，按规则选择数字</p>
+
+            <div class="score-board">
+                <div class="score-label">当前分数</div>
+                <div class="score-value" id="scoreDisplay">100</div>
+                <div class="round-info">
+                    <span>回合: <span id="roundDisplay">1</span>/10</span>
+                    <span>本轮: <span id="roundScoreDisplay">0</span></span>
+                </div>
+            </div>
+
+            <!-- 指示灯 -->
+            <div class="indicator-container">
+                <div>
+                    <div class="indicator-light inactive" id="greenLight"></div>
+                    <div class="indicator-label">选最大</div>
+                </div>
+                <div>
+                    <div class="indicator-light inactive" id="redLight"></div>
+                    <div class="indicator-label">选最小</div>
+                </div>
+                <div>
+                    <div class="indicator-light inactive" id="yellowLight"></div>
+                    <div class="indicator-label">选中间</div>
+                </div>
+            </div>
+
+            <div class="instruction" id="instructionText">
+                📌 观察指示灯，按照规则选择数字
+            </div>
+
+            <div class="feedback" id="feedback"></div>
+
+            <div class="cards-container" id="cardsContainer">
+                <!-- 卡片将由 JavaScript 生成 -->
+            </div>
+
+            <button class="next-button" id="nextButton" onclick="nextRound()" disabled>
+                下一轮 →
+            </button>
+        </div>
+
+        <div id="gameOverView" style="display: none;">
+            <div class="game-over">
+                <h1 class="game-over-title">🎉 游戏结束</h1>
+                <div class="final-score" id="finalScore">100</div>
+
+                <div class="stats">
+                    <div class="stats-row">
+                        <span>初始分数:</span>
+                        <span>100</span>
+                    </div>
+                    <div class="stats-row">
+                        <span>最终分数:</span>
+                        <span id="finalScoreText">100</span>
+                    </div>
+                    <div class="stats-row">
+                        <span>分数变化:</span>
+                        <span id="scoreChange" style="font-weight: bold;">0</span>
+                    </div>
+                    <div class="stats-row">
+                        <span>正确次数:</span>
+                        <span id="correctCount">0</span>
+                    </div>
+                    <div class="stats-row">
+                        <span>错误次数:</span>
+                        <span id="wrongCount">0</span>
+                    </div>
+                </div>
+
+                <button class="restart-button" onclick="restartGame()">
+                    🔄 重新开始
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 游戏状态
+        let score = 100;
+        let round = 1;
+        let maxRounds = 10;
+        let currentNumbers = [];
+        let selectedIndex = null;
+        let roundScore = 0;
+        let correctCount = 0;
+        let wrongCount = 0;
+        let currentRule = null; // 'max', 'min', 'mid'
+
+        // 初始化游戏
+        function initGame() {
+            score = 100;
+            round = 1;
+            selectedIndex = null;
+            roundScore = 0;
+            correctCount = 0;
+            wrongCount = 0;
+            generateNumbers();
+            updateDisplay();
+            document.getElementById('gameView').style.display = 'block';
+            document.getElementById('gameOverView').style.display = 'none';
+        }
+
+        // 生成随机数字和规则
+        function generateNumbers() {
+            currentNumbers = [];
+            const usedNumbers = new Set();
+
+            // 生成3个不重复的数字
+            while (currentNumbers.length < 3) {
+                const num = Math.floor(Math.random() * 9) + 1;
+                if (!usedNumbers.has(num)) {
+                    currentNumbers.push(num);
+                    usedNumbers.add(num);
+                }
+            }
+
+            // 随机选择规则
+            const rules = ['max', 'min', 'mid'];
+            currentRule = rules[Math.floor(Math.random() * rules.length)];
+
+            updateIndicators();
+            renderCards();
+        }
+
+        // 更新指示灯
+        function updateIndicators() {
+            const greenLight = document.getElementById('greenLight');
+            const redLight = document.getElementById('redLight');
+            const yellowLight = document.getElementById('yellowLight');
+
+            // 重置所有灯
+            greenLight.className = 'indicator-light inactive';
+            redLight.className = 'indicator-light inactive';
+            yellowLight.className = 'indicator-light inactive';
+
+            // 激活对应的灯
+            if (currentRule === 'max') {
+                greenLight.className = 'indicator-light green active';
+            } else if (currentRule === 'min') {
+                redLight.className = 'indicator-light red active';
+            } else if (currentRule === 'mid') {
+                yellowLight.className = 'indicator-light yellow active';
+            }
+        }
+
+        // 渲染卡片
+        function renderCards() {
+            const container = document.getElementById('cardsContainer');
+            container.innerHTML = '';
+
+            const labels = ['a', 'b', 'c'];
+            currentNumbers.forEach((num, index) => {
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.innerHTML = `
+                    <div class="card-number">${num}</div>
+                    <div class="card-label">选项 ${labels[index]}</div>
+                `;
+                card.onclick = () => selectCard(index);
+                container.appendChild(card);
+            });
+
+            selectedIndex = null;
+            document.getElementById('nextButton').disabled = true;
+            document.getElementById('feedback').textContent = '';
+            document.getElementById('feedback').className = 'feedback';
+        }
+
+        // 选择卡片
+        function selectCard(index) {
+            if (selectedIndex !== null) return; // 已选择，不能重复选
+
+            selectedIndex = index;
+            const selected = currentNumbers[index];
+            const maxNum = Math.max(...currentNumbers);
+            const minNum = Math.min(...currentNumbers);
+            
+            // 计算中间值：排序后取中间位置
+            const sortedNumbers = [...currentNumbers].sort((a, b) => a - b);
+            const midNum = sortedNumbers[1]; // 3个数字，中间位置是索引1
+
+            // 根据规则判断正确答案
+            let correctNum;
+            let ruleName;
+            if (currentRule === 'max') {
+                correctNum = maxNum;
+                ruleName = '最大';
+            } else if (currentRule === 'min') {
+                correctNum = minNum;
+                ruleName = '最小';
+            } else {
+                correctNum = midNum;
+                ruleName = '中间';
+            }
+
+            // 计算奖励
+            if (selected === correctNum) {
+                roundScore = 10;
+                showFeedback('correct', `✓ 正确！按规则选择了${ruleName}数字 ${selected}，+10 分`);
+                correctCount++;
+            } else {
+                roundScore = -10;
+                showFeedback('wrong', `✗ 错误！应该选择${ruleName}数字 ${correctNum}，-10 分`);
+                wrongCount++;
+            }
+
+            // 更新卡片样式
+            const cards = document.querySelectorAll('.card');
+            cards[index].classList.add('selected');
+
+            if (selected === correctNum) {
+                cards[index].classList.add('correct');
+            } else {
+                cards[index].classList.add('wrong');
+            }
+
+            // 显示正确答案
+            currentNumbers.forEach((num, i) => {
+                if (i !== index && num === correctNum) {
+                    cards[i].classList.add('correct');
+                }
+            });
+
+            score += roundScore;
+            updateDisplay();
+            document.getElementById('nextButton').disabled = false;
+        }
+
+        // 显示反馈
+        function showFeedback(type, message) {
+            const feedback = document.getElementById('feedback');
+            feedback.textContent = message;
+            feedback.className = `feedback ${type}`;
+        }
+
+        // 更新显示
+        function updateDisplay() {
+            document.getElementById('scoreDisplay').textContent = score;
+            document.getElementById('roundDisplay').textContent = round;
+            document.getElementById('roundScoreDisplay').textContent =
+                roundScore > 0 ? `+${roundScore}` : roundScore;
+        }
+
+        // 下一轮
+        function nextRound() {
+            round++;
+            roundScore = 0;
+
+            if (round > maxRounds) {
+                gameOver();
+            } else {
+                generateNumbers();
+                updateDisplay();
+            }
+        }
+
+        // 游戏结束
+        function gameOver() {
+            document.getElementById('gameView').style.display = 'none';
+            document.getElementById('gameOverView').style.display = 'block';
+
+            document.getElementById('finalScore').textContent = score;
+            document.getElementById('finalScoreText').textContent = score;
+
+            const change = score - 100;
+            const changeElement = document.getElementById('scoreChange');
+            changeElement.textContent = change > 0 ? `+${change}` : change;
+            changeElement.style.color = change > 0 ? '#38ef7d' : '#f45c43';
+
+            document.getElementById('correctCount').textContent = correctCount;
+            document.getElementById('wrongCount').textContent = wrongCount;
+        }
+
+        // 重新开始
+        function restartGame() {
+            initGame();
+        }
+
+        // 页面加载时初始化
+        window.onload = initGame;
+    </script>
+</body>
+</html>
