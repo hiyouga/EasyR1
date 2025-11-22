@@ -1,7 +1,0 @@
-# Docker ignore file
-*.pyc
-__pycache__/
-.git/
-.gitignore
-*.md
-.DS_Store

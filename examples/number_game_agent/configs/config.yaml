@@ -1,31 +1,31 @@
 data:
-  train_files: examples/number_game_agent/data/game_dataset_1119_v1/train.jsonl
-  val_files: examples/number_game_agent/data/game_dataset_1119_v1/test.jsonl
+  train_files: /home/ubuntu/numbergame/train-00000-of-00001.parquet
+  val_files: /home/ubuntu/numbergame/test-00000-of-00001.parquet
   prompt_key: problem
   answer_key: answer
   image_key: images
   video_key: videos
   image_dir: null
   video_fps: 2.0
-  max_prompt_length: 3072  # ⚡ VLM image tokens can be 500-1500, leave enough space
-  max_response_length: 64  # ⚡ OPTIMIZED: Reduced from 128, answers only need 1-2 tokens
-  rollout_batch_size: 32  # ⚡ OPTIMIZED: Smaller batch for 240-sample dataset (7.5 iters/epoch)
+  max_prompt_length: 3072
+  max_response_length: 64
+  rollout_batch_size: 32
   mini_rollout_batch_size: null
-  val_batch_size: 60  # ⚡ OPTIMIZED: Match test set size
+  val_batch_size: 60
   format_prompt: examples/number_game_agent/format_prompt/game_rules.jinja
   override_chat_template: null
   shuffle: true
-  seed: 1  # Aligned with official config
+  seed: 42
   min_pixels: 262144
   max_pixels: 4194304
-  filter_overlong_prompts: false  # ⚡ Disabled: small dataset, no need to filter
+  filter_overlong_prompts: false
 
 algorithm:
-  adv_estimator: grpo  # Group Relative Policy Optimization
+  adv_estimator: grpo
   disable_kl: false
   use_kl_loss: true
   kl_penalty: low_var_kl
-  kl_coef: 3.0e-2  # ⚡ FINAL: Increased to 3x original for stronger policy constraint
+  kl_coef: 4.0e-2  # 🔥 INDUSTRY STANDARD: DeepSeek=0.04, Jackson=0.06
   online_filtering: false
   filter_key: overall
   filter_low: 0.01
@@ -33,72 +33,73 @@ algorithm:
 
 worker:
   actor:
-    global_batch_size: 32  # ⚡ OPTIMIZED: Match rollout batch size
-    micro_batch_size_per_device_for_update: 1  # Aligned with official config
-    micro_batch_size_per_device_for_experience: 2  # Aligned with official config
-    max_grad_norm: 1.0
+    global_batch_size: 32
+    micro_batch_size_per_device_for_update: 1
+    micro_batch_size_per_device_for_experience: 2
+    max_grad_norm: 0.1  # 🔥 INDUSTRY STANDARD: Jackson=0.1 (was 0.5)
     padding_free: true
     dynamic_batching: true
     ulysses_size: 1
     model:
-      model_path: Qwen/Qwen2.5-VL-3B-Instruct  # Default to HF model path
+      model_path: Qwen/Qwen2.5-VL-3B-Instruct
       enable_gradient_checkpointing: true
-      trust_remote_code: true  # VLM models need this
+      trust_remote_code: true
       freeze_vision_tower: false
     optim:
-      lr: 1.0e-6  # ⚡ FINAL: Aligned with InstructGPT standard, ensures smooth convergence
-      weight_decay: 1.0e-2
-      strategy: adamw  # Can use adamw_bf16 for memory efficiency
-      lr_warmup_ratio: 0.05  # ⚡ OPTIMIZED: Short warmup for stability
+      lr: 1.0e-5  # 🔥 INDUSTRY STANDARD: Jackson=1e-5, DeepSeek=1e-6
+      weight_decay: 1.0e-1  # 🔥 INDUSTRY STANDARD: Jackson=0.1 (was 0.01)
+      strategy: adamw
+      lr_warmup_ratio: 0.05  # 🔥 INDUSTRY STANDARD: Jackson=0.05
+      lr_scheduler_type: constant  # 🔥 INDUSTRY STANDARD: constant is best
     fsdp:
       enable_full_shard: true
       enable_cpu_offload: false
       enable_rank0_init: true
     offload:
-      offload_params: true  # true: more CPU memory; false: more GPU memory
-      offload_optimizer: true  # true: more CPU memory; false: more GPU memory
+      offload_params: true
+      offload_optimizer: true
 
   rollout:
-    n: 3  # ⚡ FINAL: Reduced from 5, sufficient for 3-option task, reduces overfitting risk
-    temperature: 1.0
-    top_p: 1.0
-    limit_images: 1  # Number game only has 1 image per sample
-    gpu_memory_utilization: 0.75  # ⚡ OPTIMIZED: H20 has 80GB, utilize more (was 0.6)
+    n: 8  # 🔥 INDUSTRY STANDARD: Jackson=8, VLM-R1=8 (was 6)
+    temperature: 0.9  # 🔥 INDUSTRY STANDARD: Jackson=0.9, DeepSeek=0.75
+    top_p: 0.95  # 🔥 INDUSTRY STANDARD: DeepSeek=0.95
+    limit_images: 1
+    gpu_memory_utilization: 0.75
     enforce_eager: false
     enable_chunked_prefill: false
-    tensor_parallel_size: 1  # 3B model doesn't need TP (use 2 for 7B+)
+    tensor_parallel_size: 1
     disable_tqdm: false
     val_override_config:
-      temperature: 0.6  # Aligned with official config (slightly stochastic)
-      top_p: 0.95  # Aligned with official config
+      temperature: 0.6
+      top_p: 0.95
       n: 1
 
   ref:
     fsdp:
       enable_full_shard: true
-      enable_cpu_offload: true  # true: more CPU memory; false: more GPU memory
+      enable_cpu_offload: true
       enable_rank0_init: true
     offload:
-      offload_params: false  # Aligned with official config
+      offload_params: false
 
   reward:
     reward_function: examples/number_game_agent/reward_function/number_game.py:compute_score
 
 trainer:
-  total_epochs: 3  # ⚡ FINAL: Peak at epoch 3.5, stop at 3 for safety (240 samples = 1/4 of DeepSeek-Math min)
-  max_steps: null  # Must be null (not -1) to use total_epochs
+  total_epochs: 3  # 🔥 INDUSTRY STANDARD: Jackson=2, adjusted for small dataset
+  max_steps: null
   project_name: Mobile_Number_Game_RL
-  experiment_name: qwen2_5_vl_3b_number_game_grpo
-  logger: ["console", "wandb"]  # ⚡ OPTIMIZED: console + wandb for better monitoring
+  experiment_name: qwen2_5_vl_3b_numgame_industry_best
+  logger: ["console", "wandb"]
   nnodes: 1
-  n_gpus_per_node: 2  # Adjust based on your hardware (official uses 8)
-  max_try_make_batch: 20  # -1 means no limit
-  val_freq: 2  # ⚡ ALIGNED with Quick Test: validate every 2 steps (verified to achieve 91.67%)
+  n_gpus_per_node: 2
+  max_try_make_batch: 20
+  val_freq: 2
   val_before_train: true
   val_only: false
-  val_generations_to_log: 10  # ⚡ OPTIMIZED: Log more examples to monitor learning (was 3)
-  save_freq: 10  # ⚡ ALIGNED with Quick Test: save every 10 steps (verified to achieve 91.67%)
-  save_limit: 3  # Keep last 3 checkpoints (epochs 2, 4, 6)
+  val_generations_to_log: 10
+  save_freq: 10
+  save_limit: 3
   save_model_only: false
   save_checkpoint_path: null
   load_checkpoint_path: null

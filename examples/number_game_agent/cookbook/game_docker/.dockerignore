@@ -1,0 +1,9 @@
+# Docker ignore file
+*.pyc
+__pycache__/
+.git/
+.gitignore
+*.md
+.DS_Store
+DOCKER_README.md
+game.yaml
