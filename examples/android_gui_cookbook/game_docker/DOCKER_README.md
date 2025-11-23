@@ -6,30 +6,12 @@
 **当前版本**: `v1.4`  
 **镜像仓库**: `ccr.ccs.tencentyun.com/yuehuazhang/number-game-rl`  
 **架构**: `linux/amd64`  
-**大小**: ~124MB  
+**大小**: ~124MB
 **基础镜像**: `python:3.11-slim`
 
 ## 🚀 使用方法
 
-### 1. 推送到仓库
-
-```bash
-# 方式1: 推送到腾讯云容器镜像服务（当前使用）
-docker tag number-game-rl:v1.4 ccr.ccs.tencentyun.com/yuehuazhang/number-game-rl:v1.4
-docker push ccr.ccs.tencentyun.com/yuehuazhang/number-game-rl:v1.4
-
-# 方式2: 推送到 Docker Hub
-docker tag number-game-rl:v1.4 YOUR_USERNAME/number-game-rl:v1.4
-docker tag number-game-rl:latest YOUR_USERNAME/number-game-rl:latest
-docker push YOUR_USERNAME/number-game-rl:v1.4
-docker push YOUR_USERNAME/number-game-rl:latest
-
-# 方式3: 推送到私有仓库
-docker tag number-game-rl:v1.4 registry.example.com/number-game-rl:v1.4
-docker push registry.example.com/number-game-rl:v1.4
-```
-
-### 2. 运行容器
+### 1. Docker 部署
 
 ```bash
 # 从腾讯云镜像仓库拉取并运行
@@ -45,14 +27,14 @@ docker run -d \
   ccr.ccs.tencentyun.com/yuehuazhang/number-game-rl:v1.4
 ```
 
-### 3. 访问游戏
+### 2. 访问游戏
 
 打开浏览器访问：
 ```
 http://localhost:8000/number_game.html
 ```
 
-### 4. Kubernetes 部署（推荐）
+### 3. Kubernetes 部署（推荐）
 
 使用提供的 `game.yaml` 配置文件进行部署：
 
@@ -186,7 +168,3 @@ docker run -d --name number-game -p 9000:8000 number-game-rl:v1.0
 ```bash
 docker ps -a | grep number-game
 ```
-
-## 📄 许可证
-
-本项目用于强化学习研究和教学目的。

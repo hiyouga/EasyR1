@@ -1,5 +1,7 @@
 # 连接 android 设备玩游戏步骤
 
+android 云端 android 设备创建可参考: https://github.com/tkestack/tke-ai-playbook/pull/20
+
 ## 1.在Android浏览器中打开游戏：
 adb -s <android_ip>:5555 shell am start -a android.intent.action.VIEW -d "http://<game_ip>:8000/number_game.html"
 
