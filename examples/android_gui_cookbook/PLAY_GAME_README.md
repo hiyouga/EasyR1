@@ -11,7 +11,7 @@ adb connect <android_ip>:5555
 ## 3. 执行游戏脚本
 - ollama
 ```shell
-python examples/number_game_agent/cookbook/play_agent.py \
+python examples/android_gui_cookbook/play_agent.py \
     --model-type ollama \
     --api-url http://localhost:11434 \
     --model-name qwen2.5vl:3b \
@@ -20,7 +20,7 @@ python examples/number_game_agent/cookbook/play_agent.py \
 ```
 - vllm
 ```shell
-python examples/number_game_agent/cookbook/play_agent.py \
+python examples/android_gui_cookbook/play_agent.py \
     --model-type vllm \
     --api-url <vllm_ip> \
     --model-name <model_id> \

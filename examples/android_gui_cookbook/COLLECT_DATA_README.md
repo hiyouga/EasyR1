@@ -9,7 +9,7 @@ adb -s <android_ip>:5555 shell am start -a android.intent.action.VIEW -d "http:/
 max-workers: number of devices
 
 ```shell
-python examples/number_game_agent/cookbook/collect_data.py \
+python examples/android_gui_cookbook/collect_data.py \
     --devices <android_ip1>:5555 <android_ip2>:5555 <android_ip3>:5555 \
     --episodes 1 \
     --parallel \
