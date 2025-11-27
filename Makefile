@@ -2,6 +2,8 @@
 
 check_dirs := examples scripts tests verl setup.py
 
+code_dirs := scripts tests verl setup.py
+
 build:
 	python3 setup.py sdist bdist_wheel
 
@@ -10,7 +12,7 @@ commit:
 	pre-commit run --all-files
 
 license:
-	python3 tests/check_license.py $(check_dirs)
+	python3 tests/check_license.py $(code_dirs)
 
 quality:
 	ruff check $(check_dirs)
