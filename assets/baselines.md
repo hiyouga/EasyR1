@@ -23,6 +23,7 @@ Welcome to contribute new data points!
 | 7B   | DAPO        | AMP  | 1e-6 | 1e-2 | 0.37 -> 0.50 (+0.13) |
 | 7B   | GSPO        | AMP  | 1e-6 |    0 | 0.37 -> 0.48 (+0.11) |
 | 7B   | CISPO       | AMP  | 1e-6 | 1e-2 | 0.37 -> 0.50 (+0.13) |
+| 7B   | SAPO        | AMP  | 1e-6 |    0 | 0.37 -> 0.54 (+0.17) |
 | 3B   | GRPO        | AMP  | 1e-6 | 1e-2 | 0.24 -> 0.38 (+0.14) |
 | 32B  | GRPO        | BF16 | 1e-6 | 1e-2 | 0.50 -> 0.56 (+0.06) |
 
