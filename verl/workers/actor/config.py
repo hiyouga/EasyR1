@@ -104,6 +104,10 @@ class ActorConfig:
     """ulysses sequence parallel size"""
     use_torch_compile: bool = True
     """enable torch compile"""
+    tau_positive: float = 1.0
+    """temperature for positive tokens"""
+    tau_negative: float = 1.05
+    """temperature for negative tokens"""
     model: ModelConfig = field(default_factory=ModelConfig)
     optim: OptimConfig = field(default_factory=OptimConfig)
     fsdp: FSDPConfig = field(default_factory=FSDPConfig)
