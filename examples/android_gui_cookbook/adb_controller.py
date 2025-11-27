@@ -32,26 +32,15 @@ class ADBController:
     def _check_connection(self):
         """检查设备连接"""
         try:
-            result = subprocess.run(
-                ["adb", "devices"],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
+            result = subprocess.run(["adb", "devices"], capture_output=True, text=True, timeout=5)
 
             if self.device_id not in result.stdout:
-                raise ConnectionError(
-                    f"设备 {self.device_id} 未连接。"
-                    f"请运行 'adb devices' 查看可用设备。"
-                )
+                raise ConnectionError(f"设备 {self.device_id} 未连接。请运行 'adb devices' 查看可用设备。")
 
             print(f"✓ 设备 {self.device_id} 已连接")
 
         except FileNotFoundError:
-            raise RuntimeError(
-                "ADB 未安装或未添加到 PATH。"
-                "请安装 Android SDK Platform-Tools。"
-            )
+            raise RuntimeError("ADB 未安装或未添加到 PATH。请安装 Android SDK Platform-Tools。")
         except subprocess.TimeoutExpired:
             raise TimeoutError("ADB 连接超时，请检查设备状态。")
 
@@ -69,12 +58,7 @@ class ADBController:
         full_command = f"adb -s {self.device_id} {command}"
 
         try:
-            result = subprocess.run(
-                full_command.split(),
-                capture_output=True,
-                text=True,
-                timeout=timeout
-            )
+            result = subprocess.run(full_command.split(), capture_output=True, text=True, timeout=timeout)
 
             if result.returncode != 0:
                 raise RuntimeError(f"命令执行失败: {result.stderr}")
@@ -100,7 +84,7 @@ class ADBController:
             result = subprocess.run(
                 cmd.split(),
                 capture_output=True,
-                timeout=15  # 增加超时时间，特别是远程设备或并发时
+                timeout=15,  # 增加超时时间，特别是远程设备或并发时
             )
 
             if result.returncode != 0:
