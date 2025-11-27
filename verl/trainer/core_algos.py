@@ -441,9 +441,9 @@ def compute_policy_loss(
         clip_ratio_dual: (float)
             The dual clip range used in Dual-clip PPO. See https://arxiv.org/pdf/1912.09729
         tau_positive: (float)
-            The temperature for controll the positive tokens' clipping in SAPO. See https://arxiv.org/pdf/2511.20347
+            The temperature for control the positive tokens' clipping in SAPO. See https://arxiv.org/pdf/2511.20347
         tau_negative: (float)
-            The temperature for controll the negative tokens' clipping in SAPO. See https://arxiv.org/pdf/2511.20347
+            The temperature for control the negative tokens' clipping in SAPO. See https://arxiv.org/pdf/2511.20347
         loss_avg_mode: (Literal["token", "seq"])
             "token": average the loss in the whole batch
             "seq": average the loss in each sequence then average the mean of the means
