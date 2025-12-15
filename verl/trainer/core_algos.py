@@ -244,6 +244,7 @@ def compute_grpo_passk_outcome_advantage(
 
     """
     scores = token_level_rewards.sum(dim=-1)
+    advantages = torch.zeros_like(scores)
     id2score = defaultdict(list)
     id2indices = defaultdict(list)
 
@@ -258,9 +259,9 @@ def compute_grpo_passk_outcome_advantage(
         topk, topk_idx = torch.topk(rewards, k=2)
         r_max, r_second_max = topk[0], topk[1]
         i_max = id2indices[idx][topk_idx[0]]
-        scores[i_max] = (r_max - r_second_max) / (torch.std(torch.tensor(id2score[idx])) + eps)
+        advantages[i_max] = (r_max - r_second_max) / (torch.std(torch.tensor(id2score[idx])) + eps)
 
-    returns = scores.unsqueeze(-1) * response_mask
+    returns = advantages.unsqueeze(-1) * response_mask
     return returns, returns
 
 
