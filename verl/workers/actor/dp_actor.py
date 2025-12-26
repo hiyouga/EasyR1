@@ -264,6 +264,8 @@ class DataParallelPPOActor(BasePPOActor):
                         clip_ratio_low=self.config.clip_ratio_low,
                         clip_ratio_high=self.config.clip_ratio_high,
                         clip_ratio_dual=self.config.clip_ratio_dual,
+                        tau_positive=self.config.tau_positive,
+                        tau_negative=self.config.tau_negative,
                         loss_type=self.config.loss_type,
                         loss_avg_mode=self.config.loss_avg_mode,
                     )
