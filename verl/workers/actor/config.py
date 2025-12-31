@@ -21,6 +21,19 @@ from typing import Any, Optional
 
 
 @dataclass
+class LoraConfig:
+    rank: int = 0
+    alpha: int = 16
+    target_modules: Any = "all-linear"
+
+    def post_init(self):
+        if isinstance(self.target_modules, str):
+            target_modules = self.target_modules.strip()
+            if target_modules and target_modules != "all-linear" and "," in target_modules:
+                self.target_modules = [item.strip() for item in target_modules.split(",") if item.strip()]
+
+
+@dataclass
 class ModelConfig:
     model_path: Optional[str] = None
     tokenizer_path: Optional[str] = None
@@ -28,6 +41,7 @@ class ModelConfig:
     enable_gradient_checkpointing: bool = True
     trust_remote_code: bool = True
     freeze_vision_tower: bool = False
+    lora: LoraConfig = field(default_factory=LoraConfig)
 
     def post_init(self):
         if self.tokenizer_path is None:
@@ -38,6 +52,8 @@ class ModelConfig:
 
         if self.tokenizer_path is not None and os.path.exists(self.tokenizer_path):
             self.tokenizer_path = os.path.abspath(self.tokenizer_path)
+
+        self.lora.post_init()
 
 
 @dataclass

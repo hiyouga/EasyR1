@@ -17,6 +17,7 @@ from typing import Optional, Union
 
 import torch
 import torch.distributed as dist
+from peft import PeftModel
 from torch.distributed.checkpoint.state_dict import (
     StateDictOptions,
     get_model_state_dict,
@@ -115,7 +116,7 @@ class FSDPCheckpointManager(BaseCheckpointManager):
         if self.rank == 0:
             hf_path = os.path.join(path, "huggingface")
             os.makedirs(hf_path, exist_ok=True)
-            assert isinstance(self.model._fsdp_wrapped_module, PreTrainedModel)
+            assert isinstance(self.model._fsdp_wrapped_module, (PreTrainedModel, PeftModel))
             self.model._fsdp_wrapped_module.config.save_pretrained(hf_path)
             self.model._fsdp_wrapped_module.generation_config.save_pretrained(hf_path)
             self.processing_class.save_pretrained(hf_path)
