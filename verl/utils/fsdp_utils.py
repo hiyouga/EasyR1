@@ -18,6 +18,7 @@ from functools import partial
 from typing import Callable, Union
 
 import torch
+from packaging import version
 from torch import nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._runtime_utils import _lazy_init
@@ -25,6 +26,14 @@ from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 from torch.optim import Optimizer
 from transformers import PreTrainedModel
 from transformers.trainer_pt_utils import get_module_class_from_name
+
+
+if version.parse(torch.__version__) >= version.parse("2.6"):
+    from torch.distributed.fsdp import CPUOffloadPolicy, FSDPModule, MixedPrecisionPolicy, fully_shard
+elif version.parse(torch.__version__) >= version.parse("2.4"):
+    from torch.distributed._composable.fsdp import CPUOffloadPolicy, FSDPModule, MixedPrecisionPolicy, fully_shard
+else:
+    fully_shard, MixedPrecisionPolicy, FSDPModule, CPUOffloadPolicy = None, None, None, None
 
 
 def get_init_fn(model: nn.Module, device: Union[str, torch.device]) -> Callable[[nn.Module], None]:
@@ -49,11 +58,12 @@ def get_init_fn(model: nn.Module, device: Union[str, torch.device]) -> Callable[
     return init_fn
 
 
-def get_fsdp_wrap_policy(model: PreTrainedModel):
+def get_fsdp_wrap_policy(model: PreTrainedModel, is_lora=False):
     """Get FSDP wrap policy for the model.
 
     Args:
         module: The module to get wrap policy for
+        is_lora: Whether to enable lambda policy for LoRA modules
     """
     transformer_cls_to_wrap = set()
     for module in model._no_split_modules:
@@ -63,7 +73,33 @@ def get_fsdp_wrap_policy(model: PreTrainedModel):
         else:
             transformer_cls_to_wrap.add(transformer_cls)
 
-    return partial(transformer_auto_wrap_policy, transformer_layer_cls=transformer_cls_to_wrap)
+    policies = []
+
+    from torch.distributed.fsdp.wrap import _or_policy, lambda_auto_wrap_policy
+
+    # Add lambda policy for LoRA modules if is_lora is True
+    if is_lora:
+
+        def lambda_policy_fn(module):
+            # If there are no child modules (leaf node), and there is a weight, and the weight requires gradient (usually LoRA A/B matrices), then wrap
+            return bool(
+                len(list(module.named_children())) == 0
+                and getattr(module, "weight", None) is not None
+                and module.weight.requires_grad
+            )
+
+        lambda_policy = partial(lambda_auto_wrap_policy, lambda_fn=lambda_policy_fn)
+        policies.append(lambda_policy)
+
+    # Add transformer auto wrap policy
+    transformer_policy = partial(transformer_auto_wrap_policy, transformer_layer_cls=transformer_cls_to_wrap)
+    policies.append(transformer_policy)
+
+    # if there are multiple policies, use _or_policy to combine them
+    if len(policies) > 0:
+        auto_wrap_policy = partial(_or_policy, policies=policies)
+
+    return auto_wrap_policy
 
 
 @torch.no_grad()
@@ -138,3 +174,12 @@ def load_fsdp_optimizer(optimizer: Optimizer, empty_cache: bool = True):
 
     if empty_cache:
         gc.collect()
+
+
+def fsdp_version(model):
+    if isinstance(model, FSDP):
+        return 1
+    elif isinstance(model, FSDPModule):
+        return 2
+    else:
+        return 0

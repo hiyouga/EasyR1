@@ -14,10 +14,14 @@
 
 import inspect
 import re
+import time
+from collections import OrderedDict
+from dataclasses import asdict
 from typing import Iterable, Union
 
 import torch
 import torch.distributed as dist
+from peft import PeftModel
 from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint.state_dict import get_model_state_dict
 from torch.distributed.device_mesh import DeviceMesh
@@ -27,8 +31,9 @@ from vllm import LLM
 from vllm.distributed import parallel_state as vllm_ps
 
 from ...protocol import DataProto, all_gather_data_proto
-from ...utils.fsdp_utils import load_fsdp_model, offload_fsdp_model
+from ...utils.fsdp_utils import fsdp_version, load_fsdp_model, offload_fsdp_model
 from ...utils.model_utils import print_gpu_memory_usage
+from ...utils.vllm_utils import TensorLoRARequest, VLLMHijack, is_version_ge
 from .base import BaseShardingManager
 
 
@@ -45,6 +50,7 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         self.device_mesh = device_mesh
         self.use_param_offload = use_param_offload
         self.loaded = False
+        self.base_sync_done = False
 
         self.world_size = dist.get_world_size()
         self.tp_size = vllm_ps.get_tensor_model_parallel_world_size()
@@ -62,6 +68,9 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         torch.cuda.manual_seed(gen_dp_rank + 1000)  # make sure all tp ranks have the same random states
         self.gen_random_states = torch.cuda.get_rng_state()
         torch.cuda.set_rng_state(self.torch_random_states)
+
+        if is_version_ge(pkg="vllm", minver="0.7.3"):
+            VLLMHijack.hijack()
 
     def _rename_weight_keys(self, actor_weights: dict[str, Union[torch.Tensor, DTensor]], model: PreTrainedModel):
         # convert state dict keys: https://github.com/huggingface/transformers/pull/38385
@@ -89,16 +98,97 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         for name, tensor in actor_weights.items():
             yield name, tensor.full_tensor() if self.world_size != 1 else tensor
 
+    def _collect_lora_params(self):
+        """
+        collect lora params or full params if base model is not ready in vllm
+        work with if isinstance(self.module._fsdp_wrapped_module, PeftModel)
+        """
+        from peft.utils.save_and_load import get_peft_model_state_dict
+
+        lora_params = OrderedDict()
+        if fsdp_version(self.module) > 0:
+            with FSDP.summon_full_params(self.module, writeback=False):
+                if self.base_sync_done:
+                    lora_params = get_peft_model_state_dict(self.module._fsdp_wrapped_module)
+                    lora_params = {
+                        name: param.full_tensor().detach().cpu()
+                        if hasattr(param, "full_tensor")
+                        else param.detach().cpu()
+                        for name, param in lora_params.items()
+                    }
+                else:
+                    model = self.module._fsdp_wrapped_module.base_model.model
+                    orig_dev = next(model.parameters()).device
+                    model = model.to("cpu")
+                    for name, param in model.state_dict().items():
+                        if any(x in name for x in ["_flat_param", "lora_"]):
+                            continue
+                        name = name.replace("_fsdp_wrapped_module.", "").replace(".base_layer", "")
+                        lora_params[name] = (
+                            param.full_tensor().detach().cpu()
+                            if hasattr(param, "full_tensor")
+                            else param.detach().cpu()
+                        )
+                    model = model.to(orig_dev)
+            torch.cuda.empty_cache()
+        else:
+            if self.base_sync_done:
+                lora_params = get_peft_model_state_dict(self.module._fsdp_wrapped_module)
+            else:
+                model = self.module._fsdp_wrapped_module.base_model.model
+                orig_dev = next(model.parameters()).device
+                model = model.to("cpu")
+                for name, param in model.state_dict().items():
+                    if any(x in name for x in ["_flat_param", "lora_"]):
+                        continue
+                    name = name.replace("_fsdp_wrapped_module.", "").replace(".base_layer", "")
+                    lora_params[name] = param.detach().cpu()
+                model = model.to(orig_dev)
+        return lora_params
+
     def _sync_weight_to_vllm(self):
         if self.use_param_offload:
             load_fsdp_model(self.module)
 
-        actor_weights = get_model_state_dict(self.module)
-        actor_weights = self._rename_weight_keys(actor_weights, self.module._fsdp_wrapped_module)
+        peft_config = None
+        if isinstance(self.module._fsdp_wrapped_module, PeftModel):
+            peft_config = self.module._fsdp_wrapped_module.peft_config.get("default", None)
+            actor_weights = self._collect_lora_params()
+        else:
+            actor_weights = get_model_state_dict(self.module)
+            actor_weights = self._rename_weight_keys(actor_weights, self.module._fsdp_wrapped_module)
+
         print_gpu_memory_usage("After gather model weights in sharding manager")
 
         model = self.inference_engine.llm_engine.model_executor.driver_worker.worker.model_runner.model
+        if peft_config:
+            if self.base_sync_done:
+                lora_int_id = int(time.time_ns() % 0x7FFFFFFF)
+                lora_reqest = TensorLoRARequest(
+                    lora_name=f"{lora_int_id}",
+                    lora_int_id=lora_int_id,
+                    lora_path="simon_lora_path",
+                    peft_config=asdict(peft_config),
+                    lora_tensors=actor_weights,
+                )
+                self.inference_engine.llm_engine.add_lora(lora_reqest)
+                print_gpu_memory_usage("After load LoRA weights in sharding manager")
+                return
+            else:
+
+                def replace_lora_wrapper(k):
+                    stacked_params = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+                    if any(k.endswith(f"{s}.weight") for s in stacked_params):
+                        return k.replace(".weight", ".base_layer.weight")
+                    if any(k.endswith(f"{s}.bias") for s in stacked_params):
+                        return k.replace(".bias", ".base_layer.bias")
+                    return k
+
+                actor_weights = {replace_lora_wrapper(k): v for k, v in actor_weights.items()}
+
         model.load_weights(self._make_weight_iterator(actor_weights))
+
+        self.base_sync_done = True
 
         del actor_weights
         if self.use_param_offload:

@@ -45,6 +45,10 @@ worker:
       enable_gradient_checkpointing: true
       trust_remote_code: false
       freeze_vision_tower: false
+      lora:
+        rank: 0  # Set to a positive integer to enable LoRA
+        alpha: 64  # LoRA scaling factor
+        target_modules: all-linear  # all-linear or [q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj]
     optim:
       lr: 1.0e-6
       weight_decay: 1.0e-2
