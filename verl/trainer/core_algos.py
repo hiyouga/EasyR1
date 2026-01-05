@@ -469,7 +469,7 @@ def compute_policy_loss(
         if loss_type == "gspo_token":
             log_importance_ratio = negative_approx_kl_in_seq.detach().unsqueeze(-1) + log_probs - log_probs.detach()
         else:
-            log_importance_ratio = negative_approx_kl_in_seq * response_mask
+            log_importance_ratio = negative_approx_kl_in_seq.unsqueeze(-1) * response_mask
     else:
         log_importance_ratio = negative_approx_kl
 
