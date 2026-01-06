@@ -95,8 +95,9 @@ class FSDPVLLMShardingManager(BaseShardingManager):
     def _make_weight_iterator(
         self, actor_weights: dict[str, Union[torch.Tensor, DTensor]]
     ) -> Iterable[tuple[str, torch.Tensor]]:
+        device = torch.device("cuda", torch.cuda.current_device())
         for name, tensor in actor_weights.items():
-            yield name, tensor.full_tensor() if self.world_size != 1 else tensor
+            yield name, tensor.to(device, non_blocking=True).full_tensor() if isinstance(tensor, DTensor) else tensor
 
     def _collect_lora_params(self):
         """
