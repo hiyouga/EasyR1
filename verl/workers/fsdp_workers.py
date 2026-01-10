@@ -15,6 +15,7 @@
 The main entry point to run the PPO algorithm
 """
 
+from contextlib import nullcontext
 from typing import Literal, Optional, Union, cast
 
 import numpy as np
@@ -622,8 +623,6 @@ class FSDPWorker(Worker):
 
         if self._use_param_offload:
             load_fsdp_model(self.fsdp_module)
-
-        from contextlib import nullcontext
 
         # when is_lora is True, we use the actor without lora applied to calculate the log_prob
         # which is mostly used for ref log_prob calculation

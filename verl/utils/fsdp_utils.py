@@ -18,7 +18,6 @@ from functools import partial
 from typing import Callable, Union
 
 import torch
-from packaging import version
 from torch import nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._runtime_utils import _lazy_init
@@ -26,14 +25,6 @@ from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 from torch.optim import Optimizer
 from transformers import PreTrainedModel
 from transformers.trainer_pt_utils import get_module_class_from_name
-
-
-if version.parse(torch.__version__) >= version.parse("2.6"):
-    from torch.distributed.fsdp import CPUOffloadPolicy, FSDPModule, MixedPrecisionPolicy, fully_shard
-elif version.parse(torch.__version__) >= version.parse("2.4"):
-    from torch.distributed._composable.fsdp import CPUOffloadPolicy, FSDPModule, MixedPrecisionPolicy, fully_shard
-else:
-    fully_shard, MixedPrecisionPolicy, FSDPModule, CPUOffloadPolicy = None, None, None, None
 
 
 def get_init_fn(model: nn.Module, device: Union[str, torch.device]) -> Callable[[nn.Module], None]:
@@ -174,12 +165,3 @@ def load_fsdp_optimizer(optimizer: Optimizer, empty_cache: bool = True):
 
     if empty_cache:
         gc.collect()
-
-
-def fsdp_version(model):
-    if isinstance(model, FSDP):
-        return 1
-    elif isinstance(model, FSDPModule):
-        return 2
-    else:
-        return 0

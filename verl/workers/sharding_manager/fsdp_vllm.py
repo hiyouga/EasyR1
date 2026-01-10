@@ -31,7 +31,7 @@ from vllm import LLM
 from vllm.distributed import parallel_state as vllm_ps
 
 from ...protocol import DataProto, all_gather_data_proto
-from ...utils.fsdp_utils import fsdp_version, load_fsdp_model, offload_fsdp_model
+from ...utils.fsdp_utils import load_fsdp_model, offload_fsdp_model
 from ...utils.model_utils import print_gpu_memory_usage
 from ...utils.vllm_utils import TensorLoRARequest, VLLMHijack, is_version_ge
 from .base import BaseShardingManager
@@ -107,34 +107,15 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         from peft.utils.save_and_load import get_peft_model_state_dict
 
         lora_params = OrderedDict()
-        if fsdp_version(self.module) > 0:
-            with FSDP.summon_full_params(self.module, writeback=False):
-                if self.base_sync_done:
-                    lora_params = get_peft_model_state_dict(self.module._fsdp_wrapped_module)
-                    lora_params = {
-                        name: param.full_tensor().detach().cpu()
-                        if hasattr(param, "full_tensor")
-                        else param.detach().cpu()
-                        for name, param in lora_params.items()
-                    }
-                else:
-                    model = self.module._fsdp_wrapped_module.base_model.model
-                    orig_dev = next(model.parameters()).device
-                    model = model.to("cpu")
-                    for name, param in model.state_dict().items():
-                        if any(x in name for x in ["_flat_param", "lora_"]):
-                            continue
-                        name = name.replace("_fsdp_wrapped_module.", "").replace(".base_layer", "")
-                        lora_params[name] = (
-                            param.full_tensor().detach().cpu()
-                            if hasattr(param, "full_tensor")
-                            else param.detach().cpu()
-                        )
-                    model = model.to(orig_dev)
-            torch.cuda.empty_cache()
-        else:
+        with FSDP.summon_full_params(self.module, writeback=False):
             if self.base_sync_done:
                 lora_params = get_peft_model_state_dict(self.module._fsdp_wrapped_module)
+                lora_params = {
+                    name: param.full_tensor().detach().cpu()
+                    if hasattr(param, "full_tensor")
+                    else param.detach().cpu()
+                    for name, param in lora_params.items()
+                }
             else:
                 model = self.module._fsdp_wrapped_module.base_model.model
                 orig_dev = next(model.parameters()).device
@@ -143,8 +124,13 @@ class FSDPVLLMShardingManager(BaseShardingManager):
                     if any(x in name for x in ["_flat_param", "lora_"]):
                         continue
                     name = name.replace("_fsdp_wrapped_module.", "").replace(".base_layer", "")
-                    lora_params[name] = param.detach().cpu()
+                    lora_params[name] = (
+                        param.full_tensor().detach().cpu()
+                        if hasattr(param, "full_tensor")
+                        else param.detach().cpu()
+                    )
                 model = model.to(orig_dev)
+        torch.cuda.empty_cache()
         return lora_params
 
     def _sync_weight_to_vllm(self):
