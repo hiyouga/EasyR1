@@ -56,7 +56,6 @@ from ..utils.fsdp_utils import (
     offload_fsdp_optimizer,
 )
 from ..utils.model_utils import print_gpu_memory_usage, print_model_size
-from ..utils.py_functional import convert_to_regular_types
 from ..utils.tokenizer import get_processor, get_tokenizer
 from ..utils.torch_dtypes import PrecisionType
 from ..utils.torch_functional import (
@@ -237,12 +236,11 @@ class FSDPWorker(Worker):
         if is_lora_model:
             self.print_rank0("Applying LoRA to actor module")
             model.enable_input_require_grads()
-            # Convert config to regular Python types before creating PEFT model
             lora_config = peft.LoraConfig(
                 task_type=TaskType.CAUSAL_LM,
                 r=model_config.lora.rank,
                 lora_alpha=model_config.lora.alpha,
-                target_modules=convert_to_regular_types(model_config.lora.target_modules),
+                target_modules=model_config.lora.target_modules,
             )
             model = get_peft_model(model, lora_config)
             cast_mixed_precision_params(model, torch.bfloat16)

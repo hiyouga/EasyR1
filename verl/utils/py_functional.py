@@ -135,15 +135,3 @@ def timer(name: str, timing_raw: dict[str, float]):
 
     timing_raw[name] = timer.last
 
-
-def convert_to_regular_types(obj):
-    """Convert Hydra configs and other special types to regular Python types."""
-    from omegaconf import DictConfig, ListConfig
-
-    if isinstance(obj, (ListConfig, DictConfig)):
-        return {k: convert_to_regular_types(v) for k, v in obj.items()} if isinstance(obj, DictConfig) else list(obj)
-    elif isinstance(obj, (list, tuple)):
-        return [convert_to_regular_types(x) for x in obj]
-    elif isinstance(obj, dict):
-        return {k: convert_to_regular_types(v) for k, v in obj.items()}
-    return obj
