@@ -49,12 +49,12 @@ def get_init_fn(model: nn.Module, device: Union[str, torch.device]) -> Callable[
     return init_fn
 
 
-def get_fsdp_wrap_policy(model: PreTrainedModel, is_lora=False):
+def get_fsdp_wrap_policy(model: PreTrainedModel, is_lora_model=False):
     """Get FSDP wrap policy for the model.
 
     Args:
         module: The module to get wrap policy for
-        is_lora: Whether to enable lambda policy for LoRA modules
+        is_lora_model: Whether to enable lambda policy for LoRA modules
     """
     transformer_cls_to_wrap = set()
     for module in model._no_split_modules:
@@ -69,7 +69,7 @@ def get_fsdp_wrap_policy(model: PreTrainedModel, is_lora=False):
     from torch.distributed.fsdp.wrap import _or_policy, lambda_auto_wrap_policy
 
     # Add lambda policy for LoRA modules if is_lora is True
-    if is_lora:
+    if is_lora_model:
 
         def lambda_policy_fn(module):
             # If there are no child modules (leaf node), and there is a weight, and the weight requires gradient (usually LoRA A/B matrices), then wrap

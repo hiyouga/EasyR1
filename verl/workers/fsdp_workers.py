@@ -26,6 +26,7 @@ import torch.distributed as dist
 from accelerate import init_empty_weights
 from codetiming import Timer
 from peft import TaskType, get_peft_model
+from peft.utils import cast_mixed_precision_params
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import CPUOffload, MixedPrecision, ShardingStrategy
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -228,10 +229,12 @@ class FSDPWorker(Worker):
 
         model = cast(PreTrainedModel, model)  # lint
         model.tie_weights()  # avoid hanging
+        model = model.to(torch_dtype)
         if model_config.enable_gradient_checkpointing:
             model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
 
-        if self._is_lora:
+        is_lora_model = self._is_lora and role == "actor"
+        if is_lora_model:
             self.print_rank0("Applying LoRA to actor module")
             model.enable_input_require_grads()
             # Convert config to regular Python types before creating PEFT model
@@ -242,8 +245,7 @@ class FSDPWorker(Worker):
                 target_modules=convert_to_regular_types(model_config.lora.target_modules),
             )
             model = get_peft_model(model, lora_config)
-
-        model = model.to(torch_dtype)
+            cast_mixed_precision_params(model, torch.bfloat16)
 
         if role == "ref":
             model.requires_grad_(False)
@@ -269,7 +271,7 @@ class FSDPWorker(Worker):
             buffer_dtype=PrecisionType.to_dtype(fsdp_config.mp_buffer_dtype),
             cast_forward_inputs=True,
         )
-        auto_wrap_policy = get_fsdp_wrap_policy(model, is_lora=self._is_lora)
+        auto_wrap_policy = get_fsdp_wrap_policy(model, is_lora_model=is_lora_model)
         self.print_rank0(f"FSDP wrap policy: {auto_wrap_policy}.")
 
         if self.device_mesh.ndim == 2:
@@ -413,7 +415,7 @@ class FSDPWorker(Worker):
                 role="actor",
             )
 
-        if self._has_ref:
+        if self._has_ref and not self._is_lora:
             self._build_model_optimizer(
                 model_config=self.config.actor.model,
                 fsdp_config=self.config.ref.fsdp,
@@ -443,7 +445,7 @@ class FSDPWorker(Worker):
         if self._has_rollout:  # must after actor
             self._build_rollout()
 
-        if self._has_ref:
+        if self._has_ref and not self._is_lora:
             from .actor.dp_actor import DataParallelPPOActor  # lazy import
 
             self.ref_policy = DataParallelPPOActor(
@@ -660,8 +662,8 @@ class FSDPWorker(Worker):
             # if _is_lora, actor without lora applied is the ref
             data.meta_info["is_lora"] = True
             data = self.compute_log_probs(data)
-            # this old_log_probs is in fact ref_log_prob
-            data = DataProto.from_dict(tensors={"ref_log_prob": data.batch["old_log_probs"]})
+            # this old_log_probs is in fact ref_log_probs
+            data = DataProto.from_dict(tensors={"ref_log_probs": data.batch["old_log_probs"]})
             return data
         # else:
         # otherwise, the class have a standalone ref model
