@@ -22,6 +22,7 @@ from typing import Iterable, Union
 import torch
 import torch.distributed as dist
 from peft import PeftModel
+from peft.utils.save_and_load import get_peft_model_state_dict
 from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint.state_dict import get_model_state_dict
 from torch.distributed.device_mesh import DeviceMesh
@@ -44,13 +45,17 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         inference_engine: LLM,
         device_mesh: DeviceMesh,
         use_param_offload: bool,
+        load_format: str,
+        layered_summon: bool,
     ):
         self.module = module
         self.inference_engine = inference_engine
         self.device_mesh = device_mesh
         self.use_param_offload = use_param_offload
+        self.load_format = load_format
+        self.layered_summon = layered_summon
         self.loaded = False
-        self.base_sync_done = False
+        self.base_sync_done: bool = load_format != "dummy"
 
         self.world_size = dist.get_world_size()
         self.tp_size = vllm_ps.get_tensor_model_parallel_world_size()
@@ -104,33 +109,65 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         collect lora params or full params if base model is not ready in vllm
         work with if isinstance(self.module._fsdp_wrapped_module, PeftModel)
         """
-        from peft.utils.save_and_load import get_peft_model_state_dict
-
         lora_params = OrderedDict()
-        with FSDP.summon_full_params(self.module, writeback=False):
-            if self.base_sync_done:
-                lora_params = get_peft_model_state_dict(self.module._fsdp_wrapped_module)
-                lora_params = {
-                    name: param.full_tensor().detach().cpu()
-                    if hasattr(param, "full_tensor")
-                    else param.detach().cpu()
-                    for name, param in lora_params.items()
-                }
-            else:
-                model = self.module._fsdp_wrapped_module.base_model.model
-                orig_dev = next(model.parameters()).device
-                model = model.to("cpu")
-                for name, param in model.state_dict().items():
-                    if any(x in name for x in ["_flat_param", "lora_"]):
+        if self.layered_summon:
+            if not self.base_sync_done:
+                raise ValueError(
+                    "To use layered_summon, you must make sure base-model is preloaded in vllm, "
+                    "e.g. set rollout.load_format=safetensors."
+                )
+
+            def _prefix_submodules(module, prefix):
+                for name, submodule in module.named_modules():
+                    if name.startswith(prefix) and "." not in name[len(prefix) :]:
+                        yield name, submodule
+
+            prefix_list = [
+                "_fsdp_wrapped_module.base_model.model.",
+                "_fsdp_wrapped_module.base_model.model.model.",
+                "_fsdp_wrapped_module.base_model.model.model.layers.",
+            ]
+            for prefix in prefix_list:
+                for name, submodule in _prefix_submodules(self.module, prefix):
+                    adjusted_prefix = name.replace("_fsdp_wrapped_module.base_model.model.", "base_model.model.")
+                    if name.endswith(".model") or name.endswith(".layers"):
                         continue
-                    name = name.replace("_fsdp_wrapped_module.", "").replace(".base_layer", "")
-                    lora_params[name] = (
-                        param.full_tensor().detach().cpu()
-                        if hasattr(param, "full_tensor")
+                    with FSDP.summon_full_params(submodule, writeback=False):
+                        sub_lora_params = get_peft_model_state_dict(
+                            self.module._fsdp_wrapped_module, state_dict=submodule.state_dict()
+                        )
+                        sub_lora_params = {
+                            f"{adjusted_prefix}.{name}": param.full_tensor().detach().cpu()
+                            if isinstance(param, DTensor)
+                            else param.detach().cpu()
+                            for name, param in sub_lora_params.items()
+                        }
+                        lora_params.update(sub_lora_params)
+                        submodule._is_root = False
+                    torch.cuda.empty_cache()
+        else:
+            with FSDP.summon_full_params(self.module, writeback=False):
+                if self.base_sync_done:
+                    lora_params = get_peft_model_state_dict(self.module._fsdp_wrapped_module)
+                    lora_params = {
+                        name: param.full_tensor().detach().cpu()
+                        if isinstance(param, DTensor)
                         else param.detach().cpu()
-                    )
-                model = model.to(orig_dev)
-        torch.cuda.empty_cache()
+                        for name, param in lora_params.items()
+                    }
+                else:
+                    model = self.module._fsdp_wrapped_module.base_model.model
+                    orig_dev = next(model.parameters()).device
+                    model = model.to("cpu")
+                    for name, param in model.state_dict().items():
+                        if any(x in name for x in ["_flat_param", "lora_"]):
+                            continue
+                        name = name.replace("_fsdp_wrapped_module.", "").replace(".base_layer", "")
+                        lora_params[name] = (
+                            param.full_tensor().detach().cpu() if isinstance(param, DTensor) else param.detach().cpu()
+                        )
+                    model = model.to(orig_dev)
+            torch.cuda.empty_cache()
         return lora_params
 
     def _sync_weight_to_vllm(self):
