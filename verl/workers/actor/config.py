@@ -24,13 +24,12 @@ from typing import Any, Optional
 class LoraConfig:
     rank: int = 0
     alpha: int = 64
-    target_modules: Any = "all-linear"
+    target_modules: str = "all-linear"
 
     def post_init(self):
-        if isinstance(self.target_modules, str):
-            target_modules = self.target_modules.strip()
-            if target_modules and target_modules != "all-linear" and "," in target_modules:
-                self.target_modules = [item.strip() for item in target_modules.split(",") if item.strip()]
+        if not isinstance(self.target_modules, str):
+            raise TypeError("lora.target_modules must be a string like 'all-linear' or 'q_proj,k_proj,v_proj,o_proj'.")
+        self.target_modules = self.target_modules.strip()
 
 
 @dataclass
