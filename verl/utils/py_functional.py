@@ -134,4 +134,3 @@ def timer(name: str, timing_raw: dict[str, float]):
         yield
 
     timing_raw[name] = timer.last
-

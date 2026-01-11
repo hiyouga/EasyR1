@@ -21,7 +21,7 @@ import torch
 from torch import nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._runtime_utils import _lazy_init
-from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
+from torch.distributed.fsdp.wrap import _or_policy, lambda_auto_wrap_policy, transformer_auto_wrap_policy
 from torch.optim import Optimizer
 from transformers import PreTrainedModel
 from transformers.trainer_pt_utils import get_module_class_from_name
@@ -65,8 +65,6 @@ def get_fsdp_wrap_policy(model: PreTrainedModel, is_lora_model=False):
             transformer_cls_to_wrap.add(transformer_cls)
 
     policies = []
-
-    from torch.distributed.fsdp.wrap import _or_policy, lambda_auto_wrap_policy
 
     # Add lambda policy for LoRA modules if is_lora is True
     if is_lora_model:
