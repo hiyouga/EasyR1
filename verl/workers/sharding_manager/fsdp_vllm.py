@@ -114,7 +114,7 @@ class FSDPVLLMShardingManager(BaseShardingManager):
             if not self.base_sync_done:
                 raise ValueError(
                     "To use layered_summon, you must make sure base-model is preloaded in vllm, "
-                    "e.g. set rollout.load_format=safetensors."
+                    "e.g. set worker.rollout.load_format=safetensors."
                 )
 
             def _prefix_submodules(module, prefix):
