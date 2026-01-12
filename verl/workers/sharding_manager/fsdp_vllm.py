@@ -146,27 +146,21 @@ class FSDPVLLMShardingManager(BaseShardingManager):
                         submodule._is_root = False
                     torch.cuda.empty_cache()
         else:
-            with FSDP.summon_full_params(self.module, writeback=False):
-                if self.base_sync_done:
-                    lora_params = get_peft_model_state_dict(self.module._fsdp_wrapped_module)
-                    lora_params = {
-                        name: param.full_tensor().detach().cpu()
-                        if isinstance(param, DTensor)
-                        else param.detach().cpu()
-                        for name, param in lora_params.items()
-                    }
-                else:
-                    model = self.module._fsdp_wrapped_module.base_model.model
-                    orig_dev = next(model.parameters()).device
-                    model = model.to("cpu")
-                    for name, param in model.state_dict().items():
-                        if any(x in name for x in ["_flat_param", "lora_"]):
-                            continue
-                        name = name.replace("_fsdp_wrapped_module.", "").replace(".base_layer", "")
-                        lora_params[name] = (
-                            param.full_tensor().detach().cpu() if isinstance(param, DTensor) else param.detach().cpu()
-                        )
-                    model = model.to(orig_dev)
+            actor_weights = get_model_state_dict(self.module)
+            if self.base_sync_done:
+                lora_params = get_peft_model_state_dict(self.module._fsdp_wrapped_module, state_dict=actor_weights)
+                lora_params = {
+                    name: param.full_tensor().detach().cpu() if isinstance(param, DTensor) else param.detach().cpu()
+                    for name, param in lora_params.items()
+                }
+            else:
+                for name, param in actor_weights.items():
+                    if any(x in name for x in ["_flat_param", "lora_"]):
+                        continue
+                    name = name.replace("base_model.model.", "").replace(".base_layer", "")
+                    lora_params[name] = (
+                        param.full_tensor().detach().cpu() if isinstance(param, DTensor) else param.detach().cpu()
+                    )
             torch.cuda.empty_cache()
         return lora_params
 
