@@ -126,6 +126,7 @@ class FSDPVLLMShardingManager(BaseShardingManager):
                 "_fsdp_wrapped_module.base_model.model.",
                 "_fsdp_wrapped_module.base_model.model.model.",
                 "_fsdp_wrapped_module.base_model.model.model.layers.",
+                "_fsdp_wrapped_module.base_model.model.model.language_model.layers.",
             ]
             for prefix in prefix_list:
                 for name, submodule in _prefix_submodules(self.module, prefix):
@@ -196,10 +197,20 @@ class FSDPVLLMShardingManager(BaseShardingManager):
 
                 def replace_lora_wrapper(k):
                     stacked_params = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
-                    if any(k.endswith(f"{s}.weight") for s in stacked_params):
-                        return k.replace(".weight", ".base_layer.weight")
-                    if any(k.endswith(f"{s}.bias") for s in stacked_params):
-                        return k.replace(".bias", ".base_layer.bias")
+                    if k.endswith(".weight"):
+                        module_k = k[: -len(".weight")]
+                        if peft_config.exclude_modules:
+                            if re.fullmatch(peft_config.exclude_modules, module_k):
+                                return k
+                        if any(module_k.endswith(s) for s in stacked_params):
+                            return f"{module_k}.base_layer.weight"
+                    if k.endswith(".bias"):
+                        module_k = k[: -len(".bias")]
+                        if peft_config.exclude_modules:
+                            if re.fullmatch(peft_config.exclude_modules, module_k):
+                                return k
+                        if any(module_k.endswith(s) for s in stacked_params):
+                            return f"{module_k}.base_layer.bias"
                     return k
 
                 actor_weights = {replace_lora_wrapper(k): v for k, v in actor_weights.items()}

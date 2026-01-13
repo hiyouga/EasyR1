@@ -236,11 +236,13 @@ class FSDPWorker(Worker):
         if is_lora_model:
             self.print_rank0("Applying LoRA to actor module")
             model.enable_input_require_grads()
+            target_modules = [item.strip() for item in model_config.lora.target_modules.split(",") if item.strip()]
             lora_config = peft.LoraConfig(
                 task_type=TaskType.CAUSAL_LM,
                 r=model_config.lora.rank,
                 lora_alpha=model_config.lora.alpha,
-                target_modules=model_config.lora.target_modules,
+                target_modules=target_modules,
+                exclude_modules=model_config.lora.exclude_modules,
             )
             model = get_peft_model(model, lora_config)
             cast_mixed_precision_params(model, torch.bfloat16)
