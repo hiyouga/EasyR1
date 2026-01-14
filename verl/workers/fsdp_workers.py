@@ -236,7 +236,10 @@ class FSDPWorker(Worker):
         if is_lora_model:
             self.print_rank0("Applying LoRA to actor module")
             model.enable_input_require_grads()
-            target_modules = [item.strip() for item in model_config.lora.target_modules.split(",") if item.strip()]
+            if model_config.lora.target_modules == "all-linear":
+                target_modules = model_config.lora.target_modules
+            else:
+                target_modules = [item.strip() for item in model_config.lora.target_modules.split(",") if item.strip()]
             lora_config = peft.LoraConfig(
                 task_type=TaskType.CAUSAL_LM,
                 r=model_config.lora.rank,
@@ -392,8 +395,6 @@ class FSDPWorker(Worker):
             inference_engine=self.rollout.inference_engine,
             device_mesh=rollout_device_mesh,
             use_param_offload=self._use_param_offload,
-            load_format=self.config.rollout.load_format,
-            layered_summon=self.config.rollout.layered_summon,
         )
         print_gpu_memory_usage("After vllm init")
 

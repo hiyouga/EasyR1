@@ -34,8 +34,6 @@ class RolloutConfig:
     enforce_eager: bool = False
     enable_chunked_prefill: bool = False  # only for v0 engine
     tensor_parallel_size: int = 2
-    load_format: str = "dummy"
-    layered_summon: bool = False
     max_model_len: Optional[int] = None
     max_num_batched_tokens: int = 8192
     disable_log_stats: bool = True

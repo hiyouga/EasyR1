@@ -24,7 +24,7 @@ import torch.distributed as dist
 from peft import PeftModel
 from peft.utils.save_and_load import get_peft_model_state_dict
 from torch.distributed._tensor import DTensor
-from torch.distributed.checkpoint.state_dict import get_model_state_dict
+from torch.distributed.checkpoint.state_dict import StateDictOptions, get_model_state_dict
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataParallel as FSDP
 from transformers import PreTrainedModel
@@ -45,17 +45,13 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         inference_engine: LLM,
         device_mesh: DeviceMesh,
         use_param_offload: bool,
-        load_format: str,
-        layered_summon: bool,
     ):
         self.module = module
         self.inference_engine = inference_engine
         self.device_mesh = device_mesh
         self.use_param_offload = use_param_offload
-        self.load_format = load_format
-        self.layered_summon = layered_summon
         self.loaded = False
-        self.base_sync_done: bool = load_format != "dummy"
+        self.base_sync_done = False
 
         self.world_size = dist.get_world_size()
         self.tp_size = vllm_ps.get_tensor_model_parallel_world_size()
@@ -100,9 +96,8 @@ class FSDPVLLMShardingManager(BaseShardingManager):
     def _make_weight_iterator(
         self, actor_weights: dict[str, Union[torch.Tensor, DTensor]]
     ) -> Iterable[tuple[str, torch.Tensor]]:
-        device = torch.device("cuda", torch.cuda.current_device())
         for name, tensor in actor_weights.items():
-            yield name, tensor.to(device, non_blocking=True).full_tensor() if isinstance(tensor, DTensor) else tensor
+            yield name, tensor.full_tensor() if isinstance(tensor, DTensor) else tensor
 
     def _collect_lora_params(self):
         """
@@ -110,59 +105,23 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         work with if isinstance(self.module._fsdp_wrapped_module, PeftModel)
         """
         lora_params = OrderedDict()
-        if self.layered_summon:
-            if not self.base_sync_done:
-                raise ValueError(
-                    "To use layered_summon, you must make sure base-model is preloaded in vllm, "
-                    "e.g. set worker.rollout.load_format=safetensors."
-                )
-
-            def _prefix_submodules(module, prefix):
-                for name, submodule in module.named_modules():
-                    if name.startswith(prefix) and "." not in name[len(prefix) :]:
-                        yield name, submodule
-
-            prefix_list = [
-                "_fsdp_wrapped_module.base_model.model.",
-                "_fsdp_wrapped_module.base_model.model.model.",
-                "_fsdp_wrapped_module.base_model.model.model.layers.",
-                "_fsdp_wrapped_module.base_model.model.model.language_model.layers.",
-            ]
-            for prefix in prefix_list:
-                for name, submodule in _prefix_submodules(self.module, prefix):
-                    adjusted_prefix = name.replace("_fsdp_wrapped_module.base_model.model.", "base_model.model.")
-                    if name.endswith(".model") or name.endswith(".layers"):
-                        continue
-                    with FSDP.summon_full_params(submodule, writeback=False):
-                        sub_lora_params = get_peft_model_state_dict(
-                            self.module._fsdp_wrapped_module, state_dict=submodule.state_dict()
-                        )
-                        sub_lora_params = {
-                            f"{adjusted_prefix}.{name}": param.full_tensor().detach().cpu()
-                            if isinstance(param, DTensor)
-                            else param.detach().cpu()
-                            for name, param in sub_lora_params.items()
-                        }
-                        lora_params.update(sub_lora_params)
-                        submodule._is_root = False
-                    torch.cuda.empty_cache()
-        else:
+        if self.base_sync_done:
             actor_weights = get_model_state_dict(self.module)
-            if self.base_sync_done:
-                lora_params = get_peft_model_state_dict(self.module._fsdp_wrapped_module, state_dict=actor_weights)
-                lora_params = {
-                    name: param.full_tensor().detach().cpu() if isinstance(param, DTensor) else param.detach().cpu()
-                    for name, param in lora_params.items()
-                }
-            else:
-                for name, param in actor_weights.items():
-                    if any(x in name for x in ["_flat_param", "lora_"]):
-                        continue
-                    name = name.replace("base_model.model.", "").replace(".base_layer", "")
-                    lora_params[name] = (
-                        param.full_tensor().detach().cpu() if isinstance(param, DTensor) else param.detach().cpu()
-                    )
-            torch.cuda.empty_cache()
+            lora_params = get_peft_model_state_dict(self.module._fsdp_wrapped_module, state_dict=actor_weights)
+            lora_params = {
+                name: param.full_tensor().detach().cpu() if isinstance(param, DTensor) else param.detach().cpu()
+                for name, param in lora_params.items()
+            }
+        else:
+            actor_weights = get_model_state_dict(self.module, options=StateDictOptions(cpu_offload=True))
+            for name, param in actor_weights.items():
+                if any(x in name for x in ["_flat_param", "lora_"]):
+                    continue
+                name = name.replace("base_model.model.", "").replace(".base_layer", "")
+                if isinstance(param, DTensor):
+                    param = param.to(torch.device("cuda", torch.cuda.current_device())).full_tensor()
+                lora_params[name] = param.detach().cpu()
+        torch.cuda.empty_cache()
         return lora_params
 
     def _sync_weight_to_vllm(self):

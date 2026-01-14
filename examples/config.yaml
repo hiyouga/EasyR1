@@ -73,8 +73,6 @@ worker:
     enable_chunked_prefill: false
     tensor_parallel_size: 2
     disable_tqdm: false
-    load_format: "dummy"
-    layered_summon: false
     val_override_config:
       temperature: 0.6
       top_p: 0.95
