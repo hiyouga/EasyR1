@@ -12,11 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from importlib.metadata import PackageNotFoundError, version
 from typing import List
 
 from msgspec import field
-from packaging import version as vs
 from vllm.lora.models import LoRAModel
 from vllm.lora.request import LoRARequest
 from vllm.lora.utils import get_adapter_absolute_path
@@ -31,6 +29,9 @@ class TensorLoRARequest(LoRARequest):
 class VLLMHijack:
     @staticmethod
     def hijack():
+        def do_hijack(target_cls, target_method_name, hooking_method):
+            setattr(target_cls, target_method_name, hooking_method)
+
         def hijack__load_adapter(self, lora_request: TensorLoRARequest) -> LoRAModel:
             """
             based on vllm.lora.worker_manager.WorkerLoRAManager._load_adapter, support load adapter with lora tensors
@@ -110,16 +111,25 @@ class VLLMHijack:
                 )
             return lora
 
-        def do_hijack(target_cls, target_method_name, hooking_method):
-            setattr(target_cls, target_method_name, hooking_method)
-
         do_hijack(LRUCacheWorkerLoRAManager, "_load_adapter", hijack__load_adapter)
 
+        try:
+            from vllm.model_executor.models.module_mapping import MultiModelKeys
+            from vllm.model_executor.models.qwen3_vl import Qwen3VLForConditionalGeneration
+        except Exception:
+            return
 
-def is_version_ge(pkg: str = "vllm", minver: str = "0.7.3"):
-    """check if the package version is greater than or equal to the minimum version"""
-    try:
-        pkg_version = version(pkg)
-    except PackageNotFoundError:
-        return None
-    return vs.parse(pkg_version) >= vs.parse(minver)
+        def hijack__get_mm_mapping(self) -> MultiModelKeys:
+            """
+            Patch vllm.model_executor.models.qwen3_vl.Qwen3VLForConditionalGeneration.get_mm_mapping in vLLM 0.11.0
+            Reason:
+            vLLM 0.11.0 uses "model.visual.*" prefixes for Qwen3-VL, but the real module names are "visual.*".
+            This breaks LoRA filtering for multimodal parts, so we align the prefixes to the real module names.
+            """
+            return MultiModelKeys.from_string_field(
+                language_model="language_model",
+                connector="visual.merger.",
+                tower_model="visual.",
+            )
+
+        do_hijack(Qwen3VLForConditionalGeneration, "get_mm_mapping", hijack__get_mm_mapping)

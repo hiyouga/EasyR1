@@ -34,7 +34,7 @@ from vllm.distributed import parallel_state as vllm_ps
 from ...protocol import DataProto, all_gather_data_proto
 from ...utils.fsdp_utils import load_fsdp_model, offload_fsdp_model
 from ...utils.model_utils import print_gpu_memory_usage
-from ...utils.vllm_utils import TensorLoRARequest, VLLMHijack, is_version_ge
+from ...utils.vllm_utils import TensorLoRARequest
 from .base import BaseShardingManager
 
 
@@ -69,9 +69,6 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         torch.cuda.manual_seed(gen_dp_rank + 1000)  # make sure all tp ranks have the same random states
         self.gen_random_states = torch.cuda.get_rng_state()
         torch.cuda.set_rng_state(self.torch_random_states)
-
-        if is_version_ge(pkg="vllm", minver="0.7.3"):
-            VLLMHijack.hijack()
 
     def _rename_weight_keys(self, actor_weights: dict[str, Union[torch.Tensor, DTensor]], model: PreTrainedModel):
         # convert state dict keys: https://github.com/huggingface/transformers/pull/38385

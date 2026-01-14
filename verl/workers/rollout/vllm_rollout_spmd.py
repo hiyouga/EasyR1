@@ -28,6 +28,7 @@ from ...protocol import DataProto
 from ...utils import torch_functional as VF
 from ...utils.dataset import process_image, process_video
 from ...utils.torch_dtypes import PrecisionType
+from ...utils.vllm_utils import VLLMHijack
 from .base import BaseRollout
 from .config import RolloutConfig
 
@@ -107,6 +108,9 @@ class vLLMRollout(BaseRollout):
             engine_kwargs["disable_mm_preprocessor_cache"] = True
             if config.limit_images:
                 engine_kwargs["limit_mm_per_prompt"] = {"image": config.limit_images}
+
+        if self.lora_kwargs:
+            VLLMHijack.hijack()
 
         self.inference_engine = LLM(
             model=model_path,
