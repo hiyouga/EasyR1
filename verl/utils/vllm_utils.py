@@ -119,6 +119,7 @@ class VLLMHijack:
                 Reason:
                 vLLM 0.11.0 uses "model.visual.*" prefixes for Qwen3-VL, but the real module names are "visual.*".
                 This breaks LoRA filtering for multimodal parts, so we align the prefixes to the real module names.
+                Fixed upstream: https://github.com/vllm-project/vllm/commit/9f4e309
                 """
                 return MultiModelKeys.from_string_field(
                     language_model="language_model",
