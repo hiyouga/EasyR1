@@ -109,8 +109,7 @@ class vLLMRollout(BaseRollout):
             if config.limit_images:
                 engine_kwargs["limit_mm_per_prompt"] = {"image": config.limit_images}
 
-        if self.lora_kwargs:
-            VLLMHijack.hijack()
+        VLLMHijack.hijack()
 
         self.inference_engine = LLM(
             model=model_path,
