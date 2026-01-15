@@ -69,7 +69,7 @@ def get_fsdp_wrap_policy(model: PreTrainedModel, is_lora_model=False):
 
     policies = []
 
-    # Add lambda policy for LoRA modules if is_lora is True
+    # Add lambda policy for LoRA modules if is_lora_model is True
     if is_lora_model:
 
         def lambda_policy_fn(module):
