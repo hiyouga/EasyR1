@@ -112,7 +112,7 @@ class FSDPVLLMShardingManager(BaseShardingManager):
                 if isinstance(param, DTensor):
                     param = param.to(cuda_device).full_tensor()
                 lora_params[name] = param.detach().cpu()
-        torch.cuda.empty_cache()
+            torch.cuda.empty_cache()
         return lora_params
 
     def _sync_weight_to_vllm(self):

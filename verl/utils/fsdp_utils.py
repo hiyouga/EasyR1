@@ -178,4 +178,5 @@ def summon_lora_params(fsdp_module) -> dict[str, torch.Tensor]:
         else param.detach().cpu()
         for name, param in lora_params.items()
     }
+    torch.cuda.empty_cache()
     return lora_params
