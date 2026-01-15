@@ -71,7 +71,6 @@ worker:
     gpu_memory_utilization: 0.6
     enforce_eager: false
     enable_chunked_prefill: false
-    layered_summon: true
     tensor_parallel_size: 2
     disable_tqdm: false
     val_override_config:

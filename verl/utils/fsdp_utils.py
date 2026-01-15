@@ -13,13 +13,15 @@
 # limitations under the License.
 
 import gc
-from collections import OrderedDict, defaultdict
+from collections import defaultdict
 from functools import partial
 from typing import Callable, Union
 
 import torch
+from peft.utils.save_and_load import get_peft_model_state_dict
 from torch import nn
 from torch.distributed._tensor import DTensor
+from torch.distributed.checkpoint.state_dict import StateDictOptions, get_model_state_dict
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._runtime_utils import _lazy_init
 from torch.distributed.fsdp.wrap import _or_policy, lambda_auto_wrap_policy, transformer_auto_wrap_policy
@@ -166,42 +168,14 @@ def load_fsdp_optimizer(optimizer: Optimizer, empty_cache: bool = True):
         gc.collect()
 
 
-def layered_summon_lora_params(fsdp_module) -> OrderedDict:
-    from peft.utils.save_and_load import get_peft_model_state_dict
-
-    def __prefix_submodules(module, prefix):
-        for name, submodule in module.named_modules():
-            if name.startswith(prefix) and "." not in name[len(prefix) :]:
-                yield name, submodule
-
-    lora_params = OrderedDict()
-    prefix_list = [
-        # fsdp
-        "_fsdp_wrapped_module.base_model.model.",
-        "_fsdp_wrapped_module.base_model.model.model.",
-        "_fsdp_wrapped_module.base_model.model.model.layers.",
-        "_fsdp_wrapped_module.base_model.model.model.language_model.layers.",
-        # fsdp2
-        "base_model.model.",
-        "base_model.model.model.",
-        "base_model.model.model.layers.",
-        "base_model.model.model.language_model.layers.",
-    ]
-    peft_model = getattr(fsdp_module, "_fsdp_wrapped_module", fsdp_module)
-    for prefix in prefix_list:
-        for name, submodule in __prefix_submodules(fsdp_module, prefix):
-            prefix = name.replace("_fsdp_wrapped_module.base_model.model.", "base_model.model.")
-            if name.endswith(".model") or name.endswith(".layers"):
-                continue
-            with FSDP.summon_full_params(submodule, writeback=False):
-                sub_lora_params = get_peft_model_state_dict(peft_model, state_dict=submodule.state_dict())
-                sub_lora_params = {
-                    f"{prefix}.{name}": param.full_tensor().detach().cpu()
-                    if isinstance(param, DTensor)
-                    else param.detach().cpu()
-                    for name, param in sub_lora_params.items()
-                }
-                lora_params.update(sub_lora_params)
-                submodule._is_root = False
-            torch.cuda.empty_cache()
+def summon_lora_params(fsdp_module) -> dict[str, torch.Tensor]:
+    state_dict = get_model_state_dict(fsdp_module, options=StateDictOptions(cpu_offload=True))
+    lora_params = get_peft_model_state_dict(fsdp_module._fsdp_wrapped_module, state_dict=state_dict)
+    cuda_device = torch.device("cuda", torch.cuda.current_device())
+    lora_params = {
+        name: param.to(cuda_device).full_tensor().detach().cpu()
+        if isinstance(param, DTensor)
+        else param.detach().cpu()
+        for name, param in lora_params.items()
+    }
     return lora_params

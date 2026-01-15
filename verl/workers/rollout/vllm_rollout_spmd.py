@@ -116,7 +116,7 @@ class vLLMRollout(BaseRollout):
             model=model_path,
             skip_tokenizer_init=False,
             trust_remote_code=config.trust_remote_code,
-            load_format="safetensors" if self.lora_kwargs and config.layered_summon else "dummy",
+            load_format="dummy",
             dtype=PrecisionType.to_str(PrecisionType.to_dtype(config.dtype)),
             seed=config.seed,
             max_model_len=config.max_model_len or config.prompt_length + config.response_length,

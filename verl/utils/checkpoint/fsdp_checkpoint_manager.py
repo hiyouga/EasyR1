@@ -30,7 +30,7 @@ from torch.distributed.checkpoint.state_dict import (
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from transformers import PreTrainedModel, PreTrainedTokenizer, ProcessorMixin
 
-from ..fsdp_utils import layered_summon_lora_params
+from ..fsdp_utils import summon_lora_params
 from .checkpoint_manager import BaseCheckpointManager
 
 
@@ -134,7 +134,7 @@ class FSDPCheckpointManager(BaseCheckpointManager):
                 peft_config["task_type"] = peft_config["task_type"].value
                 peft_config["peft_type"] = peft_config["peft_type"].value
                 peft_config["target_modules"] = list(peft_config["target_modules"])
-            lora_params = layered_summon_lora_params(self.model)
+            lora_params = summon_lora_params(self.model)
             if self.rank == 0:
                 save_file(lora_params, os.path.join(lora_path, "adapter_model.safetensors"))
                 with open(os.path.join(lora_path, "adapter_config.json"), "w", encoding="utf-8") as f:
