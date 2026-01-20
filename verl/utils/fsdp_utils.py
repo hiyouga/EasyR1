@@ -18,10 +18,8 @@ from functools import partial
 from typing import Callable, Union
 
 import torch
-from peft.utils.save_and_load import get_peft_model_state_dict
+import torch.distributed.fsdp._traversal_utils as _traversal_utils
 from torch import nn
-from torch.distributed._tensor import DTensor
-from torch.distributed.checkpoint.state_dict import StateDictOptions, get_model_state_dict
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._runtime_utils import _lazy_init
 from torch.distributed.fsdp.wrap import _or_policy, lambda_auto_wrap_policy, transformer_auto_wrap_policy
@@ -168,15 +166,34 @@ def load_fsdp_optimizer(optimizer: Optimizer, empty_cache: bool = True):
         gc.collect()
 
 
-def summon_lora_params(fsdp_module) -> dict[str, torch.Tensor]:
-    state_dict = get_model_state_dict(fsdp_module, options=StateDictOptions(cpu_offload=True))
-    lora_params = get_peft_model_state_dict(fsdp_module._fsdp_wrapped_module, state_dict=state_dict)
-    cuda_device = torch.device("cuda", torch.cuda.current_device())
-    lora_params = {
-        name: param.to(cuda_device).full_tensor().detach().cpu()
-        if isinstance(param, DTensor)
-        else param.detach().cpu()
-        for name, param in lora_params.items()
-    }
-    torch.cuda.empty_cache()
-    return lora_params
+@torch.no_grad()
+def offload_fsdp_submodule(module: FSDP, empty_cache: bool = True):
+    for handle in _traversal_utils._get_fsdp_handles(module):
+        if handle._offload_params:
+            continue
+
+        flat_param = handle.flat_param
+        assert (
+            flat_param.data.data_ptr() == flat_param._local_shard.data_ptr()
+            and id(flat_param.data) != id(flat_param._local_shard)
+            and flat_param.data.size() == flat_param._local_shard.size()
+        )
+        handle.flat_param_to("cpu", non_blocking=True)
+        flat_param._local_shard = flat_param.data
+
+    if empty_cache:
+        torch.cuda.empty_cache()
+
+
+@torch.no_grad()
+def load_fsdp_submodule(module: FSDP, empty_cache: bool = True):
+    for handle in _traversal_utils._get_fsdp_handles(module):
+        if handle._offload_params:
+            continue
+
+        flat_param = handle.flat_param
+        handle.flat_param_to("cuda", non_blocking=True)
+        flat_param._local_shard = flat_param.data
+
+    if empty_cache:
+        gc.collect()

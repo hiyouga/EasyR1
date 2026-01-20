@@ -19,8 +19,9 @@ from typing import Optional, Union
 
 import torch
 import torch.distributed as dist
-from peft import PeftModel
+from peft import PeftModel, get_peft_model_state_dict
 from safetensors.torch import save_file
+from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint.state_dict import (
     StateDictOptions,
     get_model_state_dict,
@@ -30,7 +31,6 @@ from torch.distributed.checkpoint.state_dict import (
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from transformers import PreTrainedModel, PreTrainedTokenizer, ProcessorMixin
 
-from ..fsdp_utils import summon_lora_params
 from .checkpoint_manager import BaseCheckpointManager
 
 
@@ -134,7 +134,15 @@ class FSDPCheckpointManager(BaseCheckpointManager):
                 peft_config["task_type"] = peft_config["task_type"].value
                 peft_config["peft_type"] = peft_config["peft_type"].value
                 peft_config["target_modules"] = list(peft_config["target_modules"])
-            lora_params = summon_lora_params(self.model)
+            lora_params = get_peft_model_state_dict(self.model._fsdp_wrapped_module, state_dict=model_state_dict)
+            cuda_device = torch.device("cuda", torch.cuda.current_device())
+            lora_params = {
+                name: param.to(cuda_device).full_tensor().detach().cpu()
+                if isinstance(param, DTensor)
+                else param.detach().cpu()
+                for name, param in lora_params.items()
+            }
+            torch.cuda.empty_cache()
             if self.rank == 0:
                 save_file(lora_params, os.path.join(lora_path, "adapter_model.safetensors"))
                 with open(os.path.join(lora_path, "adapter_config.json"), "w", encoding="utf-8") as f:
