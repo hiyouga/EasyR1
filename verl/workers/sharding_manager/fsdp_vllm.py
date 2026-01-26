@@ -103,7 +103,8 @@ class FSDPVLLMShardingManager(BaseShardingManager):
     def _collect_lora_params(self) -> OrderedDict:
         """Collect LoRA params from each submodules."""
 
-        def __prefix_submodules(module, prefix):
+        def _prefix_submodules(module, prefix):
+            # get direct children of the module with this prefix
             for name, submodule in module.named_modules():
                 if name.startswith(prefix) and "." not in name[len(prefix) :]:
                     yield name, submodule
@@ -123,12 +124,14 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         ]
         peft_model = getattr(self.module, "_fsdp_wrapped_module", self.module)
         for prefix in prefix_list:
-            for name, submodule in __prefix_submodules(self.module, prefix):
+            for name, submodule in _prefix_submodules(self.module, prefix):
                 prefix = name.replace("_fsdp_wrapped_module.base_model.model.", "base_model.model.")
                 if name.endswith(".model") or name.endswith(".layers"):
                     continue
+
                 if self.use_param_offload:
                     load_fsdp_submodule(submodule)
+
                 with FSDP.summon_full_params(submodule, writeback=False):
                     sub_lora_params = get_peft_model_state_dict(peft_model, state_dict=submodule.state_dict())
                     sub_lora_params = {
@@ -138,9 +141,12 @@ class FSDPVLLMShardingManager(BaseShardingManager):
                         for name, param in sub_lora_params.items()
                     }
                     lora_params.update(sub_lora_params)
+
                 if self.use_param_offload:
                     offload_fsdp_submodule(submodule)
+
                 torch.cuda.empty_cache()
+
         return lora_params
 
     def _sync_weight_to_vllm(self):
