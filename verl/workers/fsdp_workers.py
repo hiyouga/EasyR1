@@ -26,7 +26,6 @@ import torch.distributed as dist
 from accelerate import init_empty_weights
 from codetiming import Timer
 from peft import TaskType, get_peft_model
-from peft.utils import cast_mixed_precision_params
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import CPUOffload, MixedPrecision, ShardingStrategy
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
@@ -228,9 +227,9 @@ class FSDPWorker(Worker):
 
         model = cast(PreTrainedModel, model)  # lint
         model.tie_weights()  # avoid hanging
-        model = model.to(torch_dtype)
-        if model_config.enable_gradient_checkpointing:
-            model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+
+        if role == "ref":
+            model.requires_grad_(False)
 
         is_lora_model = self._is_lora and role == "actor"
         if is_lora_model:
@@ -240,6 +239,7 @@ class FSDPWorker(Worker):
                 target_modules = model_config.lora.target_modules
             else:
                 target_modules = [item.strip() for item in model_config.lora.target_modules.split(",") if item.strip()]
+
             lora_config = peft.LoraConfig(
                 task_type=TaskType.CAUSAL_LM,
                 r=model_config.lora.rank,
@@ -248,10 +248,16 @@ class FSDPWorker(Worker):
                 exclude_modules=model_config.lora.exclude_modules,
             )
             model = get_peft_model(model, lora_config)
-            cast_mixed_precision_params(model, torch.bfloat16)
+            for p in model.parameters():
+                if not p.requires_grad:
+                    p.data = p.to(torch.bfloat16)
+                else:
+                    p.data = p.to(torch_dtype)
+        else:
+            model = model.to(torch_dtype)
 
-        if role == "ref":
-            model.requires_grad_(False)
+        if model_config.enable_gradient_checkpointing:
+            model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
 
         if model_config.freeze_vision_tower:
             if hasattr(model, "model") and hasattr(model.model, "visual"):  # transformers >= 4.52.0
