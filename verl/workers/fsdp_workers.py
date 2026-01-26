@@ -458,7 +458,7 @@ class FSDPWorker(Worker):
         if self._has_rollout:  # must after actor
             self._build_rollout()
 
-        if self._has_ref and not self._is_lora:
+        if self._has_ref:
             from .actor.dp_actor import DataParallelPPOActor  # lazy import
 
             self.ref_policy = DataParallelPPOActor(
