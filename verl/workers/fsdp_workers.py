@@ -667,7 +667,7 @@ class FSDPWorker(Worker):
 
         # when is_lora is True, we use the actor without lora applied to calculate the log_prob
         # which is mostly used for ref log_prob calculation
-        adapter_ctx = self.ref_fsdp_module.disable_adapter() if if self._is_lora else nullcontext()
+        adapter_ctx = self.ref_fsdp_module.disable_adapter() if self._is_lora else nullcontext()
 
         self._process_multi_modal_inputs(data)
         data = data.to(torch.cuda.current_device())
