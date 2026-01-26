@@ -134,13 +134,14 @@ class FSDPCheckpointManager(BaseCheckpointManager):
                 peft_config["task_type"] = peft_config["task_type"].value
                 peft_config["peft_type"] = peft_config["peft_type"].value
                 peft_config["target_modules"] = list(peft_config["target_modules"])
-            lora_params = get_peft_model_state_dict(self.model._fsdp_wrapped_module, state_dict=model_state_dict)
-            cuda_device = torch.device("cuda", torch.cuda.current_device())
+
+            sharded_lora_params = get_peft_model_state_dict(self.model._fsdp_wrapped_module, state_dict=model_state_dict)
+            cuda_device = torch.device("cuda")
             lora_params = {
-                name: param.to(cuda_device).full_tensor().detach().cpu()
-                if isinstance(param, DTensor)
-                else param.detach().cpu()
-                for name, param in lora_params.items()
+                name: sharded_param.to(cuda_device).full_tensor().detach().cpu()
+                if isinstance(sharded_param, DTensor)
+                else sharded_param.detach().cpu()
+                for name, sharded_param in sharded_lora_params.items()
             }
             torch.cuda.empty_cache()
             if self.rank == 0:
