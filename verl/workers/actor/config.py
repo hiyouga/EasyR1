@@ -60,7 +60,6 @@ class ModelConfig:
             self.tokenizer_path = os.path.abspath(self.tokenizer_path)
 
 
-
 @dataclass
 class OptimConfig:
     lr: float = 1e-6
