@@ -96,6 +96,9 @@ class FSDPWorker(Worker):
         if self.config.actor.disable_kl:
             self._has_ref = False
 
+        self._lora_rank = self.config.actor.model.lora.rank
+        self._is_lora = self._lora_rank > 0
+
         self._use_param_offload = False
         self._use_optimizer_offload = False
         self._use_ref_param_offload = False
@@ -134,8 +137,6 @@ class FSDPWorker(Worker):
             self.ulysses_device_mesh = None
 
         self.ulysses_sharding_manager = FSDPUlyssesShardingManager(self.ulysses_device_mesh)
-        self._lora_rank = self.config.actor.model.lora.rank
-        self._is_lora = self._lora_rank > 0
 
         # validate and normalize config
         if self.config.rollout.n > 1:
@@ -424,14 +425,17 @@ class FSDPWorker(Worker):
                 role="actor",
             )
 
-        if self._has_ref and not self._is_lora:
-            self._build_model_optimizer(
-                model_config=self.config.actor.model,
-                fsdp_config=self.config.ref.fsdp,
-                optim_config=None,
-                padding_free=self.config.ref.padding_free,
-                role="ref",
-            )
+        if self._has_ref:
+            if self._is_lora:
+                self.ref_fsdp_module = self.fsdp_module
+            else:
+                self._build_model_optimizer(
+                    model_config=self.config.actor.model,
+                    fsdp_config=self.config.ref.fsdp,
+                    optim_config=None,
+                    padding_free=self.config.ref.padding_free,
+                    role="ref",
+                )
 
         if self._has_actor:
             from .actor.dp_actor import DataParallelPPOActor  # lazy import
@@ -635,18 +639,12 @@ class FSDPWorker(Worker):
         if self._use_param_offload:
             load_fsdp_model(self.fsdp_module)
 
-        # when is_lora is True, we use the actor without lora applied to calculate the log_prob
-        # which is mostly used for ref log_prob calculation
-        is_lora = data.meta_info.pop("is_lora", False)
-        adapter_ctx = self.actor.actor_module.disable_adapter() if is_lora else nullcontext()
-
         # we should always recompute old_log_probs when it is HybridEngine
         data.meta_info["temperature"] = self.config.rollout.temperature
         # perform recompute log_prob
         with self.ulysses_sharding_manager:
             data = self.ulysses_sharding_manager.preprocess_data(data)
-            with adapter_ctx:
-                output = self.actor.compute_log_prob(data=data)
+            output = self.actor.compute_log_prob(data=data)
             output = DataProto.from_dict(
                 tensors={"old_log_probs": output}, meta_info={"temperature": self.config.rollout.temperature}
             )
@@ -667,15 +665,10 @@ class FSDPWorker(Worker):
     def compute_ref_log_probs(self, data: DataProto):
         assert self._has_ref
 
-        if self._is_lora:
-            # if _is_lora, actor without lora applied is the ref
-            data.meta_info["is_lora"] = True
-            data = self.compute_log_probs(data)
-            # this old_log_probs is in fact ref_log_probs
-            data = DataProto.from_dict(tensors={"ref_log_probs": data.batch["old_log_probs"]})
-            return data
-        # else:
-        # otherwise, the class have a standalone ref model
+        # when is_lora is True, we use the actor without lora applied to calculate the log_prob
+        # which is mostly used for ref log_prob calculation
+        adapter_ctx = self.ref_fsdp_module.disable_adapter() if if self._is_lora else nullcontext()
+
         self._process_multi_modal_inputs(data)
         data = data.to(torch.cuda.current_device())
 
@@ -683,7 +676,7 @@ class FSDPWorker(Worker):
             load_fsdp_model(self.ref_fsdp_module)
 
         data.meta_info["temperature"] = self.config.rollout.temperature
-        with self.ulysses_sharding_manager:
+        with self.ulysses_sharding_manager, adapter_ctx:
             data = self.ulysses_sharding_manager.preprocess_data(data)
             output = self.ref_policy.compute_log_prob(data=data)
             output = DataProto.from_dict(tensors={"ref_log_probs": output})
