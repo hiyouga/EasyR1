@@ -69,11 +69,10 @@ Use `USE_MODELSCOPE_HUB=1` to download models from the ModelScope hub.
 | ------------------------ | ---- | ------ | ------ | ------ | ------- | ------- |
 | GRPO Full Fine-Tuning    |  AMP | 2*24GB | 4*40GB | 8*40GB | 16*80GB | 32*80GB |
 | GRPO Full Fine-Tuning    | BF16 | 1*24GB | 1*40GB | 4*40GB |  8*80GB | 16*80GB |
+| GRPO LoRA Fine-Tuning    |  AMP | 1*32GB | 1*40GB | 1*48GB |   -     |   -     |
 
 > [!NOTE]
 > Use `worker.actor.fsdp.torch_dtype=bf16` and `worker.actor.optim.strategy=adamw_bf16` to enable bf16 training.
->
-> We are working hard to reduce the VRAM in RL training, LoRA support will be integrated in next updates.
 
 ## Tutorial: Run Qwen2.5-VL GRPO on [Geometry3K](https://huggingface.co/datasets/hiyouga/geometry3k) Dataset in Just 3 Steps
 
@@ -91,6 +90,12 @@ pip install -e .
 
 ```bash
 bash examples/qwen2_5_vl_7b_geo3k_grpo.sh
+```
+
+### GRPO LoRA Training
+
+```bash
+bash examples/qwen3_vl_4b_geo3k_grpo_lora.sh
 ```
 
 ### Merge Checkpoint in Hugging Face Format
@@ -186,7 +191,6 @@ See [baselines.md](assets/baselines.md).
 
 ## TODO
 
-- Support LoRA (high priority).
 - Support ulysses parallelism for VLMs (middle priority).
 - Support more VLM architectures.
 
