@@ -672,7 +672,8 @@ class FSDPWorker(Worker):
         self._process_multi_modal_inputs(data)
         data = data.to(torch.cuda.current_device())
 
-        if self._use_ref_param_offload:
+        # the fsdp module is the same as the ref fsdp module when lora is enabled
+        if self._use_ref_param_offload or (self._is_lora and self._use_param_offload):
             load_fsdp_model(self.ref_fsdp_module)
 
         data.meta_info["temperature"] = self.config.rollout.temperature
