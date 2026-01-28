@@ -69,7 +69,7 @@ Use `USE_MODELSCOPE_HUB=1` to download models from the ModelScope hub.
 | ------------------------ | ---- | ------ | ------ | ------ | ------- | ------- |
 | GRPO Full Fine-Tuning    |  AMP | 2*24GB | 4*40GB | 8*40GB | 16*80GB | 32*80GB |
 | GRPO Full Fine-Tuning    | BF16 | 1*24GB | 1*40GB | 4*40GB |  8*80GB | 16*80GB |
-| GRPO LoRA Fine-Tuning    |  AMP | 1*32GB | 1*40GB | 1*48GB |   -     |   -     |
+| GRPO LoRA Fine-Tuning    |  AMP | 1*32GB | 1*40GB | 2*32GB |   -     |   -     |
 
 > [!NOTE]
 > Use `worker.actor.fsdp.torch_dtype=bf16` and `worker.actor.optim.strategy=adamw_bf16` to enable bf16 training.
