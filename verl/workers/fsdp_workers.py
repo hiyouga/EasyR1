@@ -688,7 +688,7 @@ class FSDPWorker(Worker):
         if self.world_size > 1:
             self.ref_fsdp_module._handle.reshard(True)
 
-        if self._use_ref_param_offload:
+        if self._use_ref_param_offload or (self._is_lora and self._use_param_offload):
             offload_fsdp_model(self.ref_fsdp_module)
 
         output = output.to("cpu")
