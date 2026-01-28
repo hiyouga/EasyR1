@@ -100,54 +100,36 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         for name, tensor in actor_weights.items():
             yield name, tensor.full_tensor() if isinstance(tensor, DTensor) else tensor
 
-    def _collect_lora_params(self) -> OrderedDict:
-        """Collect LoRA params from each submodules."""
-
-        def _prefix_submodules(module, prefix):
-            # get direct children of the module with this prefix
-            for name, submodule in module.named_modules():
-                if name.startswith(prefix) and "." not in name[len(prefix) :]:
-                    yield name, submodule
-
-        lora_params = OrderedDict()
-        prefix_list = [
-            # fsdp
-            "_fsdp_wrapped_module.base_model.model.",
-            "_fsdp_wrapped_module.base_model.model.model.",
-            "_fsdp_wrapped_module.base_model.model.model.layers.",
-            "_fsdp_wrapped_module.base_model.model.model.language_model.layers.",
-            # fsdp2
-            "base_model.model.",
-            "base_model.model.model.",
-            "base_model.model.model.layers.",
-            "base_model.model.model.language_model.layers.",
-        ]
+    def _collect_lora_weights(self) -> dict:
+        """Collect LoRA weights from each transformer layer."""
+        lora_weights = {}
         peft_model = getattr(self.module, "_fsdp_wrapped_module", self.module)
-        for prefix in prefix_list:
-            for name, submodule in _prefix_submodules(self.module, prefix):
-                prefix = name.replace("_fsdp_wrapped_module.base_model.model.", "base_model.model.")
-                if name.endswith(".model") or name.endswith(".layers"):
-                    continue
+        for name, submodule in self.module.named_modules():
+            # Transformer layers are typically named ...layers.N (numeric suffix).
+            if not name.rsplit("layers.", 1)[-1].isdigit():
+                continue
 
-                if self.use_param_offload:
-                    load_fsdp_submodule(submodule)
+            layer_module = submodule
 
-                with FSDP.summon_full_params(submodule, writeback=False):
-                    sub_lora_params = get_peft_model_state_dict(peft_model, state_dict=submodule.state_dict())
-                    sub_lora_params = {
-                        f"{prefix}.{name}": param.full_tensor().detach().cpu()
-                        if isinstance(param, DTensor)
-                        else param.detach().cpu()
-                        for name, param in sub_lora_params.items()
-                    }
-                    lora_params.update(sub_lora_params)
+            if self.use_param_offload:
+                load_fsdp_submodule(layer_module)
 
-                if self.use_param_offload:
-                    offload_fsdp_submodule(submodule)
+            peft_prefix = name.replace("_fsdp_wrapped_module.base_model.model.", "base_model.model.")
+            with FSDP.summon_full_params(layer_module, writeback=False):
+                layer_lora_weights = get_peft_model_state_dict(peft_model, state_dict=layer_module.state_dict())
+                for lora_module_name, lora_weight in layer_lora_weights.items():
+                    key = f"{peft_prefix}.{lora_module_name}"
+                    if isinstance(lora_weight, DTensor):
+                        lora_weights[key] = lora_weight.full_tensor().detach().cpu()
+                    else:
+                        lora_weights[key] = lora_weight.detach().cpu()
 
-                torch.cuda.empty_cache()
+            if self.use_param_offload:
+                offload_fsdp_submodule(layer_module)
 
-        return lora_params
+            torch.cuda.empty_cache()
+
+        return lora_weights
 
     def _sync_weight_to_vllm(self):
         if self.use_param_offload and not self.is_lora:
@@ -155,7 +137,7 @@ class FSDPVLLMShardingManager(BaseShardingManager):
 
         if self.is_lora:
             peft_config = self.module._fsdp_wrapped_module.peft_config.get("default", None)
-            actor_weights = self._collect_lora_params()
+            actor_weights = self._collect_lora_weights()
         else:
             actor_weights = get_model_state_dict(self.module)
             actor_weights = self._rename_weight_keys(actor_weights, self.module._fsdp_wrapped_module)

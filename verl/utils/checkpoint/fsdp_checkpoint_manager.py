@@ -135,17 +135,19 @@ class FSDPCheckpointManager(BaseCheckpointManager):
                 peft_config["peft_type"] = peft_config["peft_type"].value
                 peft_config["target_modules"] = list(peft_config["target_modules"])
 
-            sharded_lora_params = get_peft_model_state_dict(self.model._fsdp_wrapped_module, state_dict=model_state_dict)
+            sharded_lora_weights = get_peft_model_state_dict(
+                self.model._fsdp_wrapped_module, state_dict=model_state_dict
+            )
             cuda_device = torch.device("cuda")
-            lora_params = {
-                name: sharded_param.to(cuda_device).full_tensor().detach().cpu()
-                if isinstance(sharded_param, DTensor)
-                else sharded_param.detach().cpu()
-                for name, sharded_param in sharded_lora_params.items()
+            lora_weights = {
+                name: sharded_weight.to(cuda_device).full_tensor().detach().cpu()
+                if isinstance(sharded_weight, DTensor)
+                else sharded_weight.detach().cpu()
+                for name, sharded_weight in sharded_lora_weights.items()
             }
             torch.cuda.empty_cache()
             if self.rank == 0:
-                save_file(lora_params, os.path.join(lora_path, "adapter_model.safetensors"))
+                save_file(lora_weights, os.path.join(lora_path, "adapter_model.safetensors"))
                 with open(os.path.join(lora_path, "adapter_config.json"), "w", encoding="utf-8") as f:
                     json.dump(peft_config, f, ensure_ascii=False, indent=4)
 
