@@ -109,23 +109,21 @@ class FSDPVLLMShardingManager(BaseShardingManager):
             if not name.rsplit("layers.", 1)[-1].isdigit():
                 continue
 
-            layer_module = submodule
-
             if self.use_param_offload:
-                load_fsdp_submodule(layer_module)
+                load_fsdp_submodule(submodule)
 
             peft_prefix = name.replace("_fsdp_wrapped_module.base_model.model.", "base_model.model.")
-            with FSDP.summon_full_params(layer_module, writeback=False):
-                layer_lora_weights = get_peft_model_state_dict(peft_model, state_dict=layer_module.state_dict())
-                for lora_module_name, lora_weight in layer_lora_weights.items():
-                    key = f"{peft_prefix}.{lora_module_name}"
-                    if isinstance(lora_weight, DTensor):
-                        lora_weights[key] = lora_weight.full_tensor().detach().cpu()
-                    else:
-                        lora_weights[key] = lora_weight.detach().cpu()
+            layer_weights = get_model_state_dict(submodule)
+            layer_lora_weights = get_peft_model_state_dict(peft_model, state_dict=layer_weights)
+            for lora_module_name, lora_weight in layer_lora_weights.items():
+                key = f"{peft_prefix}.{lora_module_name}"
+                if isinstance(lora_weight, DTensor):
+                    lora_weights[key] = lora_weight.full_tensor().detach().cpu()
+                else:
+                    lora_weights[key] = lora_weight.detach().cpu()
 
             if self.use_param_offload:
-                offload_fsdp_submodule(layer_module)
+                offload_fsdp_submodule(submodule)
 
             torch.cuda.empty_cache()
 
