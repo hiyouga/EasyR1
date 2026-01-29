@@ -9,7 +9,7 @@ python3 -m verl.trainer.main \
     data.train_files=hiyouga/geometry3k@train \
     data.val_files=hiyouga/geometry3k@test \
     worker.actor.model.model_path=${MODEL_PATH} \
-    trainer.experiment_name=qwen3_vl_4b_geo_grpo_lora \
-    trainer.n_gpus_per_node=2 \
     worker.actor.model.lora.rank=64 \
-    worker.actor.optim.lr=1e-5
+    worker.actor.optim.lr=1e-5 \
+    trainer.experiment_name=qwen3_vl_4b_geo_grpo_lora \
+    trainer.n_gpus_per_node=2
