@@ -31,6 +31,7 @@ EasyR1 is efficient and scalable due to the design of **[HybirdEngine](https://a
 
 - Supported tricks
   - Padding-free training
+  - LoRA training ![new](https://img.shields.io/badge/new-orange)
   - Resuming from the latest/best checkpoint
   - Wandb & SwanLab & Mlflow & Tensorboard tracking
 
@@ -69,7 +70,7 @@ Use `USE_MODELSCOPE_HUB=1` to download models from the ModelScope hub.
 | ------------------------ | ---- | ------ | ------ | ------ | ------- | ------- |
 | GRPO Full Fine-Tuning    |  AMP | 2*24GB | 4*40GB | 8*40GB | 16*80GB | 32*80GB |
 | GRPO Full Fine-Tuning    | BF16 | 1*24GB | 1*40GB | 4*40GB |  8*80GB | 16*80GB |
-| GRPO LoRA Fine-Tuning    |  AMP | 1*32GB | 1*40GB | 2*32GB |   -     |   -     |
+| GRPO LoRA Fine-Tuning    |  AMP | 1*12GB | 1*24GB | 2*32GB |  2*80GB |  4*80GB |
 
 > [!NOTE]
 > Use `worker.actor.fsdp.torch_dtype=bf16` and `worker.actor.optim.strategy=adamw_bf16` to enable bf16 training.
@@ -86,7 +87,7 @@ cd EasyR1
 pip install -e .
 ```
 
-### GRPO Training
+### GRPO Full Training
 
 ```bash
 bash examples/qwen2_5_vl_7b_geo3k_grpo.sh
@@ -195,7 +196,7 @@ See [baselines.md](assets/baselines.md).
 - Support more VLM architectures.
 
 > [!NOTE]
-> We will not provide scripts for supervised fine-tuning and inference in this project. If you have such requirements, we recommend using [LLaMA-Factory](https://github.com/hiyouga/LLaMA-Factory).
+> We will not provide scripts for supervised fine-tuning and inference in this project. If you have such requirements, we recommend using [LlamaFactory](https://github.com/hiyouga/LlamaFactory).
 
 ### Known bugs
 
