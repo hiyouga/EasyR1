@@ -52,7 +52,11 @@ def _get_logit_bias(processor: Optional[ProcessorMixin]) -> Optional[dict[int, f
 
 
 def _process_multi_modal_data(
-    multi_modal_data: dict[str, Any], min_pixels: int, max_pixels: int, video_fps: float
+    multi_modal_data: dict[str, Any],
+    min_pixels: int,
+    max_pixels: int,
+    video_fps: float,
+    return_video_metadata: bool = False,
 ) -> dict[str, Any]:
     # may convert image path to image object
     images, videos = [], []
@@ -62,7 +66,15 @@ def _process_multi_modal_data(
 
     if "videos" in multi_modal_data:
         for video in multi_modal_data["videos"]:
-            videos.append(process_video(video, min_pixels, max_pixels, video_fps))
+            videos.append(
+                process_video(
+                    video,
+                    min_pixels,
+                    max_pixels,
+                    video_fps,
+                    return_metadata=return_video_metadata,
+                )
+            )
 
     if len(images) != 0:
         return {"image": images}
@@ -93,6 +105,7 @@ class vLLMRollout(BaseRollout):
         self.rank = int(os.getenv("RANK", "0"))
         self.config = config
         self.pad_token_id = tokenizer.pad_token_id
+        self.return_video_metadata = processor is not None and "Qwen3VLProcessor" in processor.__class__.__name__
         self.use_tqdm = (self.rank == 0) and (not config.disable_tqdm)
         if config.tensor_parallel_size > torch.distributed.get_world_size():
             raise ValueError("Tensor parallelism size should be less than world size.")
@@ -190,6 +203,7 @@ class vLLMRollout(BaseRollout):
                             prompts.meta_info["min_pixels"],
                             prompts.meta_info["max_pixels"],
                             prompts.meta_info["video_fps"],
+                            return_video_metadata=self.return_video_metadata,
                         ),
                     }
                 )

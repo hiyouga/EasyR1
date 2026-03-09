@@ -78,10 +78,15 @@ def process_image(
 
 
 def process_video(
-    video: str, min_pixels: Optional[int], max_pixels: Optional[int], video_fps: float, return_fps: bool = False
-) -> Union[list[ImageObject], tuple[list[ImageObject], list[float]]]:
+    video: str,
+    min_pixels: Optional[int],
+    max_pixels: Optional[int],
+    video_fps: float,
+    return_fps: bool = False,
+    return_metadata: bool = False,
+) -> Any:
     vision_info = {"video": video, "min_pixels": min_pixels, "max_pixels": max_pixels, "fps": video_fps}
-    return fetch_video(vision_info, return_video_sample_fps=return_fps)
+    return fetch_video(vision_info, return_video_sample_fps=return_fps, return_video_metadata=return_metadata)
 
 
 class RLHFDataset(Dataset):
