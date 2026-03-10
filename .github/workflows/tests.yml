@@ -52,7 +52,7 @@ jobs:
       - name: Install dependencies
         run: |
           uv pip install --system --upgrade pip
-          uv pip install --system torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          uv pip install --system --no-cache torch torchvision --index-url https://download.pytorch.org/whl/cpu
           uv pip install --system -r .github/requirements-test.txt
           uv pip install --system --no-deps .
 
