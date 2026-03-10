@@ -47,7 +47,7 @@ jobs:
         with:
           version: "0.10.7"
           enable-cache: true
-          cache-dependency-path: ".github/requirements-test.txt"
+          cache-dependency-glob: ".github/requirements-test.txt"
           
       - name: Install dependencies
         run: |
