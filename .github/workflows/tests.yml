@@ -46,8 +46,6 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           version: "0.10.7"
-          enable-cache: true
-          cache-dependency-glob: "**/requirements-test.txt"
 
       - name: Install dependencies
         run: |
