@@ -46,7 +46,9 @@ jobs:
         uses: astral-sh/setup-uv@v7
         with:
           version: "0.10.7"
-
+          enable-cache: true
+          cache-dependency-path: ".github/requirements-test.txt"
+          
       - name: Install dependencies
         run: |
           uv pip install --system --upgrade pip
