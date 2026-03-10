@@ -33,28 +33,28 @@ jobs:
       group: ${{ github.workflow }}-${{ github.ref }}-${{ matrix.os }}-${{ matrix.python-version }}
       cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
+    env:
+      UV_NO_SYNC: 1
+
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: ${{ matrix.python-version }}
-
       - name: Install uv
         uses: astral-sh/setup-uv@v7
         with:
+          python-version: ${{ matrix.python-version }}
           version: "0.10.7"
           enable-cache: true
           cache-dependency-glob: ".github/requirements-test.txt"
           
       - name: Install dependencies
         run: |
-          uv pip install --system --upgrade pip
-          uv pip install --system --no-cache torch torchvision --index-url https://download.pytorch.org/whl/cpu
-          uv pip install --system -r .github/requirements-test.txt
-          uv pip install --system --no-deps .
+          uv venv
+          uv pip install --upgrade pip
+          uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          uv pip install -r .github/requirements-test.txt
+          uv pip install --no-deps .
 
       - name: Check quality
         run: |
