@@ -6,4 +6,6 @@ qwen-vl-utils
 ray[default]
 ruff
 tensordict
+torch
+torchvision
 transformers>=4.54.0,<=4.57.0
