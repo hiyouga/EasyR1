@@ -13,9 +13,12 @@
 # limitations under the License.
 
 import argparse
+import dataclasses
+import json
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor
+from typing import Type
 
 import numpy as np
 import torch
@@ -25,6 +28,7 @@ from transformers import (
     AutoModelForCausalLM,
     AutoModelForImageTextToText,
     AutoModelForTokenClassification,
+    AutoTokenizer,
     PretrainedConfig,
     PreTrainedModel,
 )
@@ -41,6 +45,122 @@ def merge_by_placement(tensors: list[torch.Tensor], placement: Placement):
         raise ValueError(f"Unsupported placement: {placement}")
 
 
+def strip_fsdp_prefix(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    """Strip FSDP / DDP prefixes so keys match a plain PeftModel.state_dict()."""
+    out: dict[str, torch.Tensor] = {}
+    for k, v in state_dict.items():
+        nk = k
+        # Typical torch.distributed checkpoint / FSDP root module prefix
+        if nk.startswith("_fsdp_wrapped_module."):
+            nk = nk[len("_fsdp_wrapped_module.") :]
+        # DDP-style
+        while nk.startswith("module."):
+            nk = nk[len("module.") :]
+        out[nk] = v
+    return out
+
+
+def merge_lora_into_base_and_save(
+    local_dir: str,
+    state_dict: dict[str, torch.Tensor],
+    hf_path: str,
+    auto_class: Type[PreTrainedModel],
+    trust_remote_code: bool,
+) -> bool:
+    """
+    If this checkpoint was trained with PEFT LoRA, the merged FSDP state still contains
+    separate base_layer and lora_A/B tensors. vLLM expects a dense HF checkpoint, so we
+    load into PeftModel and merge_and_unload() before save_pretrained.
+    """
+    adapter_cfg = os.path.join(local_dir, "lora_adapter", "adapter_config.json")
+    if not os.path.isfile(adapter_cfg):
+        return False
+
+    try:
+        from peft import LoraConfig, get_peft_model
+    except ImportError as e:
+        raise ImportError(
+            "LoRA checkpoint merge requires the `peft` package. Install peft or merge without lora_adapter."
+        ) from e
+
+    # PeftConfig.from_json_file may return a plain dict on some peft versions; LoraConfig is what get_peft_model needs.
+    with open(adapter_cfg, encoding="utf-8") as f:
+        raw_cfg = json.load(f)
+    base_path = raw_cfg.get("base_model_name_or_path")
+    if not base_path:
+        raise ValueError(f"adapter_config.json has no base_model_name_or_path: {adapter_cfg}")
+
+    if hasattr(LoraConfig, "from_json_file"):
+        peft_config = LoraConfig.from_json_file(adapter_cfg)
+    else:
+        field_names = {f.name for f in dataclasses.fields(LoraConfig)}
+        kwargs = {k: v for k, v in raw_cfg.items() if k in field_names}
+        peft_config = LoraConfig(**kwargs)
+
+    if isinstance(peft_config, dict):
+        field_names = {f.name for f in dataclasses.fields(LoraConfig)}
+        kwargs = {k: v for k, v in peft_config.items() if k in field_names}
+        peft_config = LoraConfig(**kwargs)
+
+    state_dict = strip_fsdp_prefix(state_dict)
+    print(f"Loading base model from {base_path} for LoRA merge...")
+    base_model = auto_class.from_pretrained(
+        base_path,
+        torch_dtype=torch.bfloat16,
+        device_map="cpu",
+        trust_remote_code=trust_remote_code,
+        low_cpu_mem_usage=True,
+    )
+    peft_model = get_peft_model(base_model, peft_config)
+    incompat = peft_model.load_state_dict(state_dict, strict=False)
+    if incompat.missing_keys:
+        print(f"Warning: {len(incompat.missing_keys)} missing keys (showing first 10): {incompat.missing_keys[:10]}")
+    if incompat.unexpected_keys:
+        print(
+            f"Warning: {len(incompat.unexpected_keys)} unexpected keys (showing first 10): {incompat.unexpected_keys[:10]}"
+        )
+
+    print("Merging LoRA adapters into base weights (merge_and_unload)...")
+    merged = peft_model.merge_and_unload()
+    print(f"Saving merged dense model to {hf_path}...")
+    merged.save_pretrained(hf_path, safe_serialization=True)
+    tok_cfg = os.path.join(hf_path, "tokenizer_config.json")
+    if not os.path.isfile(tok_cfg):
+        try:
+            AutoTokenizer.from_pretrained(base_path, trust_remote_code=trust_remote_code).save_pretrained(hf_path)
+            print(f"Copied tokenizer from base model into {hf_path}")
+        except Exception as e:
+            print(f"Warning: tokenizer not in output dir and copy from base failed: {e}")
+    return True
+
+
+def load_pretrained_config(local_dir: str, trust_remote_code: bool) -> PretrainedConfig:
+    """
+    Prefer ``<checkpoint>/huggingface/config.json`` (saved with FSDP ckpt).
+    If missing, infer from ``lora_adapter/adapter_config.json`` → base_model_name_or_path.
+    """
+    hf_path = os.path.join(local_dir, "huggingface")
+    config_json = os.path.join(hf_path, "config.json")
+    if os.path.isfile(config_json):
+        return AutoConfig.from_pretrained(hf_path, trust_remote_code=trust_remote_code)
+
+    adapter_cfg = os.path.join(local_dir, "lora_adapter", "adapter_config.json")
+    if os.path.isfile(adapter_cfg):
+        with open(adapter_cfg, encoding="utf-8") as f:
+            raw = json.load(f)
+        base_path = raw.get("base_model_name_or_path")
+        if base_path:
+            print(
+                f"No {config_json}; loading AutoConfig from base_model_name_or_path: {base_path}"
+            )
+            return AutoConfig.from_pretrained(base_path, trust_remote_code=trust_remote_code)
+
+    raise OSError(
+        f"Cannot find model config: need either {config_json} or {adapter_cfg} with "
+        "base_model_name_or_path pointing to a local model directory."
+    )
+
+
 def upload_model_to_huggingface(local_path: str, remote_path: str):
     # Push to hugging face
     from huggingface_hub import HfApi
@@ -54,8 +174,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_dir", required=True, type=str, help="The path for your saved model")
     parser.add_argument("--hf_upload_path", default=False, type=str, help="The path of the huggingface repo to upload")
+    parser.add_argument(
+        "--trust_remote_code",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Pass trust_remote_code when loading configs / base model for LoRA merge (default: true).",
+    )
     args = parser.parse_args()
-    local_dir: str = args.local_dir
+    local_dir: str = os.path.abspath(os.path.normpath(args.local_dir))
 
     assert not local_dir.endswith("huggingface"), "The local_dir should not end with huggingface."
 
@@ -160,7 +286,8 @@ if __name__ == "__main__":
 
     print("Merge completed.")
     hf_path = os.path.join(local_dir, "huggingface")
-    config: PretrainedConfig = AutoConfig.from_pretrained(hf_path)
+    os.makedirs(hf_path, exist_ok=True)
+    config: PretrainedConfig = load_pretrained_config(local_dir, trust_remote_code=args.trust_remote_code)
     architectures: list[str] = getattr(config, "architectures", ["Unknown"])
 
     if "ForTokenClassification" in architectures[0]:
@@ -172,15 +299,22 @@ if __name__ == "__main__":
     else:
         raise NotImplementedError(f"Unknown architecture {architectures}.")
 
-    with torch.device("meta"):
-        model: PreTrainedModel = AutoClass.from_config(config, torch_dtype=torch.bfloat16)
+    if merge_lora_into_base_and_save(
+        local_dir, state_dict, hf_path, AutoClass, trust_remote_code=args.trust_remote_code
+    ):
+        del state_dict
+    else:
+        with torch.device("meta"):
+            model: PreTrainedModel = AutoClass.from_config(
+                config, torch_dtype=torch.bfloat16, trust_remote_code=args.trust_remote_code
+            )
 
-    assert isinstance(model, PreTrainedModel)
-    model.to_empty(device="cpu")
+        assert isinstance(model, PreTrainedModel)
+        model.to_empty(device="cpu")
 
-    print(f"Saving model to {hf_path}...")
-    model.save_pretrained(hf_path, state_dict=state_dict)
-    del state_dict, model
+        print(f"Saving model to {hf_path}...")
+        model.save_pretrained(hf_path, state_dict=state_dict)
+        del state_dict, model
 
     if args.hf_upload_path:
         upload_model_to_huggingface(hf_path, args.hf_upload_path)
