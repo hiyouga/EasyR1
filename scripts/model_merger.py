@@ -51,11 +51,7 @@ def merge_lora_into_base_and_save(
     hf_path: str,
     auto_class: Type[PreTrainedModel],
 ) -> bool:
-    """
-    If this checkpoint was trained with PEFT LoRA, the merged FSDP state still contains
-    separate base_layer and lora_A/B tensors. vLLM expects a dense HF checkpoint, so we
-    load into PeftModel and merge_and_unload() before save_pretrained.
-    """
+    """Merge LoRA weights into the base model before saving a dense HF checkpoint for vLLM."""
     adapter_cfg = os.path.join(local_dir, "lora_adapter", "adapter_config.json")
     if not os.path.isfile(adapter_cfg):
         return False
@@ -72,7 +68,7 @@ def merge_lora_into_base_and_save(
         kwargs = {k: v for k, v in peft_config.items() if k in field_names}
         peft_config = LoraConfig(**kwargs)
 
-    print(f"Loading base model from {base_path} for LoRA merge...")
+    print(f"Loading base model from {base_path}...")
     base_model = auto_class.from_pretrained(
         base_path,
         torch_dtype=torch.bfloat16,
@@ -80,17 +76,11 @@ def merge_lora_into_base_and_save(
         low_cpu_mem_usage=True,
     )
     peft_model = get_peft_model(base_model, peft_config)
-    incompat = peft_model.load_state_dict(state_dict, strict=False)
-    if incompat.missing_keys:
-        print(f"Warning: {len(incompat.missing_keys)} missing keys (showing first 10): {incompat.missing_keys[:10]}")
-    if incompat.unexpected_keys:
-        print(
-            f"Warning: {len(incompat.unexpected_keys)} unexpected keys (showing first 10): {incompat.unexpected_keys[:10]}"
-        )
+    peft_model.load_state_dict(state_dict)
 
-    print("Merging LoRA adapters into base weights (merge_and_unload)...")
+    print("Merging LoRA weights into base model...")
     merged = peft_model.merge_and_unload()
-    print(f"Saving merged dense model to {hf_path}...")
+    print(f"Saving merged model to {hf_path}...")
     merged.save_pretrained(hf_path, safe_serialization=True)
     return True
 
