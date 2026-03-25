@@ -18,7 +18,6 @@ import json
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor
-from typing import Type
 
 import numpy as np
 import torch
@@ -49,7 +48,7 @@ def merge_lora_into_base_and_save(
     local_dir: str,
     state_dict: dict[str, torch.Tensor],
     hf_path: str,
-    auto_class: Type[PreTrainedModel],
+    auto_class: type[PreTrainedModel],
 ) -> bool:
     """Merge LoRA weights into the base model before saving a dense HF checkpoint for vLLM."""
     adapter_cfg = os.path.join(local_dir, "lora_adapter", "adapter_config.json")
