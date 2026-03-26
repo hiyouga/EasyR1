@@ -13,12 +13,15 @@
 # limitations under the License.
 
 import argparse
+import dataclasses
+import json
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import torch
+from peft import LoraConfig, get_peft_model
 from torch.distributed._tensor import DTensor, Placement, Shard
 from transformers import (
     AutoConfig,
@@ -41,6 +44,46 @@ def merge_by_placement(tensors: list[torch.Tensor], placement: Placement):
         raise ValueError(f"Unsupported placement: {placement}")
 
 
+def merge_lora_into_base_and_save(
+    local_dir: str,
+    state_dict: dict[str, torch.Tensor],
+    hf_path: str,
+    auto_class: type[PreTrainedModel],
+) -> bool:
+    """Merge LoRA weights into the base model before saving a dense HF checkpoint for vLLM."""
+    adapter_cfg = os.path.join(local_dir, "lora_adapter", "adapter_config.json")
+    if not os.path.isfile(adapter_cfg):
+        return False
+
+    with open(adapter_cfg, encoding="utf-8") as f:
+        raw_cfg = json.load(f)
+    base_path = raw_cfg.get("base_model_name_or_path")
+    if not base_path:
+        raise ValueError(f"adapter_config.json has no base_model_name_or_path: {adapter_cfg}")
+
+    peft_config = LoraConfig.from_json_file(adapter_cfg)
+    if isinstance(peft_config, dict):
+        field_names = {f.name for f in dataclasses.fields(LoraConfig)}
+        kwargs = {k: v for k, v in peft_config.items() if k in field_names}
+        peft_config = LoraConfig(**kwargs)
+
+    print(f"Loading base model from {base_path}...")
+    base_model = auto_class.from_pretrained(
+        base_path,
+        torch_dtype=torch.bfloat16,
+        device_map="cpu",
+        low_cpu_mem_usage=True,
+    )
+    peft_model = get_peft_model(base_model, peft_config)
+    peft_model.load_state_dict(state_dict)
+
+    print("Merging LoRA weights into base model...")
+    merged = peft_model.merge_and_unload()
+    print(f"Saving merged model to {hf_path}...")
+    merged.save_pretrained(hf_path, safe_serialization=True)
+    return True
+
+
 def upload_model_to_huggingface(local_path: str, remote_path: str):
     # Push to hugging face
     from huggingface_hub import HfApi
@@ -55,7 +98,7 @@ if __name__ == "__main__":
     parser.add_argument("--local_dir", required=True, type=str, help="The path for your saved model")
     parser.add_argument("--hf_upload_path", default=False, type=str, help="The path of the huggingface repo to upload")
     args = parser.parse_args()
-    local_dir: str = args.local_dir
+    local_dir: str = os.path.abspath(args.local_dir)
 
     assert not local_dir.endswith("huggingface"), "The local_dir should not end with huggingface."
 
@@ -172,15 +215,18 @@ if __name__ == "__main__":
     else:
         raise NotImplementedError(f"Unknown architecture {architectures}.")
 
-    with torch.device("meta"):
-        model: PreTrainedModel = AutoClass.from_config(config, torch_dtype=torch.bfloat16)
+    if merge_lora_into_base_and_save(local_dir, state_dict, hf_path, AutoClass):
+        del state_dict
+    else:
+        with torch.device("meta"):
+            model: PreTrainedModel = AutoClass.from_config(config, torch_dtype=torch.bfloat16)
 
-    assert isinstance(model, PreTrainedModel)
-    model.to_empty(device="cpu")
+        assert isinstance(model, PreTrainedModel)
+        model.to_empty(device="cpu")
 
-    print(f"Saving model to {hf_path}...")
-    model.save_pretrained(hf_path, state_dict=state_dict)
-    del state_dict, model
+        print(f"Saving model to {hf_path}...")
+        model.save_pretrained(hf_path, state_dict=state_dict)
+        del state_dict, model
 
     if args.hf_upload_path:
         upload_model_to_huggingface(hf_path, args.hf_upload_path)
