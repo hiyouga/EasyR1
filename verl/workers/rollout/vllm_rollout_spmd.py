@@ -111,7 +111,11 @@ class vLLMRollout(BaseRollout):
             raise ValueError("Tensor parallelism size should be less than world size.")
 
         if config.max_num_batched_tokens < config.prompt_length + config.response_length:
-            raise ValueError("max_num_batched_tokens should be greater than prompt_length + response_length.")
+            config.max_num_batched_tokens = config.prompt_length + config.response_length
+            print(
+                f"max_num_batched_tokens is less than prompt_length + response_length, "
+                f"setting max_num_batched_tokens to {config.max_num_batched_tokens}."
+            )
 
         lora_kwargs = kwargs.pop("lora_kwargs", {})
         self.lora_kwargs = lora_kwargs
