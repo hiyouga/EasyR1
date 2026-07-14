@@ -73,7 +73,7 @@ fi
 
 # vLLM torch.compile: shared ~/.cache/vllm on NFS can hit stale file handles (Errno 116)
 # and FXGraphCacheMiss on multi-node Ray workers; use a per-job local cache.
-VLLM_JOB_CACHE="${VLLM_JOB_CACHE:-/projects/u6gd/.cache/vllm_cache}"
+VLLM_JOB_CACHE="${VLLM_JOB_CACHE:-${HOME}/.cache/vllm_cache}"
 mkdir -p "${VLLM_JOB_CACHE}"
 export XDG_CACHE_HOME="${VLLM_JOB_CACHE}/xdg"
 export TORCHINDUCTOR_CACHE_DIR="${VLLM_JOB_CACHE}/torchinductor"
