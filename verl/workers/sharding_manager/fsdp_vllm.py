@@ -207,12 +207,58 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         print_gpu_memory_usage("After vllm offload in sharding manager")
 
         self.module.train()
+        # Drain vLLM's multimodal encoder cache before empty_cache so the freed image-embedding
+        # tensors are actually released (see _drain_vllm_encoder_cache for details).
+        self._drain_vllm_encoder_cache()
         torch.cuda.empty_cache()  # add empty cache after each compute
 
         # restore random states
         if self.device_mesh is not None:
             self.gen_random_states = torch.cuda.get_rng_state()
             torch.cuda.set_rng_state(self.torch_random_states)
+
+    def _drain_vllm_encoder_cache(self):
+        """Release vLLM's per-mm-hash GPU encoder cache between rollout steps.
+
+        For multimodal models, vLLM's V1 ``GpuModelRunner`` keeps an ``encoder_cache``
+        (``dict[mm_hash -> GPU tensor]`` of image/video encoder outputs). Entries are only evicted
+        by the scheduler's ``EncoderCacheManager`` under capacity pressure (it frees the oldest
+        entries only when a new request needs slots). In the colocated HybridEngine setup each
+        training step runs a single bounded ``generate`` call and then sleeps, so that pressure
+        never builds: finished-request entries are never reclaimed and the cache grows by roughly
+        one entry per image per step, leaking GPU memory across steps until an OOM in the actor
+        update. ``sleep(level=1)`` only offloads model weights, not this cache, and
+        ``torch.cuda.empty_cache()`` cannot reclaim it because the entries are still referenced.
+
+        Generation has fully completed by the time we offload (no unfinished requests), so it is
+        safe to drop the runner's cached tensors and reset the scheduler's cache-manager accounting
+        to its empty state. Best-effort and guarded: any vLLM-internal layout change degrades to a
+        no-op rather than breaking training.
+        """
+        try:
+            runner = self.inference_engine.llm_engine.model_executor.driver_worker.worker.model_runner
+            encoder_cache = getattr(runner, "encoder_cache", None)
+            if isinstance(encoder_cache, dict):
+                encoder_cache.clear()
+        except Exception:
+            pass
+
+        # Reset the scheduler-side EncoderCacheManager so the freed slots are reclaimed. The
+        # scheduler lives on the in-process EngineCore for the external_launcher (SPMD) backend.
+        try:
+            engine_core = self.inference_engine.llm_engine.engine_core
+            engine_core = getattr(engine_core, "engine_core", engine_core)  # unwrap in-process client
+            scheduler = getattr(engine_core, "scheduler", None)
+            manager = getattr(scheduler, "encoder_cache_manager", None)
+            if manager is not None and not scheduler.has_unfinished_requests():
+                manager.num_free_slots = manager.cache_size
+                manager.num_freeable_slots = manager.cache_size
+                manager.cached.clear()
+                if hasattr(manager, "freeable"):
+                    manager.freeable.clear()
+                manager.freed.clear()
+        except Exception:
+            pass
 
     def preprocess_data(self, data: DataProto) -> DataProto:
         """All gather across tp group to make each rank has identical input."""
