@@ -40,6 +40,12 @@ fi
 
 set -euo pipefail
 
+cleanup() {
+  echo "Cleaning up Ray cluster..."
+  ray stop
+}
+trap cleanup EXIT
+
 
 MODEL_PATH="${MODEL_PATH:-Qwen/Qwen3-4B}"
 # MODEL_PATH="${MODEL_PATH:-Qwen/Qwen3.5-0.8B}"
