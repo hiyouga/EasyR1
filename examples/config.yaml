@@ -71,8 +71,8 @@ worker:
     gpu_memory_utilization: 0.6
     enforce_eager: false
     enable_chunked_prefill: false
-    tensor_parallel_size: 2
-    disable_tqdm: false
+    tensor_parallel_size: 1
+    disable_tqdm: true
     val_override_config:
       temperature: 0.6
       top_p: 0.95
@@ -103,7 +103,7 @@ trainer:
   val_only: false
   val_generations_to_log: 3
   save_freq: 5  # -1 to disable
-  save_limit: 3  # -1 to disable
+  save_limit: 1  # -1 to disable
   save_model_only: false
   save_checkpoint_path: null
   load_checkpoint_path: null
