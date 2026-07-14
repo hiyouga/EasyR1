@@ -220,7 +220,8 @@ class FSDPWorker(Worker):
         try:
             import flash_attn_interface
             attn_implementation = "flash_attention_3"
-            torch_dtype = torch.bfloat16
+            if fsdp_config.torch_dtype is None:
+                torch_dtype = torch.bfloat16
         except ImportError:
             pass
 
