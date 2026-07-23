@@ -6,6 +6,20 @@
 
 ### Used by [Amazon Web Services](https://aws.amazon.com/cn/blogs/china/building-llm-model-hub-based-on-llamafactory-and-easyr1/)
 
+----
+
+<div align="center" markdown="1">
+
+### Check our new open-source project —<br>🐧 [PenguinHarness](https://github.com/Prism-Shadow/penguin-harness): Your desktop agent that automatically builds agents for just $0.02 of tokens!
+
+Follow our project: https://github.com/Prism-Shadow/penguin-harness
+
+</div>
+
+https://github.com/user-attachments/assets/9b7033e8-f08a-4c3f-bd33-547896664e6e
+
+----
+
 This project is a clean fork of the original [veRL](https://github.com/volcengine/verl) project to support vision language models, we thank all the authors for providing such a high-performance RL training framework.
 
 EasyR1 is efficient and scalable due to the design of **[HybirdEngine](https://arxiv.org/abs/2409.19256)** and the latest release of **[vLLM](https://github.com/vllm-project/vllm)**'s SPMD mode.
