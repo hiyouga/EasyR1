@@ -18,6 +18,7 @@ import json
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
 
 import numpy as np
 import torch
@@ -28,6 +29,7 @@ from transformers import (
     AutoModelForCausalLM,
     AutoModelForImageTextToText,
     AutoModelForTokenClassification,
+    GenerationConfig,
     PretrainedConfig,
     PreTrainedModel,
 )
@@ -44,11 +46,25 @@ def merge_by_placement(tensors: list[torch.Tensor], placement: Placement):
         raise ValueError(f"Unsupported placement: {placement}")
 
 
+def save_pretrained_with_generation_config(
+    model: PreTrainedModel,
+    hf_path: str,
+    generation_config: Optional[GenerationConfig],
+    **kwargs,
+) -> None:
+    """Save a model without replacing the checkpoint's generation configuration."""
+    if generation_config is not None:
+        model.generation_config = generation_config
+
+    model.save_pretrained(hf_path, **kwargs)
+
+
 def merge_lora_into_base_and_save(
     local_dir: str,
     state_dict: dict[str, torch.Tensor],
     hf_path: str,
     auto_class: type[PreTrainedModel],
+    generation_config: Optional[GenerationConfig],
 ) -> bool:
     """Merge LoRA weights into the base model before saving a dense HF checkpoint for vLLM."""
     adapter_cfg = os.path.join(local_dir, "lora_adapter", "adapter_config.json")
@@ -80,7 +96,7 @@ def merge_lora_into_base_and_save(
     print("Merging LoRA weights into base model...")
     merged = peft_model.merge_and_unload()
     print(f"Saving merged model to {hf_path}...")
-    merged.save_pretrained(hf_path, safe_serialization=True)
+    save_pretrained_with_generation_config(merged, hf_path, generation_config, safe_serialization=True)
     return True
 
 
@@ -96,7 +112,12 @@ def upload_model_to_huggingface(local_path: str, remote_path: str):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--local_dir", required=True, type=str, help="The path for your saved model")
-    parser.add_argument("--hf_upload_path", default=False, type=str, help="The path of the huggingface repo to upload")
+    parser.add_argument(
+        "--hf_upload_path",
+        default=False,
+        type=str,
+        help="The path of the huggingface repo to upload",
+    )
     args = parser.parse_args()
     local_dir: str = os.path.abspath(args.local_dir)
 
@@ -204,6 +225,8 @@ if __name__ == "__main__":
     print("Merge completed.")
     hf_path = os.path.join(local_dir, "huggingface")
     config: PretrainedConfig = AutoConfig.from_pretrained(hf_path)
+    generation_config_path = os.path.join(hf_path, "generation_config.json")
+    generation_config = GenerationConfig.from_pretrained(hf_path) if os.path.isfile(generation_config_path) else None
     architectures: list[str] = getattr(config, "architectures", ["Unknown"])
 
     if "ForTokenClassification" in architectures[0]:
@@ -215,7 +238,7 @@ if __name__ == "__main__":
     else:
         raise NotImplementedError(f"Unknown architecture {architectures}.")
 
-    if merge_lora_into_base_and_save(local_dir, state_dict, hf_path, AutoClass):
+    if merge_lora_into_base_and_save(local_dir, state_dict, hf_path, AutoClass, generation_config):
         del state_dict
     else:
         with torch.device("meta"):
@@ -225,7 +248,7 @@ if __name__ == "__main__":
         model.to_empty(device="cpu")
 
         print(f"Saving model to {hf_path}...")
-        model.save_pretrained(hf_path, state_dict=state_dict)
+        save_pretrained_with_generation_config(model, hf_path, generation_config, state_dict=state_dict)
         del state_dict, model
 
     if args.hf_upload_path:
