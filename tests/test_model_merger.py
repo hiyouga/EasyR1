@@ -12,10 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import importlib.util
+from pathlib import Path
+
 import transformers.modeling_utils
 from transformers import AutoModelForCausalLM, GenerationConfig, GPT2Config
 
-from scripts.model_merger import save_pretrained_with_generation_config
+
+MODEL_MERGER_PATH = Path(__file__).parents[1] / "scripts" / "model_merger.py"
+MODEL_MERGER_SPEC = importlib.util.spec_from_file_location("model_merger", MODEL_MERGER_PATH)
+assert MODEL_MERGER_SPEC is not None and MODEL_MERGER_SPEC.loader is not None
+MODEL_MERGER = importlib.util.module_from_spec(MODEL_MERGER_SPEC)
+MODEL_MERGER_SPEC.loader.exec_module(MODEL_MERGER)
+save_pretrained_with_generation_config = MODEL_MERGER.save_pretrained_with_generation_config
 
 
 def test_save_pretrained_preserves_checkpoint_generation_config(tmp_path, monkeypatch):
