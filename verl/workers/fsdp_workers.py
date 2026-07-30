@@ -37,7 +37,10 @@ from transformers import (
     GenerationConfig,
     PreTrainedModel,
 )
-from transformers.modeling_utils import no_init_weights
+try:
+    from transformers.initialization import no_init_weights
+except ImportError:  # older transformers
+    from transformers.modeling_utils import no_init_weights
 
 from ..models.monkey_patch import apply_ulysses_patch
 from ..protocol import DataProto
@@ -206,13 +209,28 @@ class FSDPWorker(Worker):
             AutoClass = AutoModelForImageTextToText
         else:
             AutoClass = AutoModelForCausalLM
+        
+        attn_implementation = None
+        try:
+            import flash_attn
+            attn_implementation = "flash_attention_2"
+        except ImportError:
+            pass
+        
+        try:
+            import flash_attn_interface
+            attn_implementation = "flash_attention_3"
+            if fsdp_config.torch_dtype is None:
+                torch_dtype = torch.bfloat16
+        except ImportError:
+            pass
 
         if (not fsdp_config.enable_rank0_init) or self.device_mesh.get_local_rank("fsdp") == 0:
             model = AutoClass.from_pretrained(
                 model_config.model_path,
                 config=self.model_config,
                 torch_dtype=torch_dtype,
-                attn_implementation="flash_attention_2",
+                attn_implementation=attn_implementation,
                 device_map="cpu" if fsdp_config.enable_rank0_init else "cuda",
                 low_cpu_mem_usage=True,
                 trust_remote_code=model_config.trust_remote_code,
@@ -222,7 +240,7 @@ class FSDPWorker(Worker):
                 model = AutoClass.from_config(
                     self.model_config,
                     torch_dtype=torch_dtype,
-                    attn_implementation="flash_attention_2",
+                    attn_implementation=attn_implementation,
                     trust_remote_code=model_config.trust_remote_code,
                 )
 
