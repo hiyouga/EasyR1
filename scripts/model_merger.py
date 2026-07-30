@@ -22,7 +22,6 @@ from typing import Optional
 
 import numpy as np
 import torch
-from peft import LoraConfig, get_peft_model
 from torch.distributed._tensor import DTensor, Placement, Shard
 from transformers import (
     AutoConfig,
@@ -67,6 +66,8 @@ def merge_lora_into_base_and_save(
     generation_config: Optional[GenerationConfig],
 ) -> bool:
     """Merge LoRA weights into the base model before saving a dense HF checkpoint for vLLM."""
+    from peft import LoraConfig, get_peft_model
+
     adapter_cfg = os.path.join(local_dir, "lora_adapter", "adapter_config.json")
     if not os.path.isfile(adapter_cfg):
         return False

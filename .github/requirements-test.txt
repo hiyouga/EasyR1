@@ -1,6 +1,5 @@
 codetiming
 datasets
-peft
 pillow
 pytest
 qwen-vl-utils
