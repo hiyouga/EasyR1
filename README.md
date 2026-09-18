@@ -203,6 +203,7 @@ See [baselines.md](assets/baselines.md).
 - **IE-Critic-R1**: Advancing the Explanatory Measurement of Text-Driven Image Editing for Human Perception Alignment. [![[code]](https://img.shields.io/github/stars/Coobiw/IE-Critic-R1)](https://github.com/Coobiw/IE-Critic-R1) [![[arxiv]](https://img.shields.io/badge/arxiv-2511.18055-blue)](https://arxiv.org/abs/2511.18055)
 - **OneThinker**: All-in-one Reasoning Model for Image and Video. [![[code]](https://img.shields.io/github/stars/tulerfeng/OneThinker)](https://github.com/tulerfeng/OneThinker) [![[arxiv]](https://img.shields.io/badge/arxiv-2512.03043-blue)](https://arxiv.org/abs/2512.03043)
 - **MetaphorStar**: Image Metaphor Understanding and Reasoning with End-to-End Visual Reinforcement Learning. [![[code]](https://img.shields.io/github/stars/MING-ZCH/MetaphorStar)](https://github.com/MING-ZCH/MetaphorStar) [![[arxiv]](https://img.shields.io/badge/arxiv-2602.10575-blue)](https://arxiv.org/abs/2602.10575)
+- **CARDEA**: Auditable Reasoning Grounded in Spatial Evidence for End-to-End Coronary Angiography Interpretation. [![[code]](https://img.shields.io/github/stars/benbayibaurba/cardea)](https://github.com/benbayibaurba/cardea) [![[arxiv]](https://img.shields.io/badge/arxiv-2609.06931-blue)](https://arxiv.org/abs/2609.06931)
 
 ## TODO
 
