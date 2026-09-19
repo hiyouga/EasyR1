@@ -250,15 +250,17 @@ def rearrange_micro_batches(
     )
     effective_seqlen = torch.sum(batch["attention_mask"], dim=-1)
     total_seqlen = effective_seqlen.sum().item()
-    num_micro_batches = min(len(effective_seqlen), ceildiv(total_seqlen, max_token_len))
+    num_micro_batches = min(len(effective_seqlen), int(ceildiv(total_seqlen, max_token_len)))
     if dist.is_initialized():
-        num_micro_batches = torch.tensor([num_micro_batches], device="cuda")
+        device = batch.device or batch["attention_mask"].device
+        num_micro_batches = torch.tensor([num_micro_batches], device=device, dtype=torch.long)
         dist.all_reduce(num_micro_batches, op=dist.ReduceOp.MAX, group=dp_group)
-        num_micro_batches = num_micro_batches.cpu().item()
+        num_micro_batches = int(num_micro_batches.item())
 
     effective_seqlen = effective_seqlen.tolist()
-    assert num_micro_batches <= len(effective_seqlen)
-    micro_bsz_idx = get_seqlen_balanced_partitions(effective_seqlen, num_micro_batches, equal_size=False)
+    micro_bsz_idx = get_seqlen_balanced_partitions(
+        effective_seqlen, min(num_micro_batches, len(effective_seqlen)), equal_size=False
+    )
 
     # Use the sum of squared sequence lengths to approximate attention computation workload
     def compute_workload(partition: list[int]) -> Tuple[int, int]:
@@ -270,6 +272,16 @@ def rearrange_micro_batches(
     for partition in micro_bsz_idx:
         curr_micro_batch = [batch[idx] for idx in partition]
         micro_batches.append(torch.stack(curr_micro_batch))
+
+    # Every rank must execute the same number of FSDP forwards/backwards, even if
+    # the synchronized count exceeds its sample count. Empty indices mark dummies.
+    for _ in range(num_micro_batches - len(micro_batches)):
+        dummy_batch = batch[:1].clone()
+        dummy_batch["attention_mask"].zero_()
+        if "response_mask" in dummy_batch:
+            dummy_batch["response_mask"].zero_()
+        micro_batches.append(dummy_batch)
+        micro_bsz_idx.append([])
 
     return micro_batches, micro_bsz_idx
 
@@ -292,23 +304,29 @@ def get_reverse_idx(idx_map: list[int]) -> list[int]:
     return reverse_idx_map
 
 
-def prepare_dynamic_batch(data: DataProto, max_token_len: int) -> tuple[list[DataProto], list[list[int]]]:
+def prepare_dynamic_batch(
+    data: DataProto, max_token_len: int, dp_group: Optional[dist.ProcessGroup] = None
+) -> tuple[list[DataProto], list[list[int]]]:
     """
     Prepare a batch for dynamic batching.
 
     Args:
         data (DataProto): The input data.
         max_token_len (int): The maximum token length for dynamic batching.
+        dp_group (Optional[dist.ProcessGroup]): Group used to synchronize micro-batch counts (None uses WORLD).
 
     Returns:
         Tuple[List[DataProto], List[List[int]]]: A tuple containing a list of DataProto objects
-        and a list of index lists.
+        and a list of index lists. Empty index lists identify dummy micro-batches;
+        callers must run them for collective synchronization but discard their outputs/loss.
+        Dummies have zero masks; workers reuse sample 0's attention mask only for the model forward.
     """
-    batch, batch_idx_list = rearrange_micro_batches(data.batch, max_token_len=max_token_len)
+    batch, batch_idx_list = rearrange_micro_batches(data.batch, max_token_len=max_token_len, dp_group=dp_group)
     micro_batches = []
     for i, batch_idx in enumerate(batch_idx_list):
         tensors = dict(batch[i])
-        non_tensors = {key: value[batch_idx] for key, value in data.non_tensor_batch.items()}
+        # Preserve sample 0's multimodal inputs for the dummy's forward pass.
+        non_tensors = {key: value[batch_idx or [0]] for key, value in data.non_tensor_batch.items()}
         micro_batches.append(DataProto.from_dict(tensors, non_tensors))
 
     return micro_batches, batch_idx_list
@@ -319,7 +337,7 @@ def restore_dynamic_batch(data: torch.Tensor, batch_idx_list: list[list[int]]) -
     Restore a batch from dynamic batching.
 
     Args:
-        data (torch.Tensor): The input data.
+        data (torch.Tensor): The concatenated outputs of non-dummy micro-batches.
         batch_idx_list (List[List[int]]): The list of index lists.
 
     Returns:
