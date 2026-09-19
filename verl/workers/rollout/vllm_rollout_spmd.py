@@ -15,6 +15,7 @@
 import os
 from contextlib import contextmanager
 from typing import Any, Optional, Union
+from dataclasses import fields
 
 import numpy as np
 import torch
@@ -23,6 +24,7 @@ from tensordict import TensorDict
 from transformers import PreTrainedTokenizer, ProcessorMixin
 from vllm import LLM, RequestOutput, SamplingParams
 from vllm.lora.request import LoRARequest
+from vllm.engine.arg_utils import EngineArgs
 
 from ...protocol import DataProto
 from ...utils import torch_functional as VF
@@ -118,10 +120,18 @@ class vLLMRollout(BaseRollout):
 
         engine_kwargs = {}
         if processor is not None:  # only VLMs have processor
-            engine_kwargs["disable_mm_preprocessor_cache"] = True
+            engine_arg_names = {f.name for f in fields(EngineArgs)}
+            # Disable vLLM multimodal SHM cache (~180 GiB savings)
+            if "disable_mm_preprocessor_cache" in engine_arg_names:
+                # for vllm 0.8.0
+                engine_kwargs["disable_mm_preprocessor_cache"] = True
+            if "mm_processor_cache_gb" in engine_arg_names:
+                # for vllm 0.20.0
+                engine_kwargs["mm_processor_cache_gb"] = 0
             if config.limit_images:
                 engine_kwargs["limit_mm_per_prompt"] = {"image": config.limit_images}
-
+        
+        engine_kwargs.update(config.extra_engine_kwargs)
         VLLMHijack.hijack()
 
         self.inference_engine = LLM(
@@ -170,12 +180,19 @@ class vLLMRollout(BaseRollout):
                 if hasattr(self.sampling_params, key):
                     old_value = getattr(self.sampling_params, key)
                     old_sampling_params_args[key] = old_value
-                    setattr(self.sampling_params, key, value)
+                    # vLLM >=0.12: eos_token_id is a read-only property; set private field.
+                    if key == "eos_token_id":
+                        setattr(self.sampling_params, "_eos_token_id", value)
+                    else:
+                        setattr(self.sampling_params, key, value)
 
         yield
         # roll back to previous sampling params
         for key, value in old_sampling_params_args.items():
-            setattr(self.sampling_params, key, value)
+            if key == "eos_token_id":
+                setattr(self.sampling_params, "_eos_token_id", value)
+            else:
+                setattr(self.sampling_params, key, value)
 
     @torch.no_grad()
     def generate_sequences(self, prompts: DataProto) -> DataProto:
