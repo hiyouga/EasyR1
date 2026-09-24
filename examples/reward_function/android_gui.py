@@ -43,10 +43,10 @@ def extract_answer(response: str) -> str:
     if response in ["0", "1", "2"]:
         return response
 
-    # 情况2: 响应包含多余文字，提取第一个出现的0/1/2
-    match = re.search(r"[012]", response)
-    if match:
-        return match.group(0)
+    # 情况2: 响应包含多余文字，提取最后一个独立出现的0/1/2
+    matches = re.findall(r"(?<!\d)[012](?!\d)", response)
+    if matches:
+        return matches[-1]
 
     # 提取失败
     return ""
