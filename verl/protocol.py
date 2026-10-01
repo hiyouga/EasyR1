@@ -205,21 +205,28 @@ class DataProto:
 
     def __getstate__(self) -> tuple[bytes, dict[str, NDArray], dict[str, Any]]:
         if self.batch is not None:
-            batch_to_save: TensorDict = self.batch.contiguous()
-            batch_to_save: TensorDict = batch_to_save.consolidate()
+            batch_to_save = self.batch.contiguous()
+            batch_to_save = batch_to_save.consolidate()
+            # Convert TensorDict to dict to allow weights_only=True during loading
+            # We also need to preserve the batch_size
+            state_to_save = {"data": batch_to_save.to_dict(), "batch_size": list(batch_to_save.batch_size)}
         else:
-            batch_to_save = None
+            state_to_save = None
 
         buffer = io.BytesIO()
-        torch.save(batch_to_save, buffer)
+        torch.save(state_to_save, buffer)
         buffer_bytes = buffer.getvalue()
         return buffer_bytes, self.non_tensor_batch, self.meta_info
 
     def __setstate__(self, data: tuple[bytes, dict[str, NDArray], dict[str, Any]]) -> None:
         batch_deserialized_bytes, non_tensor_batch, meta_info = data
         batch_deserialized = io.BytesIO(batch_deserialized_bytes)
-        batch = torch.load(batch_deserialized, weights_only=False, map_location="cpu")
-        self.batch = batch
+        # Safe loading with weights_only=True
+        state_dict = torch.load(batch_deserialized, weights_only=True, map_location="cpu")
+        if state_dict is not None:
+            self.batch = TensorDict(source=state_dict["data"], batch_size=state_dict["batch_size"])
+        else:
+            self.batch = None
         self.non_tensor_batch = non_tensor_batch
         self.meta_info = meta_info
 
