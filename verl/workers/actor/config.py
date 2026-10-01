@@ -26,6 +26,10 @@ class LoraConfig:
     alpha: int = 64
     target_modules: str = "all-linear"
     exclude_modules: Optional[str] = None
+    merge_for_rollout: bool = False
+    """Merge LoRA weights into the base model before syncing to vllm for rollouts.
+    Required for models with hybrid architectures (e.g. Qwen3.5 GDN layers)
+    where vllm's native LoRA mechanism cannot handle mixed layer dimensions."""
 
     def post_init(self):
         if not isinstance(self.target_modules, str):

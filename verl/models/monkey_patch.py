@@ -31,10 +31,12 @@ SUPPORTED_MODEL_TYPE = (
     "qwen2_5_vl",
     "qwen3_vl",
     "qwen3_vl_moe",
+    "qwen3_5",
 )
 
 QWEN2_VL_MODELS = ("qwen2_vl", "qwen2_5_vl")
 QWEN3_VL_MODELS = ("qwen3_vl", "qwen3_vl_moe")
+QWEN3_5_MODELS = ("qwen3_5",)
 
 
 def apply_ulysses_patch(model_type: str) -> None:
@@ -76,3 +78,10 @@ def apply_ulysses_patch(model_type: str) -> None:
         # TODO: add linear cross entropy kernels
         Qwen3VLForConditionalGeneration.forward = qwen3_vl_model_forward
         Qwen3VLMoeForConditionalGeneration.forward = qwen3_vl_model_forward
+    elif model_type in QWEN3_5_MODELS:
+        # Qwen3.5's default transformers forward handles image embedding, mRoPE position IDs,
+        # and mixed text-image batches correctly. No forward monkey-patching needed.
+        # Position IDs are pre-computed in dataset.py using qwen3_5.get_rope_index.
+        # Image token/feature mismatch is handled by fix_qwen35_image_check.py which
+        # patches the strict check in modeling_qwen3_5.py at build time.
+        pass

@@ -21,7 +21,13 @@ from typing import Optional, Tuple
 import torch
 import torch.distributed as dist
 from transformers.modeling_flash_attention_utils import _flash_attention_forward, fa_peft_integration_check
-from transformers.utils import is_flash_attn_2_available, is_flash_attn_greater_or_equal_2_10
+from transformers.utils import is_flash_attn_2_available
+
+try:
+    from transformers.utils import is_flash_attn_greater_or_equal_2_10
+except ImportError:
+    from transformers.utils import is_flash_attn_greater_or_equal
+    is_flash_attn_greater_or_equal_2_10 = lambda: is_flash_attn_greater_or_equal("2.10")
 
 from ...utils.ulysses import (
     gather_heads_scatter_seq,
