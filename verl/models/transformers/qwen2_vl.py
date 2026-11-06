@@ -130,6 +130,32 @@ def get_rope_index(
     return position_ids
 
 
+def _get_visual_embeds(
+    model: "Qwen2VLModel",
+    pixel_values: Optional[torch.FloatTensor] = None,
+    pixel_values_videos: Optional[torch.FloatTensor] = None,
+    image_grid_thw: Optional[torch.LongTensor] = None,
+    video_grid_thw: Optional[torch.LongTensor] = None,
+) -> tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
+    if pixel_values is not None and pixel_values_videos is not None:
+        # one vision tower call per forward on every rank, otherwise the fsdp collectives go out of step
+        visual_embeds = model.visual(
+            torch.cat((pixel_values, pixel_values_videos), dim=0).type(model.visual.dtype),
+            grid_thw=torch.cat((image_grid_thw, video_grid_thw), dim=0),
+        )
+        num_image_embeds = pixel_values.size(0) // model.visual.spatial_merge_size**2
+        return visual_embeds[:num_image_embeds], visual_embeds[num_image_embeds:]
+
+    image_embeds, video_embeds = None, None
+    if pixel_values is not None:
+        image_embeds = model.visual(pixel_values.type(model.visual.dtype), grid_thw=image_grid_thw)
+
+    if pixel_values_videos is not None:
+        video_embeds = model.visual(pixel_values_videos.type(model.visual.dtype), grid_thw=video_grid_thw)
+
+    return image_embeds, video_embeds
+
+
 def _get_input_embeds(
     model: "Qwen2VLModel",
     input_ids: torch.LongTensor,
@@ -140,9 +166,10 @@ def _get_input_embeds(
     video_grid_thw: Optional[torch.LongTensor] = None,
 ):
     inputs_embeds = model.get_input_embeddings()(input_ids)
+    image_embeds, video_embeds = _get_visual_embeds(
+        model, pixel_values, pixel_values_videos, image_grid_thw, video_grid_thw
+    )
     if pixel_values is not None:
-        pixel_values = pixel_values.type(model.visual.dtype)
-        image_embeds = model.visual(pixel_values, grid_thw=image_grid_thw)
         n_image_tokens = (input_ids == model.config.image_token_id).sum().item()
         n_image_features = image_embeds.shape[0]
         if n_image_tokens != n_image_features:
@@ -159,8 +186,6 @@ def _get_input_embeds(
         inputs_embeds = inputs_embeds.masked_scatter(image_mask, image_embeds)
 
     if pixel_values_videos is not None:
-        pixel_values_videos = pixel_values_videos.type(model.visual.dtype)
-        video_embeds = model.visual(pixel_values_videos, grid_thw=video_grid_thw)
         n_video_tokens = (input_ids == model.config.video_token_id).sum().item()
         n_video_features = video_embeds.shape[0]
         if n_video_tokens != n_video_features:
