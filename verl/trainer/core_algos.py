@@ -365,7 +365,7 @@ def compute_remax_outcome_advantage(
             shape: (bs, response_length)
 
     """
-    advantages = (token_level_rewards.sum(dim=-1) - reward_baselines) * response_mask
+    advantages = (token_level_rewards.sum(dim=-1) - reward_baselines).unsqueeze(-1) * response_mask
     returns = (token_level_rewards * response_mask).flip(dims=(-1,)).cumsum(dim=-1).flip(dims=(-1,))
     return advantages, returns
 
@@ -488,8 +488,8 @@ def compute_policy_loss(
     if loss_type == "cispo":
         final_pg_loss = -advantages * log_probs * clipped_ratio.detach()
     elif loss_type == "sapo":
-        positive_token_mask =  (advantages >= 0).float()
-        negative_token_mask =  (advantages < 0).float()
+        positive_token_mask = (advantages >= 0).float()
+        negative_token_mask = (advantages < 0).float()
         gate_negative = 4.0 / tau_negative * torch.sigmoid(tau_negative * (ratio - 1.0))
         gate_positive = 4.0 / tau_positive * torch.sigmoid(tau_positive * (ratio - 1.0))
         final_pg_loss = -advantages * (positive_token_mask * gate_positive + negative_token_mask * gate_negative)

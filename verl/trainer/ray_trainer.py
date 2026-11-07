@@ -506,7 +506,13 @@ class RayPPOTrainer:
                 reward_baseline_tensor, _ = ray.get(self.reward_fn.compute_reward.remote(new_batch))
                 reward_baseline_tensor = reward_baseline_tensor.sum(dim=-1)
 
-                new_batch.pop(batch_keys=list(gen_baseline_output.batch.keys()))
+                # remove everything the baseline output added, otherwise its temperature=0 in meta_info
+                # conflicts with the meta_info of the log probs merged into the batch later
+                new_batch.pop(
+                    batch_keys=list(gen_baseline_output.batch.keys()),
+                    non_tensor_batch_keys=list(gen_baseline_output.non_tensor_batch.keys()),
+                    meta_info_keys=list(gen_baseline_output.meta_info.keys()),
+                )
                 new_batch.batch["reward_baselines"] = reward_baseline_tensor
                 del gen_baseline_batch, gen_baseline_output
 
