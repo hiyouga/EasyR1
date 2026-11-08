@@ -154,13 +154,30 @@ class RLHFDataset(Dataset):
                 num_proc=filter_overlong_prompts_workers,
             )
 
+    def _get_modality_key(self, example: dict[str, Any]) -> Optional[str]:
+        # a dataset that mixes image and video samples has both columns, one of them empty in each row
+        has_images = len(example.get(self.image_key) or []) != 0
+        has_videos = len(example.get(self.video_key) or []) != 0
+        if has_images and has_videos:
+            raise ValueError("A sample with both images and videos is not supported.")
+
+        if has_videos:
+            return self.video_key
+        elif self.image_key in example:
+            return self.image_key
+        elif self.video_key in example:
+            return self.video_key
+        else:
+            return None
+
     def _build_messages(self, example: dict[str, Any]) -> list[dict[str, Any]]:
         prompt_str: str = example[self.prompt_key]
         if self.format_prompt:
             format_prompt = Template(self.format_prompt.strip())
             prompt_str = format_prompt.render(content=prompt_str)
 
-        if self.image_key in example:
+        modality_key = self._get_modality_key(example)
+        if modality_key == self.image_key:
             # https://huggingface.co/docs/transformers/en/tasks/image_text_to_text
             content_list = []
             for i, content in enumerate(prompt_str.split("<image>")):
@@ -171,7 +188,7 @@ class RLHFDataset(Dataset):
                     content_list.append({"type": "text", "text": content})
 
             return [{"role": "user", "content": content_list}]
-        elif self.video_key in example:
+        elif modality_key == self.video_key:
             content_list = []
             for i, content in enumerate(prompt_str.split("<video>")):
                 if i != 0:
@@ -186,7 +203,8 @@ class RLHFDataset(Dataset):
 
     def _filter_overlong_prompts(self, example: dict[str, Any]) -> bool:
         messages = self._build_messages(example)
-        if self.image_key in example:
+        modality_key = self._get_modality_key(example)
+        if modality_key == self.image_key:
             prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
             images = example[self.image_key]
             if self.image_dir is not None and len(images) != 0 and isinstance(images[0], str):  # image paths
@@ -198,7 +216,7 @@ class RLHFDataset(Dataset):
 
             model_inputs = self.processor(processed_images, [prompt], add_special_tokens=False, return_tensors="pt")
             return model_inputs["input_ids"].size(-1) <= self.max_prompt_length
-        elif self.video_key in example:
+        elif modality_key == self.video_key:
             prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
             videos = example[self.video_key]
             if self.image_dir is not None and len(videos) != 0 and isinstance(videos[0], str):  # video paths
@@ -222,11 +240,13 @@ class RLHFDataset(Dataset):
     def __getitem__(self, index):
         example: dict = self.dataset[index]
         messages = self._build_messages(example)
+        modality_key = self._get_modality_key(example)
         example.pop(self.prompt_key, None)
 
-        if self.image_key in example:
+        if modality_key == self.image_key:
             prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
             images = example.pop(self.image_key)
+            example.pop(self.video_key, None)  # keep the same keys in every row of a mixed batch
             if self.image_dir is not None and len(images) != 0 and isinstance(images[0], str):  # image paths
                 images = [os.path.join(self.image_dir, image) for image in images]
 
@@ -238,9 +258,10 @@ class RLHFDataset(Dataset):
             input_ids = model_inputs.pop("input_ids")[0]
             attention_mask = model_inputs.pop("attention_mask")[0]
             example["multi_modal_data"] = {"images": images}
-        elif self.video_key in example:
+        elif modality_key == self.video_key:
             prompt = self.processor.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
             videos = example.pop(self.video_key)
+            example.pop(self.image_key, None)
             if self.image_dir is not None and len(videos) != 0 and isinstance(videos[0], str):  # video paths
                 videos = [os.path.join(self.image_dir, video) for video in videos]
 
