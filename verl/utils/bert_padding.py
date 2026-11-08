@@ -1,0 +1,79 @@
+# Copyright 2024 Bytedance Ltd. and/or its affiliates
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Prefer flash-attention's bert_padding helpers when installed; otherwise use
+# PyTorch/einops equivalents (adapted from Dao-AILab/flash-attention) so
+# padding-free training does not fail when flash_attn.bert_padding is missing.
+
+from __future__ import annotations
+
+import math
+
+import torch
+import torch.nn.functional as F
+from einops import rearrange, repeat
+
+try:
+    from flash_attn.bert_padding import index_first_axis, pad_input, unpad_input  # type: ignore
+except ImportError:
+    # -------------------------------------------------------------------------
+    # Fallback adapted from Dao-AILab/flash-attention flash_attn/bert_padding.py
+    # -------------------------------------------------------------------------
+
+    def index_first_axis(input, indices):
+        return torch.index_select(input, 0, indices)
+
+    class IndexPutFirstAxis(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, values, indices, first_axis_dim):
+            ctx.save_for_backward(indices)
+            assert indices.ndim == 1
+            assert values.ndim >= 2
+            output = torch.zeros(
+                first_axis_dim,
+                *values.shape[1:],
+                device=values.device,
+                dtype=values.dtype,
+            )
+            output[indices] = values
+            return output
+
+        @staticmethod
+        def backward(ctx, grad_output):
+            (indices,) = ctx.saved_tensors
+            grad_values = grad_output[indices]
+            return grad_values, None, None
+
+    index_put_first_axis = IndexPutFirstAxis.apply
+
+    def unpad_input(hidden_states, attention_mask, unused_mask=None):
+        all_masks = (attention_mask + unused_mask) if unused_mask is not None else attention_mask
+        seqlens_in_batch = all_masks.sum(dim=-1, dtype=torch.int32)
+        used_seqlens_in_batch = attention_mask.sum(dim=-1, dtype=torch.int32)
+        indices = torch.nonzero(all_masks.flatten(), as_tuple=False).flatten()
+        max_seqlen_in_batch = int(seqlens_in_batch.max().item())
+        cu_seqlens = F.pad(torch.cumsum(seqlens_in_batch, dim=0, dtype=torch.int32), (1, 0))
+        return (
+            index_first_axis(rearrange(hidden_states, "b s ... -> (b s) ..."), indices),
+            indices,
+            cu_seqlens,
+            max_seqlen_in_batch,
+            used_seqlens_in_batch,
+        )
+
+    def pad_input(hidden_states, indices, batch, seqlen):
+        output = index_put_first_axis(hidden_states, indices, batch * seqlen)
+        return rearrange(output, "(b s) ... -> b s ...", b=batch)
+
+__all__ = ["index_first_axis", "pad_input", "unpad_input"]

@@ -43,6 +43,6 @@ class RolloutConfig:
     prompt_length: int = field(default=-1, init=False)
     response_length: int = field(default=-1, init=False)
     trust_remote_code: bool = field(default=False, init=False)
-
+    extra_engine_kwargs: dict[str, Any] = field(default_factory=dict)
     def to_dict(self):
         return asdict(self)

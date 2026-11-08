@@ -29,17 +29,12 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from ...protocol import DataProto, batch_collate
 from ...trainer.core_algos import average_loss, compute_kl, compute_policy_loss
 from ...utils import torch_functional as VF
+from ...utils.bert_padding import index_first_axis, pad_input, unpad_input
 from ...utils.py_functional import append_to_dict
 from ...utils.seqlen_balancing import prepare_dynamic_batch, restore_dynamic_batch
 from ...utils.ulysses import gather_outputs_and_unpad, ulysses_pad_and_slice_inputs
 from .base import BasePPOActor
 from .config import ActorConfig
-
-
-try:
-    from flash_attn.bert_padding import index_first_axis, pad_input, rearrange, unpad_input
-except ImportError:
-    pass
 
 
 __all__ = ["DataParallelPPOActor"]

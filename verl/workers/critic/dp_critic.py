@@ -21,23 +21,19 @@ from typing import Any
 
 import torch
 import torch.distributed as dist
+from einops import rearrange
 from ray.experimental.tqdm_ray import tqdm
 from torch import nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 from ...protocol import DataProto, batch_collate
 from ...trainer.core_algos import compute_value_loss
+from ...utils.bert_padding import index_first_axis, pad_input, unpad_input
 from ...utils.py_functional import append_to_dict
 from ...utils.seqlen_balancing import prepare_dynamic_batch, restore_dynamic_batch
 from ...utils.ulysses import gather_outputs_and_unpad, ulysses_pad_and_slice_inputs
 from .base import BasePPOCritic
 from .config import CriticConfig
-
-
-try:
-    from flash_attn.bert_padding import index_first_axis, pad_input, rearrange, unpad_input
-except ImportError:
-    pass
 
 
 __all__ = ["DataParallelPPOCritic"]
