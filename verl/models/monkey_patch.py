@@ -35,6 +35,8 @@ SUPPORTED_MODEL_TYPE = (
 
 QWEN2_VL_MODELS = ("qwen2_vl", "qwen2_5_vl")
 QWEN3_VL_MODELS = ("qwen3_vl", "qwen3_vl_moe")
+# TODO support monkey patch for glm4.1v
+GLM_VL_MODELS = ("glm4.1v_base", "glm4.1v_thinking")
 
 
 def apply_ulysses_patch(model_type: str) -> None:
@@ -44,7 +46,7 @@ def apply_ulysses_patch(model_type: str) -> None:
     if model_type in SUPPORTED_MODEL_TYPE:
         ALL_ATTENTION_FUNCTIONS["flash_attention_2"] = flash_attention_forward
     else:
-        raise NotImplementedError(f"Model architecture {model_type} is not supported yet.")
+        raise NotImplementedError(f"Model architecture {model_type} is not supported ulysses_patch (patch_free) yet.")
 
     if model_type in QWEN2_VL_MODELS:
         from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import (
