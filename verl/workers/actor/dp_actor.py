@@ -234,8 +234,14 @@ class DataParallelPPOActor(BasePPOActor):
                 mini_batches = tqdm(mini_batches, desc="Train mini-batches", position=1)
 
             for mini_batch in mini_batches:
-                total_response_tokens = torch.sum(mini_batch.batch["response_mask"])
-                dist.all_reduce(total_response_tokens, op=dist.ReduceOp.SUM)
+                # token mode weights every response token of the mini-batch (on all ranks) equally,
+                # seq mode weights every response with at least one token equally
+                if self.config.loss_avg_mode == "seq":
+                    total_loss_weight = torch.sum(mini_batch.batch["response_mask"].sum(-1) > 0)
+                else:
+                    total_loss_weight = torch.sum(mini_batch.batch["response_mask"])
+
+                dist.all_reduce(total_loss_weight, op=dist.ReduceOp.SUM)
 
                 if self.config.dynamic_batching:
                     max_input_len = mini_batch.batch["input_ids"].size(-1)
@@ -284,7 +290,12 @@ class DataParallelPPOActor(BasePPOActor):
                     else:
                         loss = pg_loss
 
-                    loss = loss * torch.sum(response_mask) * self.world_size / total_response_tokens
+                    if self.config.loss_avg_mode == "seq":  # average_loss divided by the responses of the micro-batch
+                        loss_weight = response_mask.size(0)
+                    else:
+                        loss_weight = torch.sum(response_mask)
+
+                    loss = loss * loss_weight * self.world_size / total_loss_weight
                     loss.backward()
 
                     batch_metrics = {f"actor/{k}": v for k, v in pg_metrics.items()}
