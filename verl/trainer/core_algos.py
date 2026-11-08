@@ -160,9 +160,10 @@ def compute_gae_advantage_return(
         delta = token_level_rewards[:, t] + gamma * nextvalues - values[:, t]
         gaelam = delta + gamma * lam * lastgaelam
 
-        if response_mask[:, t]:  # skip values and TD-error on observation tokens
-            nextvalues = values[:, t]
-            lastgaelam = gaelam
+        # skip values and TD-error on observation tokens, per sample
+        mask_t = response_mask[:, t].to(values.dtype)
+        nextvalues = values[:, t] * mask_t + (1 - mask_t) * nextvalues
+        lastgaelam = gaelam * mask_t + (1 - mask_t) * lastgaelam
 
         advantages_reversed.append(lastgaelam)
 
