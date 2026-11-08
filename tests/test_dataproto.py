@@ -14,6 +14,7 @@
 
 
 import os
+import pickle
 from typing import Any, Optional
 
 import numpy as np
@@ -169,6 +170,22 @@ def test_data_proto_save_load():
     loaded_data = DataProto.load_from_disk("test_data.pt")
     os.remove("test_data.pt")
     _assert_equal(data, loaded_data)
+
+
+def test_data_proto_pickle_roundtrip_noncontiguous():
+    obs = torch.arange(48).reshape(4, 12)[:, ::2]
+    act = torch.arange(96, dtype=torch.float32).reshape(4, 24)[:, ::4]
+    data = _get_data_proto(
+        tensors={"obs": obs, "act": act},
+        non_tensors={"labels": ["a", "b", "c", "d"]},
+        meta_info={"temperature": 0.7},
+    )
+
+    assert not data.batch["obs"].is_contiguous()
+    loaded_data = pickle.loads(pickle.dumps(data))
+
+    _assert_equal(loaded_data, data)
+    assert not data.batch["obs"].is_contiguous()
 
 
 def test_union_tensor_dict():

@@ -206,12 +206,11 @@ class DataProto:
     def __getstate__(self) -> tuple[bytes, dict[str, NDArray], dict[str, Any]]:
         if self.batch is not None:
             batch_to_save: TensorDict = self.batch.contiguous()
-            batch_to_save: TensorDict = batch_to_save.consolidate()
         else:
             batch_to_save = None
 
         buffer = io.BytesIO()
-        torch.save(batch_to_save, buffer)
+        torch.save(batch_to_save, buffer, _use_new_zipfile_serialization=False)
         buffer_bytes = buffer.getvalue()
         return buffer_bytes, self.non_tensor_batch, self.meta_info
 
