@@ -1,5 +1,6 @@
 codetiming
 datasets
+einops
 pillow
 pytest
 qwen-vl-utils

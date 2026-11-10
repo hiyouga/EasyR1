@@ -196,7 +196,9 @@ class DataParallelPPOActor(BasePPOActor):
         data = data.select(select_keys, non_tensor_select_keys)
         if self.config.dynamic_batching:
             max_token_len = self.config.micro_batch_size_per_device_for_experience * data.batch["input_ids"].size(-1)
-            micro_batches, batch_idx_list = prepare_dynamic_batch(data, max_token_len=max_token_len)
+            micro_batches, batch_idx_list = prepare_dynamic_batch(
+                data, max_token_len=max_token_len, dp_group=dist.group.WORLD if dist.is_initialized() else None
+            )
         else:
             micro_batches = data.split(self.config.micro_batch_size_per_device_for_experience)
 
@@ -204,10 +206,15 @@ class DataParallelPPOActor(BasePPOActor):
         if self.rank == 0:
             micro_batches = tqdm(micro_batches, desc="Compute log probs", position=1)
 
-        for micro_batch in micro_batches:
+        for i, micro_batch in enumerate(micro_batches):
+            is_dummy = self.config.dynamic_batching and not batch_idx_list[i]
             model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
+            if is_dummy:
+                # Keep valid model inputs: padding-free attention cannot process an empty sequence.
+                model_inputs["attention_mask"] = data.batch["attention_mask"][:1]
             log_probs = self._forward_micro_batch(model_inputs, temperature=temperature)
-            log_probs_lst.append(log_probs)
+            if not is_dummy:
+                log_probs_lst.append(log_probs)
 
         log_probs = torch.concat(log_probs_lst, dim=0)
 
@@ -240,21 +247,32 @@ class DataParallelPPOActor(BasePPOActor):
                 if self.config.dynamic_batching:
                     max_input_len = mini_batch.batch["input_ids"].size(-1)
                     max_token_len = self.config.micro_batch_size_per_device_for_update * max_input_len
-                    micro_batches, _ = prepare_dynamic_batch(mini_batch, max_token_len=max_token_len)
+                    micro_batches, batch_idx_list = prepare_dynamic_batch(
+                        mini_batch,
+                        max_token_len=max_token_len,
+                        dp_group=dist.group.WORLD if dist.is_initialized() else None,
+                    )
                 else:
                     micro_batches = mini_batch.split(self.config.micro_batch_size_per_device_for_update)
 
                 if self.rank == 0:
                     micro_batches = tqdm(micro_batches, desc="Update policy", position=2)
 
-                for micro_batch in micro_batches:
+                for i, micro_batch in enumerate(micro_batches):
+                    is_dummy = self.config.dynamic_batching and not batch_idx_list[i]
                     model_inputs = {**micro_batch.batch, **micro_batch.non_tensor_batch}
+                    if is_dummy:
+                        model_inputs["attention_mask"] = mini_batch.batch["attention_mask"][:1]
                     response_mask = model_inputs["response_mask"]
                     old_log_probs = model_inputs["old_log_probs"]
                     advantages = model_inputs["advantages"]
 
                     # all return: (bsz, response_length)
                     log_probs = self._forward_micro_batch(model_inputs, temperature=temperature)
+                    if is_dummy:
+                        # Participate in FSDP backward without affecting gradients or loss metrics.
+                        (log_probs.sum() * 0.0).backward()
+                        continue
 
                     pg_loss, pg_metrics = compute_policy_loss(
                         old_log_probs=old_log_probs,
