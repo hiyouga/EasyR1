@@ -97,10 +97,79 @@ class State:
         return repr_str
 
 
+class _SparseGroup:
+    """One non-empty partition. Empty padding is not stored."""
+
+    __slots__ = ("sum", "items")
+
+    def __init__(self) -> None:
+        self.sum = 0
+        self.items: list[tuple[int, int]] = []
+
+    def add(self, idx: int, val: int) -> None:
+        self.items.append((idx, val))
+        self.sum += val
+
+    def merge(self, other: "_SparseGroup") -> None:
+        self.items.extend(other.items)
+        self.sum += other.sum
+
+    def __lt__(self, other: "_SparseGroup") -> bool:
+        if self.sum != other.sum:
+            return self.sum < other.sum
+        if len(self.items) != len(other.items):
+            return len(self.items) < len(other.items)
+        return self.items < other.items
+
+
+class _SparseState:
+    """KK state that omits empty groups. They sort last for lengths >= 0."""
+
+    __slots__ = ("k", "sets", "spread")
+
+    def __init__(self, sets: list[_SparseGroup], k: int) -> None:
+        self.k = k
+        self.sets = sets
+        if len(sets) < k:
+            self.spread = sets[0].sum
+        else:
+            self.spread = sets[0].sum - sets[-1].sum
+
+    def get_partitions(self):
+        partitions = []
+        for group in self.sets:
+            partitions.append([idx for idx, _ in group.items])
+        return partitions
+
+    def merge(self, other: "_SparseState") -> None:
+        occupied: dict[int, _SparseGroup] = {}
+        for i, group in enumerate(self.sets):
+            occupied[i] = group
+        for j, group in enumerate(other.sets):
+            dest = self.k - 1 - j
+            current = occupied.get(dest)
+            if current is None:
+                occupied[dest] = group
+            else:
+                current.merge(group)
+        ordered = [occupied[i] for i in sorted(occupied)]
+        ordered.sort(reverse=True)
+        self.sets = ordered
+        if len(ordered) < self.k:
+            self.spread = ordered[0].sum
+        else:
+            self.spread = ordered[0].sum - ordered[-1].sum
+
+    def __lt__(self, other: "_SparseState") -> bool:
+        if self.spread != other.spread:
+            return self.spread > other.spread
+        return self.sets[0] > other.sets[0]
+
+
 def karmarkar_karp(seqlen_list: list[int], k_partitions: int, equal_size: bool):
     # see: https://en.wikipedia.org/wiki/Largest_differencing_method
     sorted_seqlen_list = sorted([(seqlen, i) for i, seqlen in enumerate(seqlen_list)])
-    states_pq: list[State] = []
+    states_pq = []
     if equal_size:
         assert len(seqlen_list) % k_partitions == 0, f"{len(seqlen_list)} % {k_partitions} != 0"
         for offset in range(0, len(sorted_seqlen_list), k_partitions):
@@ -110,8 +179,15 @@ def karmarkar_karp(seqlen_list: list[int], k_partitions: int, equal_size: bool):
                 items.append((idx, seqlen))
             heapq.heappush(states_pq, State(items=items, k=k_partitions))
     else:
-        for seqlen, idx in sorted_seqlen_list:
-            heapq.heappush(states_pq, State(items=[(idx, seqlen)], k=k_partitions))
+        # Lengths below zero sort empty groups into the middle, so keep padding.
+        if any(seqlen < 0 for seqlen, _ in sorted_seqlen_list):
+            for seqlen, idx in sorted_seqlen_list:
+                heapq.heappush(states_pq, State(items=[(idx, seqlen)], k=k_partitions))
+        else:
+            for seqlen, idx in sorted_seqlen_list:
+                group = _SparseGroup()
+                group.add(idx, seqlen)
+                heapq.heappush(states_pq, _SparseState([group], k_partitions))
 
     while len(states_pq) > 1:
         state0 = heapq.heappop(states_pq)
