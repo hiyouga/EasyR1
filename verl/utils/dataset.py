@@ -268,9 +268,32 @@ class RLHFDataset(Dataset):
             input_ids = model_inputs.pop("input_ids")[0]
             attention_mask = model_inputs.pop("attention_mask")[0]
 
-        if self.processor is not None and "Qwen2VLImageProcessor" in self.processor.image_processor.__class__.__name__:
-            # qwen-vl mrope
-            if "Qwen3VLProcessor" in self.processor.__class__.__name__:
+        if self.processor is not None and self.processor.__class__.__name__ == "Qwen3_5_VLProcessor":
+            # Qwen3.5 uses mm_token_type_ids for mRoPE (different from Qwen2/3-VL's token-scanning approach)
+            from ..models.transformers.qwen3_5 import get_rope_index as get_rope_index_qwen35
+
+            mm_token_type_ids = model_inputs.get("mm_token_type_ids", None)
+            if mm_token_type_ids is not None:
+                mm_token_type_ids = mm_token_type_ids[0]  # remove batch dim
+            else:
+                # Construct from input_ids if processor didn't return it
+                mm_token_type_ids = torch.zeros_like(input_ids, dtype=torch.int)
+                if hasattr(self.processor, "image_token_id"):
+                    mm_token_type_ids[input_ids == self.processor.image_token_id] = 1
+                if hasattr(self.processor, "video_token_id"):
+                    mm_token_type_ids[input_ids == self.processor.video_token_id] = 2
+
+            position_ids = get_rope_index_qwen35(
+                self.processor,
+                input_ids=input_ids,
+                mm_token_type_ids=mm_token_type_ids,
+                image_grid_thw=model_inputs.get("image_grid_thw", None),
+                video_grid_thw=model_inputs.get("video_grid_thw", None),
+                attention_mask=attention_mask,
+            )  # (3, seq_length)
+        elif self.processor is not None and "Qwen2VLImageProcessor" in self.processor.image_processor.__class__.__name__:
+            # Qwen2-VL / Qwen2.5-VL / Qwen3-VL use mRoPE with token-scanning
+            if self.processor.__class__.__name__ in ("Qwen3VLProcessor",):
                 from ..models.transformers.qwen3_vl import get_rope_index
             else:
                 from ..models.transformers.qwen2_vl import get_rope_index

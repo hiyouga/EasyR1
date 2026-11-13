@@ -48,6 +48,7 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         inference_engine: LLM,
         device_mesh: DeviceMesh,
         use_param_offload: bool,
+        merge_lora_for_rollout: bool = False,
     ):
         self.module = module
         self.inference_engine = inference_engine
@@ -55,11 +56,13 @@ class FSDPVLLMShardingManager(BaseShardingManager):
         self.use_param_offload = use_param_offload
         self.loaded = False
         self.is_lora = isinstance(self.module._fsdp_wrapped_module, PeftModel)
+        self.merge_lora_for_rollout = merge_lora_for_rollout
 
         self.world_size = dist.get_world_size()
         self.tp_size = vllm_ps.get_tensor_model_parallel_world_size()
         self.tp_rank = vllm_ps.get_tensor_model_parallel_rank()
-        self.tp_group = vllm_ps.get_tensor_model_parallel_group().device_group
+        tp_group_fn = getattr(vllm_ps, "get_tensor_model_parallel_group", None) or getattr(vllm_ps, "get_tp_group")
+        self.tp_group = tp_group_fn().device_group
 
         # Record freed bytes to estimate memory usage correctly
         # https://github.com/vllm-project/vllm/pull/11743#issuecomment-2754338119
@@ -129,21 +132,97 @@ class FSDPVLLMShardingManager(BaseShardingManager):
 
         return lora_weights
 
-    def _sync_weight_to_vllm(self):
-        if self.use_param_offload and not self.is_lora:
-            load_fsdp_model(self.module)
+    def _merge_lora_into_weights(self, actor_weights: dict, lora_weights: dict) -> dict:
+        """Merge LoRA deltas into base model weights on CPU.
 
-        if self.is_lora:
+        Args:
+            actor_weights: Full model state dict (with PEFT prefixes stripped,
+                          keys like 'model.layers.0.self_attn.q_proj.weight')
+            lora_weights: LoRA state dict from _collect_lora_weights
+                         (keys like 'base_model.model.model.layers.0.self_attn.q_proj.lora_A.default.weight')
+        """
+        import logging
+        logger = logging.getLogger("merge_lora")
+
+        peft_model = getattr(self.module, "_fsdp_wrapped_module", self.module)
+        peft_config = peft_model.peft_config.get("default", None)
+        scaling = peft_config.lora_alpha / peft_config.r
+
+        # Group LoRA A/B pairs by their target module
+        # Key format: base_model.model.MODEL_KEY.lora_A.default.weight
+        lora_pairs = {}  # model_key -> {"a": tensor, "b": tensor}
+        for lora_key, tensor in lora_weights.items():
+            if ".lora_A." in lora_key:
+                # Extract model key: base_model.model.model.layers.0.self_attn.q_proj.lora_A.default.weight
+                # -> model.layers.0.self_attn.q_proj
+                model_key = lora_key.split(".lora_A.")[0].replace("base_model.model.", "")
+                lora_pairs.setdefault(model_key, {})["a"] = tensor
+            elif ".lora_B." in lora_key:
+                model_key = lora_key.split(".lora_B.")[0].replace("base_model.model.", "")
+                lora_pairs.setdefault(model_key, {})["b"] = tensor
+
+        merge_count = 0
+        for model_key, pair in lora_pairs.items():
+            if "a" not in pair or "b" not in pair:
+                continue
+            weight_key = f"{model_key}.weight"
+            if weight_key in actor_weights:
+                delta = (pair["b"] @ pair["a"]) * scaling
+                actor_weights[weight_key] = actor_weights[weight_key] + delta.to(actor_weights[weight_key].dtype)
+                merge_count += 1
+            else:
+                logger.warning(f"LoRA target '{weight_key}' not found in base weights. "
+                               f"Sample keys: {list(actor_weights.keys())[:5]}...")
+
+        logger.info(f"Merged {merge_count} LoRA deltas into {len(actor_weights)} base weights (scaling={scaling})")
+        return actor_weights
+
+    def _sync_weight_to_vllm(self):
+        if self.is_lora and self.merge_lora_for_rollout:
+            # Step 1: Collect LoRA weights layer by layer (proven to work under FSDP)
+            lora_weights = self._collect_lora_weights()
+
+            # Step 2: Collect full base model weights (same as non-LoRA path)
+            if self.use_param_offload:
+                load_fsdp_model(self.module)
+            actor_weights = get_model_state_dict(self.module)
+            # Strip PEFT prefixes: base_model.model.X.base_layer.weight -> X.weight
+            cleaned = {}
+            for key, value in actor_weights.items():
+                if ".lora_" in key or "ranknum" in key:
+                    continue  # skip LoRA params
+                clean_key = key.replace(".base_layer.", ".")
+                clean_key = clean_key.replace("base_model.model.", "")
+                cleaned[clean_key] = value
+            actor_weights = cleaned
+            actor_weights = self._rename_weight_keys(actor_weights, self.module._fsdp_wrapped_module)
+
+            # Step 3: Merge LoRA deltas into base weights on CPU
+            # Convert DTensors to regular tensors first
+            for key in list(actor_weights.keys()):
+                v = actor_weights[key]
+                if isinstance(v, DTensor):
+                    actor_weights[key] = v.full_tensor().detach().cpu()
+                else:
+                    actor_weights[key] = v.detach().cpu()
+            actor_weights = self._merge_lora_into_weights(actor_weights, lora_weights)
+            del lora_weights
+
+            if self.use_param_offload:
+                offload_fsdp_model(self.module)
+        elif self.is_lora:
             peft_config = self.module._fsdp_wrapped_module.peft_config.get("default", None)
             actor_weights = self._collect_lora_weights()
         else:
+            if self.use_param_offload:
+                load_fsdp_model(self.module)
             actor_weights = get_model_state_dict(self.module)
             actor_weights = self._rename_weight_keys(actor_weights, self.module._fsdp_wrapped_module)
 
         print_gpu_memory_usage("After gather model weights in sharding manager")
 
         model = self.inference_engine.llm_engine.model_executor.driver_worker.worker.model_runner.model
-        if not self.is_lora:
+        if not self.is_lora or self.merge_lora_for_rollout:
             model.load_weights(self._make_weight_iterator(actor_weights))
         else:
             lora_int_id = int(time.time_ns() % 0x7FFFFFFF)

@@ -32,12 +32,23 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
-    AutoModelForImageTextToText,
     AutoModelForTokenClassification,
     GenerationConfig,
     PreTrainedModel,
 )
-from transformers.modeling_utils import no_init_weights
+
+try:
+    from transformers import AutoModelForVision2Seq
+except ImportError:
+    AutoModelForVision2Seq = None
+try:
+    from transformers import AutoModelForImageTextToText
+except ImportError:
+    AutoModelForImageTextToText = AutoModelForVision2Seq
+try:
+    from transformers.initialization import no_init_weights
+except ImportError:
+    from transformers.modeling_utils import no_init_weights
 
 from ..models.monkey_patch import apply_ulysses_patch
 from ..protocol import DataProto
@@ -98,6 +109,7 @@ class FSDPWorker(Worker):
 
         self._lora_rank = self.config.actor.model.lora.rank
         self._is_lora = self._lora_rank > 0
+        self._merge_lora_for_rollout = self._is_lora and self.config.actor.model.lora.merge_for_rollout
 
         self._use_param_offload = False
         self._use_optimizer_offload = False
@@ -387,7 +399,7 @@ class FSDPWorker(Worker):
         rollout_device_mesh = init_device_mesh("cuda", mesh_shape=(dp_size, tp_size), mesh_dim_names=("dp", "tp"))
         lora_kwargs = (
             {"lora_kwargs": {"enable_lora": True, "max_loras": 1, "max_lora_rank": self._lora_rank}}
-            if self._is_lora
+            if self._is_lora and not self._merge_lora_for_rollout
             else {}
         )
         self.rollout = vLLMRollout(
@@ -402,6 +414,7 @@ class FSDPWorker(Worker):
             inference_engine=self.rollout.inference_engine,
             device_mesh=rollout_device_mesh,
             use_param_offload=self._use_param_offload,
+            merge_lora_for_rollout=self._merge_lora_for_rollout,
         )
         print_gpu_memory_usage("After vllm init")
 

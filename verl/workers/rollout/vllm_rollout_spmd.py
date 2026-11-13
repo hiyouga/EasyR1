@@ -105,7 +105,7 @@ class vLLMRollout(BaseRollout):
         self.rank = int(os.getenv("RANK", "0"))
         self.config = config
         self.pad_token_id = tokenizer.pad_token_id
-        self.return_video_metadata = processor is not None and "Qwen3VLProcessor" in processor.__class__.__name__
+        self.return_video_metadata = processor is not None and processor.__class__.__name__ in ("Qwen3VLProcessor", "Qwen3_5_VLProcessor")
         self.use_tqdm = (self.rank == 0) and (not config.disable_tqdm)
         if config.tensor_parallel_size > torch.distributed.get_world_size():
             raise ValueError("Tensor parallelism size should be less than world size.")
@@ -118,7 +118,16 @@ class vLLMRollout(BaseRollout):
 
         engine_kwargs = {}
         if processor is not None:  # only VLMs have processor
-            engine_kwargs["disable_mm_preprocessor_cache"] = True
+            try:
+                from vllm.engine.arg_utils import EngineArgs
+                import inspect
+                params = inspect.signature(EngineArgs.__init__).parameters
+                if "disable_mm_preprocessor_cache" in params:
+                    engine_kwargs["disable_mm_preprocessor_cache"] = True
+                elif "mm_processor_cache_gb" in params:
+                    engine_kwargs["mm_processor_cache_gb"] = 0
+            except Exception:
+                pass
             if config.limit_images:
                 engine_kwargs["limit_mm_per_prompt"] = {"image": config.limit_images}
 
@@ -170,12 +179,19 @@ class vLLMRollout(BaseRollout):
                 if hasattr(self.sampling_params, key):
                     old_value = getattr(self.sampling_params, key)
                     old_sampling_params_args[key] = old_value
-                    setattr(self.sampling_params, key, value)
+                    try:
+                        setattr(self.sampling_params, key, value)
+                    except AttributeError:
+                        # vllm 0.17+: some SamplingParams fields are read-only properties
+                        pass
 
         yield
         # roll back to previous sampling params
         for key, value in old_sampling_params_args.items():
-            setattr(self.sampling_params, key, value)
+            try:
+                setattr(self.sampling_params, key, value)
+            except AttributeError:
+                pass
 
     @torch.no_grad()
     def generate_sequences(self, prompts: DataProto) -> DataProto:
