@@ -204,6 +204,7 @@ See [baselines.md](assets/baselines.md).
 - **OneThinker**: All-in-one Reasoning Model for Image and Video. [![[code]](https://img.shields.io/github/stars/tulerfeng/OneThinker)](https://github.com/tulerfeng/OneThinker) [![[arxiv]](https://img.shields.io/badge/arxiv-2512.03043-blue)](https://arxiv.org/abs/2512.03043)
 - **MetaphorStar**: Image Metaphor Understanding and Reasoning with End-to-End Visual Reinforcement Learning. [![[code]](https://img.shields.io/github/stars/MING-ZCH/MetaphorStar)](https://github.com/MING-ZCH/MetaphorStar) [![[arxiv]](https://img.shields.io/badge/arxiv-2602.10575-blue)](https://arxiv.org/abs/2602.10575)
 - **CARDEA**: Auditable Reasoning Grounded in Spatial Evidence for End-to-End Coronary Angiography Interpretation. [![[code]](https://img.shields.io/github/stars/benbayibaurba/cardea)](https://github.com/benbayibaurba/cardea) [![[arxiv]](https://img.shields.io/badge/arxiv-2609.06931-blue)](https://arxiv.org/abs/2609.06931)
+- **Awesome-Perception-Aware-RLVR**: Unified Reproductions and Controlled Comparisons of Perception-Aware RLVR and On-Policy Distillation for Vision-Language Models (19 methods, including the official code of CGPO). [![[code]](https://img.shields.io/github/stars/zsxm1998/awesome-perception-aware-rlvr)](https://github.com/zsxm1998/awesome-perception-aware-rlvr)
 
 ## TODO
 
