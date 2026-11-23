@@ -206,8 +206,20 @@ def compute_grpo_outcome_advantage(
 
     for idx in id2score:
         assert len(id2score[idx]) > 1, "GRPO needs rollout.n > 1."
-        id2mean[idx] = torch.mean(torch.tensor(id2score[idx]))
-        id2std[idx] = torch.std(torch.tensor(id2score[idx]))
+        group_scores = torch.stack(id2score[idx])
+        if (group_scores == group_scores[0]).all():
+            # Every response in the group has the same score, so every
+            # advantage is exactly zero. The float32 mean of identical
+            # values can land an ulp away from the value itself, and the
+            # std is then the same size as that residue, so dividing by
+            # std + eps would give the whole group a nonzero advantage.
+            # Using the shared score as the mean keeps the centered
+            # scores at zero.
+            id2mean[idx] = group_scores[0]
+            id2std[idx] = torch.tensor(1.0, device=group_scores.device)
+        else:
+            id2mean[idx] = torch.mean(group_scores)
+            id2std[idx] = torch.std(group_scores)
 
     for i in range(bsz):
         scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + eps)
