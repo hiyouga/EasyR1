@@ -121,9 +121,35 @@ def normalize_final_answer(final_answer: str) -> str:
     return final_answer.strip()
 
 
+def has_conflicting_numbers(answer: str) -> bool:
+    """Check whether an answer line gives two or more different numbers in separate $...$ segments.
+
+    `normalize_final_answer` keeps only the first $...$ segment, so a hedged answer such as
+    "Answer: $5$ or $6$" would otherwise be graded as 5. Segments that are not plain numbers, like
+    "$n$" in "Answer: $5$ where $n$ is the count", are ignored, so explanatory math next to a single
+    answer is still accepted.
+
+    Args:
+        answer: The answer line to check
+
+    Returns:
+        True if the segments contain at least two different numbers
+    """
+    numbers = set()
+    for segment in re.findall(r"\$(.*?)\$", answer):
+        value = normalize_final_answer(f"${segment}$")
+        if re.fullmatch(r"-?\d+(\.\d+)?", value):
+            numbers.add(float(value))
+
+    return len(numbers) > 1
+
+
 def accuracy_reward(response: str, ground_truth: str) -> float:
     match = re.findall(r"(?i)Answer\s*:\s*([^\n]+)", response)
     answer = match[-1] if match else "[INVALID]"
+    if has_conflicting_numbers(answer):  # a hedged answer is not a single correct answer
+        return -1.0
+
     if normalize_final_answer(answer) == normalize_final_answer(ground_truth):
         return 1.0
     else:
